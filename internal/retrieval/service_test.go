@@ -52,6 +52,29 @@ func TestServiceAllowsPolicyBoundVectorDegradation(t *testing.T) {
 	}
 }
 
+func TestServiceDoesNotExecuteConfiguredChannelAbsentFromServingSnapshot(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	vector := &serviceChannel{name: ChannelVector, manifest: "idx_vector", approximate: true, err: errors.New("must not execute")}
+	fixture.service.config.Channels = append(fixture.service.config.Channels, vector)
+	response, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Disposition != RunSelected || vector.calls != 0 || len(fixture.repository.runs[0].ChannelExecutions) != 1 {
+		t.Fatalf("response=%#v vector_calls=%d run=%#v", response, vector.calls, fixture.repository.runs[0])
+	}
+}
+
+func TestServiceFailsClosedWhenSnapshotChannelManifestIsNotConfigured(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	fixture.repository.snapshot.Indexes[0].ManifestID = "idx_exact_unavailable"
+	_, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Code != "serving_config_mismatch" || fixture.exact.calls != 0 {
+		t.Fatalf("error=%v channel_calls=%d", err, fixture.exact.calls)
+	}
+}
+
 func TestServiceFailsAndAuditsWhenRequiredChannelIsUnavailable(t *testing.T) {
 	fixture := newServiceFixture(t, false)
 	fixture.exact.err = &ChannelError{Code: "index_unavailable", Err: errors.New("down")}

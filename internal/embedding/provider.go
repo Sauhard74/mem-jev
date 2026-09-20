@@ -14,10 +14,10 @@ type ProviderRequest struct {
 }
 
 type ProviderResponse struct {
-	Provider      string
-	Model         string
-	ModelRevision string
-	Vectors       [][]float64
+	Provider      string      `json:"provider"`
+	Model         string      `json:"model"`
+	ModelRevision string      `json:"model_revision"`
+	Vectors       [][]float64 `json:"vectors"`
 }
 
 // Store is an immutable, content-addressed embedding store. Put must converge

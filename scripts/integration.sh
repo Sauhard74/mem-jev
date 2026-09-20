@@ -53,6 +53,7 @@ set +a
 docker compose --env-file .env.local down --volumes --remove-orphans >/dev/null 2>&1 || true
 docker compose --env-file .env.local up --detach --build --wait
 go test -race -tags=integration ./internal/store/... -count=1
+go test -race -tags=integration ./cmd/api -count=1
 go test -race -tags=e2e ./tests/e2e -run TestDurableIdempotentIngest -count=1 -v
 ./scripts/evidence-integration.sh
 ./scripts/retrieval-integration.sh

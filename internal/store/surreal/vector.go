@@ -46,27 +46,10 @@ type VectorGeneration struct {
 }
 
 func ProvisionVectorGeneration(ctx context.Context, db *surrealdb.DB, tenantID string, manifest embedding.Manifest, tuning VectorTuning) (VectorGeneration, error) {
-	if db == nil || strings.TrimSpace(tenantID) == "" || embedding.ValidateManifest(manifest) != nil || !validVectorTuning(tuning) {
+	if db == nil {
 		return VectorGeneration{}, ErrInvalidVectorGeneration
 	}
-	physical := struct {
-		EmbeddingID string             `json:"embedding_manifest_id"`
-		Dimension   uint32             `json:"dimension"`
-		Distance    embedding.Distance `json:"distance"`
-		Algorithm   string             `json:"algorithm"`
-		Tuning      VectorTuning       `json:"tuning"`
-	}{manifest.ID, manifest.Dimension, manifest.Distance, "diskann", tuning}
-	_, physicalHash, err := canonical.MarshalAndHash(physical)
-	if err != nil {
-		return VectorGeneration{}, err
-	}
-	generation := VectorGeneration{
-		SchemaVersion: "embedding-index-generation.v1", TenantID: tenantID,
-		IndexManifestID: "vidx_" + physicalHash, EmbeddingID: manifest.ID,
-		TableName: "embedding_g_" + physicalHash[:32], IndexName: "diskann_" + physicalHash[:32],
-		Dimension: manifest.Dimension, Distance: manifest.Distance, Algorithm: "diskann", Tuning: tuning, State: "ready",
-	}
-	_, generation.ContentHash, err = canonical.MarshalAndHash(generation)
+	generation, err := BuildVectorGeneration(tenantID, manifest, tuning)
 	if err != nil {
 		return VectorGeneration{}, err
 	}
@@ -125,6 +108,38 @@ DEFINE INDEX IF NOT EXISTS %s_snapshot ON TABLE %s FIELDS tenant_id, procedure_v
 		"state": generation.State, "created_at": now, "schema_version": generation.SchemaVersion, "content_hash": generation.ContentHash,
 	}
 	if err = createOrVerifyRecord(ctx, db, models.NewRecordID("embedding_index_generation", tenantID+"_"+generation.IndexManifestID), generationRecord, "embedding_index_generation", "index_manifest_id", tenantID, generation.IndexManifestID, generation.ContentHash); err != nil {
+		return VectorGeneration{}, err
+	}
+	return generation, nil
+}
+
+// BuildVectorGeneration derives every physical identifier from the immutable
+// embedding manifest and tuning. Runtime configuration never supplies SQL
+// identifiers directly.
+func BuildVectorGeneration(tenantID string, manifest embedding.Manifest, tuning VectorTuning) (VectorGeneration, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" || embedding.ValidateManifest(manifest) != nil || !validVectorTuning(tuning) {
+		return VectorGeneration{}, ErrInvalidVectorGeneration
+	}
+	physical := struct {
+		EmbeddingID string             `json:"embedding_manifest_id"`
+		Dimension   uint32             `json:"dimension"`
+		Distance    embedding.Distance `json:"distance"`
+		Algorithm   string             `json:"algorithm"`
+		Tuning      VectorTuning       `json:"tuning"`
+	}{manifest.ID, manifest.Dimension, manifest.Distance, "diskann", tuning}
+	_, physicalHash, err := canonical.MarshalAndHash(physical)
+	if err != nil {
+		return VectorGeneration{}, err
+	}
+	generation := VectorGeneration{
+		SchemaVersion: "embedding-index-generation.v1", TenantID: tenantID,
+		IndexManifestID: "vidx_" + physicalHash, EmbeddingID: manifest.ID,
+		TableName: "embedding_g_" + physicalHash[:32], IndexName: "diskann_" + physicalHash[:32],
+		Dimension: manifest.Dimension, Distance: manifest.Distance, Algorithm: "diskann", Tuning: tuning, State: "ready",
+	}
+	_, generation.ContentHash, err = canonical.MarshalAndHash(generation)
+	if err != nil {
 		return VectorGeneration{}, err
 	}
 	return generation, nil
@@ -277,7 +292,8 @@ func PutVectorDocument(ctx context.Context, db *surrealdb.DB, generation VectorG
 }
 
 func validateGeneration(generation VectorGeneration, manifest embedding.Manifest) error {
-	if embedding.ValidateManifest(manifest) != nil || generation.EmbeddingID != manifest.ID || generation.Dimension != manifest.Dimension || generation.Distance != manifest.Distance || generation.Algorithm != "diskann" || generation.State != "ready" || !validVectorTuning(generation.Tuning) || !identifierPattern.MatchString(generation.TableName) || !identifierPattern.MatchString(generation.IndexName) {
+	expected, err := BuildVectorGeneration(generation.TenantID, manifest, generation.Tuning)
+	if err != nil || generation.SchemaVersion != expected.SchemaVersion || generation.IndexManifestID != expected.IndexManifestID || generation.EmbeddingID != expected.EmbeddingID || generation.TableName != expected.TableName || generation.IndexName != expected.IndexName || generation.Dimension != expected.Dimension || generation.Distance != expected.Distance || generation.Algorithm != expected.Algorithm || generation.State != expected.State || generation.ContentHash != expected.ContentHash {
 		return ErrInvalidVectorGeneration
 	}
 	return nil
@@ -311,7 +327,7 @@ type vectorRow struct {
 }
 
 func (c *VectorChannel) Search(ctx context.Context, request retrieval.ChannelRequest) ([]retrieval.Hit, error) {
-	if c == nil || c.db == nil || c.service == nil || request.TenantID == "" || request.ProjectionEpoch == 0 || request.Limit == 0 || request.Limit > 1000 || string(request.TenantID) != c.generation.TenantID {
+	if c == nil || c.db == nil || c.service == nil || request.TenantID == "" || request.ProjectionEpoch == 0 || request.Limit == 0 || request.Limit > 1000 {
 		return nil, &retrieval.ChannelError{Code: "invalid_request", Err: retrieval.ErrInvalidChannels}
 	}
 	input, err := embedding.InputFromQuery(request.Query)

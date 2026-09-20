@@ -25,9 +25,10 @@ func main() {
 	namespace := flag.String("namespace", "memjev", "SurrealDB namespace")
 	database := flag.String("database", "memjev", "SurrealDB database")
 	minimumEvents := flag.Int("minimum-events", 10_000_000, "minimum canonical event count")
+	minimumDocuments := flag.Int("minimum-retrieval-documents", 1_000_000, "minimum immutable retrieval document revisions")
 	minimumTenants := flag.Int("minimum-tenants", 2, "minimum tenants with active serving state")
 	flag.Parse()
-	if *endpoint == "" || *username == "" || *password == "" || *minimumEvents < 1 || *minimumTenants < 2 {
+	if *endpoint == "" || *username == "" || *password == "" || *minimumEvents < 1 || *minimumDocuments < 1 || *minimumTenants < 2 {
 		fmt.Fprintln(os.Stderr, "endpoint, credentials, and production qualification minima are required")
 		os.Exit(2)
 	}
@@ -40,8 +41,8 @@ func main() {
 	defer func() { _ = db.Close(context.Background()) }()
 	report := preflightReport{CanonicalEvents: countTable(ctx, db, "canonical_event"), RetrievalDocs: countTable(ctx, db, "retrieval_document"), Tenants: servingTenants(ctx, db)}
 	_ = json.NewEncoder(os.Stdout).Encode(report)
-	if report.CanonicalEvents < *minimumEvents || report.Tenants < *minimumTenants || report.RetrievalDocs < *minimumTenants {
-		fmt.Fprintf(os.Stderr, "production corpus preflight failed: events=%d/%d tenants=%d/%d documents=%d\n", report.CanonicalEvents, *minimumEvents, report.Tenants, *minimumTenants, report.RetrievalDocs)
+	if report.CanonicalEvents < *minimumEvents || report.Tenants < *minimumTenants || report.RetrievalDocs < *minimumDocuments {
+		fmt.Fprintf(os.Stderr, "production corpus preflight failed: events=%d/%d tenants=%d/%d documents=%d/%d\n", report.CanonicalEvents, *minimumEvents, report.Tenants, *minimumTenants, report.RetrievalDocs, *minimumDocuments)
 		os.Exit(1)
 	}
 }

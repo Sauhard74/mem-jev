@@ -34,6 +34,7 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_RETRIEVAL_POLICY_VERSION": {}, "MEMJEV_RETRIEVAL_QUERY_KEY_ID": {}, "MEMJEV_RETRIEVAL_QUERY_KEY_BASE64": {},
 	"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT": {}, "MEMJEV_RETRIEVAL_RETENTION": {}, "MEMJEV_RETRIEVAL_MINIMUM_SCORE": {}, "MEMJEV_RETRIEVAL_MAX_SELECTIONS": {},
 	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
+	"MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE": {}, "MEMJEV_EMBEDDING_PROVIDER_ENDPOINT": {}, "MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE": {},
 }
 
 type Config struct {
@@ -80,6 +81,13 @@ type RetrievalConfig struct {
 	MaximumSelections                         uint32
 	ExactManifestID, LexicalManifestID        string
 	FacetManifestID, GraphManifestID          string
+	VectorConfigFile                          string
+	EmbeddingProviderEndpoint                 string
+	EmbeddingProviderTokenFile                string
+}
+
+func (c RetrievalConfig) VectorEnabled() bool {
+	return c.VectorConfigFile != "" && c.EmbeddingProviderEndpoint != "" && c.EmbeddingProviderTokenFile != ""
 }
 
 type BuildConfig struct {
@@ -154,6 +162,8 @@ func load() (Config, error) {
 			ChannelTimeout: 150 * time.Millisecond, Retention: 24 * time.Hour, MaximumSelections: 5,
 			ExactManifestID: valueOr("MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID", "idx_exact.v1"), LexicalManifestID: valueOr("MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID", "idx_lexical.v1"),
 			FacetManifestID: valueOr("MEMJEV_RETRIEVAL_FACET_MANIFEST_ID", "idx_facet.v1"), GraphManifestID: valueOr("MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID", "idx_graph.v1"),
+			VectorConfigFile: os.Getenv("MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE"), EmbeddingProviderEndpoint: os.Getenv("MEMJEV_EMBEDDING_PROVIDER_ENDPOINT"),
+			EmbeddingProviderTokenFile: os.Getenv("MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE"),
 		},
 		Build: BuildConfig{Version: valueOr("MEMJEV_BUILD_VERSION", "dev"), Commit: valueOr("MEMJEV_BUILD_COMMIT", "unknown"), BuiltAt: valueOr("MEMJEV_BUILD_AT", "unknown")},
 	}
@@ -271,8 +281,20 @@ func validate(config Config, requireAPICredentials bool) error {
 			return fieldError("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64")
 		}
 	}
+	vectorFields := 0
+	for _, value := range []string{config.Retrieval.VectorConfigFile, config.Retrieval.EmbeddingProviderEndpoint, config.Retrieval.EmbeddingProviderTokenFile} {
+		if value != "" {
+			vectorFields++
+		}
+	}
+	if vectorFields != 0 && vectorFields != 3 {
+		return fieldError("vector retrieval configuration")
+	}
+	if config.Retrieval.VectorEnabled() && config.Environment != "development" && !hasScheme(config.Retrieval.EmbeddingProviderEndpoint, "https") {
+		return fieldError("MEMJEV_EMBEDDING_PROVIDER_ENDPOINT")
+	}
 	if config.AdapterMode == "memory" {
-		if config.Environment != "development" {
+		if config.Environment != "development" || config.Retrieval.VectorEnabled() {
 			return fieldError("MEMJEV_ADAPTER_MODE")
 		}
 		return nil

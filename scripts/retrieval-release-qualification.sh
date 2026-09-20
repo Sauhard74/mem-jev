@@ -21,7 +21,7 @@ if (( duration_minutes < 30 )); then
   exit 2
 fi
 
-go run ./tests/qualification -minimum-events 10000000 -minimum-tenants 2
+go run ./tests/qualification -minimum-events 10000000 -minimum-retrieval-documents 1000000 -minimum-tenants 2
 
 memory_samples=$(mktemp)
 sampler_pid=

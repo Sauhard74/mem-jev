@@ -1,0 +1,19 @@
+{
+  "schema_version": "retrieval-vector-config.v1",
+  "embedding": {
+    "provider": "embedding-gateway",
+    "model": "text-embedding-production-v1",
+    "model_revision": "2026-09-01",
+    "dimension": 1536,
+    "distance": "cosine_normalized",
+    "normalization": "l2",
+    "quantization_scale": 1000000
+  },
+  "tuning": {
+    "degree": 32,
+    "build_search": 100,
+    "alpha_milli": 1200,
+    "overfetch": 8,
+    "search_effort": 100
+  }
+}

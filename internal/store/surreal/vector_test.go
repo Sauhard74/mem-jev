@@ -95,6 +95,19 @@ func TestSurrealVectorGenerationAndExactRerank(t *testing.T) {
 	if provider.calls != 2 {
 		t.Fatalf("content-addressed query embedding should be reused, calls=%d", provider.calls)
 	}
+	otherTenantQuery, err := retrieval.BuildQuery("tenant_b", "policy.v1", retrieval.AliasSet{}, retrieval.Input{
+		Task: "write and verify", Tools: []retrieval.Tool{{Name: "write", ContractVersionID: "tcv_write"}, {Name: "verify", ContractVersionID: "tcv_verify"}},
+		Resources: []retrieval.Resource{{Type: "repository", Namespace: "repo", Identity: "workspace"}},
+		Harness:   retrieval.Harness{Name: "test-harness", Version: "1"}, RiskClass: retrieval.RiskMedium,
+		LatencyClass: retrieval.LatencyInteractive, MaxCandidates: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTenantHits, err := channel.Search(context.Background(), retrieval.ChannelRequest{TenantID: "tenant_b", ProjectionEpoch: secondReceipt.ProjectionEpoch, Query: otherTenantQuery, Limit: 10})
+	if err != nil || len(otherTenantHits) != 0 {
+		t.Fatalf("shared channel leaked tenant_a rows: hits=%#v error=%v", otherTenantHits, err)
+	}
 	_, err = surrealdb.Query[any](context.Background(), db, `CREATE ONLY outcome_evidence CONTENT $record`, map[string]any{"record": map[string]any{
 		"tenant_id": "tenant_a", "outcome_id": fmt.Sprintf("out_%064x", 3), "trace_id": fmt.Sprintf("tr_%064x", 3),
 		"state": "verified_success", "promotion_eligible": true, "policy_version": "policy.v1", "evidence_count": 1,

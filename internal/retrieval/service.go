@@ -194,7 +194,8 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	if err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "snapshot_unavailable", Err: err}
 	}
-	if err = s.validateSnapshotChannels(snapshot); err != nil {
+	activeChannels, err := s.snapshotChannels(snapshot)
+	if err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "serving_config_mismatch", Err: err}
 	}
 	observability.RecordRetrievalSnapshot(ctx, s.clock().UTC(), snapshot.ProjectionCreatedAt, snapshot.VectorIndexCreatedAt, snapshot.RankerManifestID)
@@ -211,7 +212,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		return ServiceResponse{}, &ServiceError{Code: "query_encryption_failed", RunID: runID, Err: err}
 	}
 	started := s.clock().UTC()
-	collection, err := CollectCandidates(ctx, CollectRequest{Request: ChannelRequest{TenantID: request.TenantID, ProjectionEpoch: snapshot.ProjectionEpoch, Query: query, Limit: request.Input.MaxCandidates}, Channels: s.config.Channels, Timeout: s.config.ChannelTimeout})
+	collection, err := CollectCandidates(ctx, CollectRequest{Request: ChannelRequest{TenantID: request.TenantID, ProjectionEpoch: snapshot.ProjectionEpoch, Query: query, Limit: request.Input.MaxCandidates}, Channels: activeChannels, Timeout: s.config.ChannelTimeout})
 	if err != nil {
 		return ServiceResponse{}, err
 	}
@@ -313,6 +314,32 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
 	response.Candidates = responseCandidates
 	return response, err
+}
+
+func (s *Service) snapshotChannels(snapshot ServingSnapshot) ([]Channel, error) {
+	configured := make(map[ChannelName]Channel, len(s.config.Channels))
+	for _, channel := range s.config.Channels {
+		configured[channel.Name()] = channel
+	}
+	active := make([]Channel, 0, len(snapshot.Indexes))
+	present := make(map[ChannelName]struct{}, len(snapshot.Indexes))
+	for _, index := range snapshot.Indexes {
+		channel, ok := configured[index.Channel]
+		if !ok || channel.ManifestID() != index.ManifestID || channel.Approximate() != index.Approximate {
+			return nil, ErrServiceUnavailable
+		}
+		active = append(active, channel)
+		present[index.Channel] = struct{}{}
+	}
+	for _, required := range s.config.RequiredChannels {
+		if _, ok := present[required]; !ok {
+			return nil, ErrServiceUnavailable
+		}
+	}
+	if len(active) == 0 {
+		return nil, ErrServiceUnavailable
+	}
+	return active, nil
 }
 
 func (s *Service) runID(tenantID domain.TenantID, requestIdentityHash string) (string, error) {
@@ -474,23 +501,6 @@ func retrievalRequestContextHash(request ServiceRequest, query Query) (string, e
 		return "", fmt.Errorf("canonicalize retrieval request context: %w", err)
 	}
 	return hash, nil
-}
-
-func (s *Service) validateSnapshotChannels(snapshot ServingSnapshot) error {
-	configured := make(map[ChannelName]Channel, len(s.config.Channels))
-	for _, channel := range s.config.Channels {
-		configured[channel.Name()] = channel
-	}
-	if len(configured) != len(snapshot.Indexes) {
-		return ErrServiceUnavailable
-	}
-	for _, item := range snapshot.Indexes {
-		channel, ok := configured[item.Channel]
-		if !ok || channel.ManifestID() != item.ManifestID || channel.Approximate() != item.Approximate {
-			return ErrServiceUnavailable
-		}
-	}
-	return nil
 }
 
 func persistedChannels(collection CandidateCollection) ([]ChannelExecution, []PersistedHit) {

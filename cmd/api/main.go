@@ -23,6 +23,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/config"
+	"github.com/sauhard74/mem-jev/internal/embedding"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
@@ -176,7 +177,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		closeDB()
 		return nil, nil, nil, nil, nil, nil, err
 	}
-	retrievalService, err := buildRetrievalService(db, configuration.Retrieval)
+	retrievalService, err := buildRetrievalService(db, configuration.Retrieval, configuration.Environment)
 	if err != nil {
 		closeDB()
 		return nil, nil, nil, nil, nil, nil, err
@@ -191,7 +192,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), retrievalService, readiness, closeDB, nil
 }
 
-func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfig) (*retrieval.Service, error) {
+func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfig, environment string) (*retrieval.Service, error) {
 	key, err := base64.StdEncoding.DecodeString(configuration.QueryKeyBase64)
 	if err != nil || len(key) != 32 {
 		return nil, fmt.Errorf("retrieval encryption configuration is invalid")
@@ -204,25 +205,60 @@ func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfi
 	if err != nil {
 		return nil, err
 	}
-	channelSpecs := []struct {
-		name       retrieval.ChannelName
-		manifestID string
-	}{{retrieval.ChannelExact, configuration.ExactManifestID}, {retrieval.ChannelLexical, configuration.LexicalManifestID}, {retrieval.ChannelFacet, configuration.FacetManifestID}, {retrieval.ChannelGraph, configuration.GraphManifestID}}
-	channels := make([]retrieval.Channel, 0, len(channelSpecs))
-	required := make([]retrieval.ChannelName, 0, len(channelSpecs))
-	for _, spec := range channelSpecs {
-		channel, channelErr := storesurreal.NewRetrievalChannel(db, spec.name, spec.manifestID)
-		if channelErr != nil {
-			return nil, channelErr
-		}
-		channels = append(channels, channel)
-		required = append(required, spec.name)
+	channels, required, err := buildRetrievalChannels(db, configuration, environment)
+	if err != nil {
+		return nil, err
 	}
 	projectionRepository := storesurreal.NewProjectionRepository(db)
 	return retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
 		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
 		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections,
 	})
+}
+
+func buildRetrievalChannels(db *surrealdb.DB, configuration config.RetrievalConfig, environment string) ([]retrieval.Channel, []retrieval.ChannelName, error) {
+	channelSpecs := []struct {
+		name       retrieval.ChannelName
+		manifestID string
+	}{{retrieval.ChannelExact, configuration.ExactManifestID}, {retrieval.ChannelLexical, configuration.LexicalManifestID}, {retrieval.ChannelFacet, configuration.FacetManifestID}, {retrieval.ChannelGraph, configuration.GraphManifestID}}
+	channels := make([]retrieval.Channel, 0, len(channelSpecs)+1)
+	required := make([]retrieval.ChannelName, 0, len(channelSpecs))
+	for _, spec := range channelSpecs {
+		channel, channelErr := storesurreal.NewRetrievalChannel(db, spec.name, spec.manifestID)
+		if channelErr != nil {
+			return nil, nil, channelErr
+		}
+		channels = append(channels, channel)
+		required = append(required, spec.name)
+	}
+	if configuration.VectorEnabled() {
+		manifest, generation, vectorErr := loadVectorRuntimeConfig(configuration.VectorConfigFile)
+		if vectorErr != nil {
+			return nil, nil, vectorErr
+		}
+		token, tokenErr := loadProviderToken(configuration.EmbeddingProviderTokenFile)
+		if tokenErr != nil {
+			return nil, nil, tokenErr
+		}
+		provider, providerErr := embedding.NewHTTPProvider(configuration.EmbeddingProviderEndpoint, token, environment == "development")
+		if providerErr != nil {
+			return nil, nil, providerErr
+		}
+		embeddingStore, storeErr := storesurreal.NewEmbeddingStore(db)
+		if storeErr != nil {
+			return nil, nil, storeErr
+		}
+		embeddingService, serviceErr := embedding.NewService(provider, embeddingStore)
+		if serviceErr != nil {
+			return nil, nil, serviceErr
+		}
+		vectorChannel, channelErr := storesurreal.NewVectorChannel(db, manifest, generation, embeddingService)
+		if channelErr != nil {
+			return nil, nil, channelErr
+		}
+		channels = append(channels, vectorChannel)
+	}
+	return channels, required, nil
 }
 
 func shutdownAndCode(logger *slog.Logger, shutdown observability.Shutdown, timeout time.Duration, code int) int {

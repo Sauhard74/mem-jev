@@ -70,6 +70,41 @@ func TestLoadRejectsInvalidRetrievalEncryptionKey(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsPartialVectorRetrievalConfiguration(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE", "/run/config/vector.json")
+	if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadProductionAcceptsTLSVectorRetrievalConfiguration(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE", "/run/config/vector.json")
+	t.Setenv("MEMJEV_EMBEDDING_PROVIDER_ENDPOINT", "https://embedding.example.test/v1/embed")
+	t.Setenv("MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE", "/run/secrets/embedding-token")
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Retrieval.VectorEnabled() || got.Retrieval.EmbeddingProviderEndpoint != "https://embedding.example.test/v1/embed" {
+		t.Fatalf("retrieval config = %#v", got.Retrieval)
+	}
+}
+
+func TestLoadProductionRejectsPlaintextEmbeddingProvider(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE", "/run/config/vector.json")
+	t.Setenv("MEMJEV_EMBEDDING_PROVIDER_ENDPOINT", "http://embedding.example.test/v1/embed")
+	t.Setenv("MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE", "/run/secrets/embedding-token")
+	if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestLoadWorkerParsesDurableLeaseAndTemporalConfiguration(t *testing.T) {
 	setValidDurableEnvironment(t)
 	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
