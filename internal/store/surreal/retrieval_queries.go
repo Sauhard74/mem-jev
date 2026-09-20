@@ -7,6 +7,14 @@ WHERE tenant_id = $tenant_id AND projection_epoch <= $epoch AND intent_hash = $i
 ORDER BY projection_epoch DESC, procedure_version_id ASC
 LIMIT $scan_limit`
 
+const exactEffectInferenceQuery = `
+SELECT effect_signature_hash
+FROM retrieval_document
+WHERE tenant_id = $tenant_id AND projection_epoch <= $epoch AND intent_hash = $intent_hash
+GROUP BY effect_signature_hash
+ORDER BY effect_signature_hash ASC
+LIMIT 2`
+
 const lexicalCandidateQuery = `
 SELECT procedure_version_id, projection_epoch, search::score(0) AS score
 FROM retrieval_document

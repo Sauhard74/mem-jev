@@ -70,10 +70,16 @@ func TestDeterministicHostedRetrieval(t *testing.T) {
 		t.Fatalf("explanation error = %v", err)
 	}
 	eligible := false
+	exact := false
 	for _, candidate := range explanation.Msg.GetCandidates() {
 		eligible = eligible || candidate.GetProcedureVersionId() == "pv_retrieval_e2e" && candidate.GetEligible()
+		if candidate.GetProcedureVersionId() == "pv_retrieval_e2e" {
+			for _, channel := range candidate.GetSourceChannels() {
+				exact = exact || channel == "exact"
+			}
+		}
 	}
-	if explanation.Msg.GetProvenance().GetQueryHash() != first.Msg.GetProvenance().GetQueryHash() || len(explanation.Msg.GetCandidates()) < 1 || !eligible {
+	if explanation.Msg.GetProvenance().GetQueryHash() != first.Msg.GetProvenance().GetQueryHash() || len(explanation.Msg.GetCandidates()) < 1 || !eligible || !exact {
 		t.Fatalf("explanation message=%s err=%v", explanation.Msg.String(), err)
 	}
 

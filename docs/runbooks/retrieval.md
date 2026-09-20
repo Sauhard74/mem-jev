@@ -2,6 +2,8 @@
 
 The retrieval response is valid only after its decision record commits. A selected response identifies the immutable projection epoch, eligibility policy, ranker, and channel manifests used to produce it. Never reconstruct a historical answer from current indexes. Idempotency binds both the canonical query and the server-owned authorization context (tenant, recall consent, and allowed residency regions); a key reused under different context must return a conflict.
 
+The request never supplies an effect-signature hash. For the exact-intent channel, the server examines the tenant's immutable documents at the captured projection epoch and binds the sole effect signature only when that corpus inference is unambiguous. Zero or multiple signatures produce no exact hit; lexical, facet, graph, and vector retrieval continue, followed by the same hard gates. This prevents the server from guessing an effect or trusting a client-controlled routing key.
+
 ## Triage order
 
 1. Check API readiness, SurrealDB quorum, and `memjev.retrieval.persistence_failures`.

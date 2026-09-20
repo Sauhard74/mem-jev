@@ -41,10 +41,18 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 	var err error
 	switch c.name {
 	case retrieval.ChannelExact:
-		if request.Query.EffectSignatureHash == "" {
-			return nil, nil
+		effectHash := request.Query.EffectSignatureHash
+		if effectHash == "" {
+			inferred, inferErr := c.query(ctx, exactEffectInferenceQuery, request, map[string]any{"intent_hash": request.Query.IntentHash})
+			if inferErr != nil {
+				return nil, &retrieval.ChannelError{Code: "query_failed", Err: inferErr}
+			}
+			if len(inferred) != 1 || inferred[0].EffectSignatureHash == "" {
+				return nil, nil
+			}
+			effectHash = inferred[0].EffectSignatureHash
 		}
-		rows, err = c.query(ctx, exactCandidateQuery, request, map[string]any{"intent_hash": request.Query.IntentHash, "effect_hash": request.Query.EffectSignatureHash})
+		rows, err = c.query(ctx, exactCandidateQuery, request, map[string]any{"intent_hash": request.Query.IntentHash, "effect_hash": effectHash})
 	case retrieval.ChannelLexical:
 		rows, err = c.query(ctx, lexicalCandidateQuery, request, map[string]any{"task": request.Query.Task})
 	case retrieval.ChannelFacet:
@@ -98,9 +106,10 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 }
 
 type retrievalRow struct {
-	VersionID string  `json:"procedure_version_id"`
-	Epoch     uint64  `json:"projection_epoch"`
-	Score     float64 `json:"score"`
+	VersionID           string  `json:"procedure_version_id"`
+	EffectSignatureHash string  `json:"effect_signature_hash"`
+	Epoch               uint64  `json:"projection_epoch"`
+	Score               float64 `json:"score"`
 }
 
 func (c *RetrievalChannel) query(ctx context.Context, statement string, request retrieval.ChannelRequest, extra map[string]any) ([]retrievalRow, error) {

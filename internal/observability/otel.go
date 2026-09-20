@@ -155,6 +155,8 @@ var (
 	lifecycleTransitions        metric.Int64Counter
 	experimentBudgetRejections  metric.Int64Counter
 	jevJudgments                metric.Int64Counter
+	jevAdmissions               metric.Int64Counter
+	jevAdmittedCandidates       metric.Int64Histogram
 	jevLatency                  metric.Float64Histogram
 	jevInputTokens              metric.Int64Counter
 	jevOutputTokens             metric.Int64Counter
@@ -202,9 +204,18 @@ func initializeMetrics() {
 	lifecycleTransitions, _ = meter.Int64Counter("memjev.lifecycle.transitions")
 	experimentBudgetRejections, _ = meter.Int64Counter("memjev.experiment.budget_rejections")
 	jevJudgments, _ = meter.Int64Counter("memjev.jev.judgments")
+	jevAdmissions, _ = meter.Int64Counter("memjev.jev.admissions")
+	jevAdmittedCandidates, _ = meter.Int64Histogram("memjev.jev.admitted_candidates")
 	jevLatency, _ = meter.Float64Histogram("memjev.jev.duration", metric.WithUnit("ms"))
 	jevInputTokens, _ = meter.Int64Counter("memjev.jev.input_tokens")
 	jevOutputTokens, _ = meter.Int64Counter("memjev.jev.output_tokens")
+}
+
+func RecordJevAdmission(ctx context.Context, disposition string, candidates int) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("disposition", disposition))
+	jevAdmissions.Add(ctx, 1, options)
+	jevAdmittedCandidates.Record(ctx, int64(candidates), options)
 }
 
 func RecordJevJudgment(ctx context.Context, facts JevJudgmentMetrics) {

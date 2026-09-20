@@ -41,12 +41,29 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 		documents[document.ProcedureVersionID] = document
 	}
 	c.repository.mu.RUnlock()
+	query := request.Query
+	if c.name == retrieval.ChannelExact && query.EffectSignatureHash == "" {
+		inferred := ""
+		for _, document := range documents {
+			if document.IntentHash != query.IntentHash {
+				continue
+			}
+			if inferred == "" {
+				inferred = document.EffectSignatureHash
+				continue
+			}
+			if inferred != document.EffectSignatureHash {
+				return nil, nil
+			}
+		}
+		query.EffectSignatureHash = inferred
+	}
 	hits := make([]retrieval.Hit, 0, len(documents))
 	for versionID, document := range documents {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		score := c.score(request.Query, document)
+		score := c.score(query, document)
 		if score <= 0 {
 			continue
 		}

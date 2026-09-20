@@ -685,7 +685,12 @@ func supportsSemanticFeatures(manifest ranking.Manifest) bool {
 
 func (s *Service) applySemanticJudgments(ctx context.Context, tenantID domain.TenantID, query Query, policyManifestID string, manifest ranking.Manifest, documents map[string]Document, candidates []ranking.Candidate, preliminary []ranking.Result) ([]ranking.Result, []PersistedSemanticJudgment) {
 	admitted, err := s.semantic.Admit(preliminary)
-	if err != nil || len(admitted) == 0 || len(admitted) > 32 {
+	if err != nil || len(admitted) > 32 {
+		observability.RecordJevAdmission(ctx, "invalid_admission", 0)
+		return preliminary, nil
+	}
+	if len(admitted) == 0 {
+		observability.RecordJevAdmission(ctx, "not_ambiguous", 0)
 		return preliminary, nil
 	}
 	eligible := make(map[string]struct{}, len(preliminary))
@@ -695,13 +700,16 @@ func (s *Service) applySemanticJudgments(ctx context.Context, tenantID domain.Te
 	seen := make(map[string]struct{}, len(admitted))
 	for _, versionID := range admitted {
 		if _, ok := eligible[versionID]; !ok {
+			observability.RecordJevAdmission(ctx, "invalid_admission", 0)
 			return preliminary, nil
 		}
 		if _, duplicate := seen[versionID]; duplicate {
+			observability.RecordJevAdmission(ctx, "invalid_admission", 0)
 			return preliminary, nil
 		}
 		seen[versionID] = struct{}{}
 	}
+	observability.RecordJevAdmission(ctx, "admitted", len(admitted))
 	judgments := make([]SemanticJudgment, len(admitted))
 	var group sync.WaitGroup
 	for index, versionID := range admitted {
