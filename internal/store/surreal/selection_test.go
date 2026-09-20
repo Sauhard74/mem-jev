@@ -35,6 +35,10 @@ func TestSurrealSelectionRepositoryCommitsAndReplays(t *testing.T) {
 	if err != nil || stored.ContentHash != first.Record.ContentHash {
 		t.Fatalf("stored=%#v error=%v", stored, err)
 	}
+	byRun, err := repository.FindByRetrievalRunID(context.Background(), draft.TenantID, draft.RetrievalRunID)
+	if err != nil || byRun.ContentHash != first.Record.ContentHash {
+		t.Fatalf("stored by run=%#v error=%v", byRun, err)
+	}
 	assertSelectionCounts(t, db, first.Record.InjectionID, map[string]int{"selection_record": 1, "selection_plan_node": 1, "selection_plan_edge": 0, "selection_plan_gap": 0})
 	now = now.Add(time.Hour)
 	_, err = repository.Commit(context.Background(), request)

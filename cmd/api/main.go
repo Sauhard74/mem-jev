@@ -27,8 +27,10 @@ import (
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
+	"github.com/sauhard74/mem-jev/internal/planning"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/security"
+	"github.com/sauhard74/mem-jev/internal/selection"
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
@@ -210,10 +212,18 @@ func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfi
 		return nil, err
 	}
 	projectionRepository := storesurreal.NewProjectionRepository(db)
+	selectionRepository, err := storesurreal.NewSelectionRepository(db, selection.RetentionPolicy{TTL: configuration.Retention})
+	if err != nil {
+		return nil, err
+	}
+	planIssuer, err := planning.NewDeterministicIssuer(selectionRepository)
+	if err != nil {
+		return nil, err
+	}
 	return retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
 		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
 		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections,
-	})
+	}, planIssuer)
 }
 
 func buildRetrievalChannels(db *surrealdb.DB, configuration config.RetrievalConfig, environment string) ([]retrieval.Channel, []retrieval.ChannelName, error) {

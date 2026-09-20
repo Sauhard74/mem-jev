@@ -36,6 +36,7 @@ type Receipt struct {
 type Repository interface {
 	Commit(context.Context, CommitRequest) (Receipt, error)
 	FindByInjectionID(context.Context, domain.TenantID, string) (Record, error)
+	FindByRetrievalRunID(context.Context, domain.TenantID, string) (Record, error)
 }
 
 type RetentionPolicy struct {

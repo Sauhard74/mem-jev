@@ -136,6 +136,23 @@ func (r *SelectionRepository) FindByInjectionID(ctx context.Context, tenantID do
 	return record, nil
 }
 
+func (r *SelectionRepository) FindByRetrievalRunID(ctx context.Context, tenantID domain.TenantID, runID string) (selection.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return selection.Record{}, err
+	}
+	if r == nil || r.db == nil || tenantID == "" || runID == "" {
+		return selection.Record{}, selection.ErrInvalidSelection
+	}
+	record, found, err := findSelectionByRun(ctx, r.db, tenantID, runID)
+	if err != nil {
+		return selection.Record{}, databaseFailure("find selection by retrieval run", err)
+	}
+	if !found || !r.now().UTC().Before(record.ExpiresAt) {
+		return selection.Record{}, selection.ErrSelectionNotFound
+	}
+	return record, nil
+}
+
 func createSelectionRecord(ctx context.Context, tx *surrealdb.Transaction, record selection.Record) error {
 	value := map[string]any{
 		"tenant_id": string(record.TenantID), "injection_id": record.InjectionID, "idempotency_identity_hash": record.IdempotencyIdentityHash,

@@ -80,7 +80,7 @@ func retrieveResponse(result retrieval.ServiceResponse) *memjevv1.RetrieveRespon
 	for index, item := range result.Candidates {
 		candidates[index] = &memjevv1.RetrievalCandidate{ProcedureVersionId: item.VersionID, ProcedureId: item.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: lifecycle(item.Lifecycle), ObservedEndToEnd: item.ObservedEndToEnd, AdvisoryOnly: item.AdvisoryOnly}
 	}
-	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate)}
+	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate), Plan: executablePlan(result.Plan)}
 }
 
 func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalResponse {
@@ -96,7 +96,73 @@ func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalRes
 		}
 		candidates[index] = &memjevv1.CandidateExplanation{ProcedureVersionId: item.VersionID, Eligible: item.Eligible, SourceChannels: channels, Facts: facts, FusedRankScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.FinalRank}
 	}
-	return &memjevv1.ExplainRetrievalResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate), Candidates: candidates}
+	response := &memjevv1.ExplainRetrievalResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate), Candidates: candidates}
+	if result.Plan != nil {
+		response.CompositionEdges = planDependencies(result.Plan.Dependencies)
+		response.PlanGaps = planGaps(result.Plan.Gaps)
+	}
+	return response
+}
+
+func executablePlan(plan *retrieval.PlanArtifact) *memjevv1.ExecutableProcedurePlan {
+	if plan == nil {
+		return nil
+	}
+	nodes := make([]*memjevv1.ProcedurePlanNode, len(plan.Nodes))
+	for index, node := range plan.Nodes {
+		nodes[index] = &memjevv1.ProcedurePlanNode{Ordinal: node.Ordinal, ProcedureVersionId: node.VersionID, InterfaceHash: node.InterfaceHash, Bridge: node.Bridge}
+	}
+	groups := []*memjevv1.ProcedureParallelGroup{}
+	if plan.ParallelGroups != nil {
+		groups = make([]*memjevv1.ProcedureParallelGroup, len(plan.ParallelGroups))
+		for index, group := range plan.ParallelGroups {
+			groups[index] = &memjevv1.ProcedureParallelGroup{Ordinal: group.Ordinal, ProcedureVersionIds: append([]string(nil), group.NodeVersionIDs...)}
+		}
+	}
+	return &memjevv1.ExecutableProcedurePlan{
+		InjectionId: plan.InjectionID, Nodes: nodes, Dependencies: planDependencies(plan.Dependencies), ParallelGroups: groups,
+		Gaps: planGaps(plan.Gaps), LimitCodes: append([]string(nil), plan.LimitCodes...), NoveltyClass: noveltyClass(plan.NoveltyClass), Complete: plan.Complete,
+		Provenance: &memjevv1.ProcedurePlanProvenance{
+			ProjectionEpoch: plan.ProjectionEpoch, SelectionHash: plan.SelectionHash, PlanHash: plan.PlanHash,
+			CompatibilityGraphId: plan.CompatibilityGraphID, CompatibilityGraphHash: plan.CompatibilityGraphHash,
+			CompatibilityMatrixHash: plan.CompatibilityMatrixHash, CandidateSetHash: plan.CandidateSetHash,
+			PlannerManifestId: plan.PlannerManifestID, PolicyManifestId: plan.PolicyManifestID, RankerManifestId: plan.RankerManifestID,
+			ServingConfigId: plan.ServingConfigID, DocumentSetHash: plan.DocumentSetHash,
+		},
+	}
+}
+
+func planDependencies(source []retrieval.PlanDependency) []*memjevv1.ProcedurePlanDependency {
+	result := make([]*memjevv1.ProcedurePlanDependency, len(source))
+	for index, dependency := range source {
+		result[index] = &memjevv1.ProcedurePlanDependency{CompatibilityEdgeId: dependency.CompatibilityEdgeID, SourceProcedureVersionId: dependency.SourceVersionID, TargetProcedureVersionId: dependency.TargetVersionID, SourceProvisionIds: append([]string(nil), dependency.SourceProvisionIDs...), SatisfiedRequirementIds: append([]string(nil), dependency.SatisfiedRequirementIDs...)}
+	}
+	return result
+}
+
+func planGaps(source []retrieval.PlanGap) []*memjevv1.ProcedurePlanGap {
+	result := make([]*memjevv1.ProcedurePlanGap, len(source))
+	for index, gap := range source {
+		result[index] = &memjevv1.ProcedurePlanGap{ProcedureVersionId: gap.VersionID, RequirementId: gap.RequirementID, GoalPredicateId: gap.GoalPredicateID, Code: gap.Code}
+	}
+	return result
+}
+
+func noveltyClass(value string) memjevv1.PlanNoveltyClass {
+	switch value {
+	case "exact":
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_EXACT
+	case "known_shape":
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_KNOWN_SHAPE
+	case "bridged":
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_BRIDGED
+	case "partial":
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_PARTIAL
+	case "unseen":
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_UNSEEN
+	default:
+		return memjevv1.PlanNoveltyClass_PLAN_NOVELTY_CLASS_UNSPECIFIED
+	}
 }
 
 func provenance(snapshot retrieval.ServingSnapshot, queryHash string, degraded []retrieval.DegradedChannel, approximate bool) *memjevv1.RetrievalProvenance {

@@ -21,7 +21,7 @@ func TestServiceSelectsEligibleCandidateAndPersistsDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Disposition != RunSelected || len(response.Candidates) != 1 || response.Candidates[0].VersionID != fixture.document.ProcedureVersionID || len(fixture.repository.runs) != 1 {
+	if response.Disposition != RunSelected || response.Plan == nil || len(response.Candidates) != 1 || response.Candidates[0].VersionID != fixture.document.ProcedureVersionID || len(fixture.repository.runs) != 1 {
 		t.Fatalf("response = %#v, runs = %#v", response, fixture.repository.runs)
 	}
 	run := fixture.repository.runs[0]
@@ -122,6 +122,21 @@ func TestServiceNeverServesUnpersistedDecisionOrCallsDormantJudge(t *testing.T) 
 	}
 }
 
+func TestServiceCommitsRetrievalBeforePlanAndNeverServesUncommittedPlan(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	fixture.plans.onIssue = func() {
+		if len(fixture.repository.runs) != 1 {
+			t.Fatal("plan issuer ran before retrieval decision committed")
+		}
+	}
+	fixture.plans.issueErr = errors.New("selection store unavailable")
+	response, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	var serviceErr *ServiceError
+	if response.Disposition != "" || !errors.As(err, &serviceErr) || serviceErr.Code != "plan_persistence_failed" || len(fixture.repository.runs) != 1 {
+		t.Fatalf("response=%#v error=%v runs=%d", response, err, len(fixture.repository.runs))
+	}
+}
+
 func TestServiceDeniesRecallBeforeCandidateAccessWhenCurrentConsentIsFalse(t *testing.T) {
 	fixture := newServiceFixture(t, false)
 	fixture.request.RecallAllowed = false
@@ -213,6 +228,7 @@ type serviceFixture struct {
 	repository *fakeDecisionRepository
 	document   Document
 	exact      *serviceChannel
+	plans      *fakePlanIssuer
 	request    ServiceRequest
 }
 
@@ -257,12 +273,13 @@ func newServiceFixture(t *testing.T, degradedVector bool) serviceFixture {
 	}
 	snapshot := ServingSnapshot{ProjectionEpoch: 1, DocumentSetHash: strings.Repeat("a", 64), ServingConfigID: config.ID, PolicyManifestID: policy.ID, RankerManifestID: ranker.ID, Indexes: config.Indexes}
 	repository := &fakeDecisionRepository{snapshot: snapshot}
-	service, err := NewService(repository, fakeDocumentReader{documents: []Document{document}}, fakeManifestResolver{policy: policy, ranker: ranker}, fixedEffectInferer{hash: document.EffectSignatureHash}, fixedCipher{}, fixedIDs{}, ServiceConfig{Channels: channels, RequiredChannels: []ChannelName{ChannelExact}, ChannelTimeout: time.Second, Retention: 24 * time.Hour, MaximumSelections: 1})
+	issuer := &fakePlanIssuer{}
+	service, err := NewService(repository, fakeDocumentReader{documents: []Document{document}}, fakeManifestResolver{policy: policy, ranker: ranker}, fixedEffectInferer{hash: document.EffectSignatureHash}, fixedCipher{}, fixedIDs{}, ServiceConfig{Channels: channels, RequiredChannels: []ChannelName{ChannelExact}, ChannelTimeout: time.Second, Retention: 24 * time.Hour, MaximumSelections: 1}, issuer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	service.clock = func() time.Time { return now }
-	return serviceFixture{service: service, repository: repository, document: document, exact: exact, request: ServiceRequest{TenantID: "tenant_a", CurrentPolicyVersion: "policy.v1", RecallAllowed: true, AllowedResidencyRegions: []string{"local"}, Input: Input{Task: "release", Tools: []Tool{{Name: "shell", ContractVersionID: "tcv_shell"}}, Harness: Harness{Name: "ci", Version: "1"}, RiskClass: RiskMedium, LatencyClass: LatencyInteractive, MaxCandidates: 10}}}
+	return serviceFixture{service: service, repository: repository, document: document, exact: exact, plans: issuer, request: ServiceRequest{TenantID: "tenant_a", CurrentPolicyVersion: "policy.v1", RecallAllowed: true, AllowedResidencyRegions: []string{"local"}, Input: Input{Task: "release", Tools: []Tool{{Name: "shell", ContractVersionID: "tcv_shell"}}, Harness: Harness{Name: "ci", Version: "1"}, RiskClass: RiskMedium, LatencyClass: LatencyInteractive, MaxCandidates: 10}}}
 }
 
 type serviceChannel struct {
@@ -398,4 +415,37 @@ type countingJudge struct{ calls int }
 func (j *countingJudge) Judge(context.Context, SemanticJudgmentRequest) (SemanticJudgment, error) {
 	j.calls++
 	return SemanticJudgment{}, nil
+}
+
+type fakePlanIssuer struct {
+	mu       sync.Mutex
+	plan     *PlanArtifact
+	onIssue  func()
+	issueErr error
+}
+
+func (r *fakePlanIssuer) FindByRetrievalRunID(_ context.Context, tenantID domain.TenantID, runID string) (PlanArtifact, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.plan == nil || r.plan.TenantID != tenantID || r.plan.RetrievalRunID != runID {
+		return PlanArtifact{}, ErrPlanNotFound
+	}
+	return *r.plan, nil
+}
+
+func (r *fakePlanIssuer) Issue(_ context.Context, run Run, _ []Document) (PlanArtifact, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.onIssue != nil {
+		r.onIssue()
+	}
+	if r.issueErr != nil {
+		return PlanArtifact{}, r.issueErr
+	}
+	if r.plan != nil {
+		return *r.plan, nil
+	}
+	plan := PlanArtifact{InjectionID: "inj_test", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), TenantID: run.TenantID, RetrievalRunID: run.ID, QueryHash: run.QueryHash, RequestContextHash: run.RequestContextHash, ProjectionEpoch: run.Snapshot.ProjectionEpoch, Complete: true, NoveltyClass: "exact", Nodes: []PlanNode{{VersionID: run.SelectedVersionIDs[0], InterfaceHash: strings.Repeat("3", 64)}}}
+	r.plan = &plan
+	return plan, nil
 }

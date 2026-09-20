@@ -60,12 +60,76 @@ message RetrievalProvenance {
   bool approximate_candidates = 7;
 }
 
+enum PlanNoveltyClass {
+  PLAN_NOVELTY_CLASS_UNSPECIFIED = 0;
+  PLAN_NOVELTY_CLASS_EXACT = 1;
+  PLAN_NOVELTY_CLASS_KNOWN_SHAPE = 2;
+  PLAN_NOVELTY_CLASS_BRIDGED = 3;
+  PLAN_NOVELTY_CLASS_PARTIAL = 4;
+  PLAN_NOVELTY_CLASS_UNSEEN = 5;
+}
+
+message ProcedurePlanNode {
+  uint32 ordinal = 1;
+  string procedure_version_id = 2;
+  string interface_hash = 3;
+  bool bridge = 4;
+}
+
+message ProcedurePlanDependency {
+  string compatibility_edge_id = 1;
+  string source_procedure_version_id = 2;
+  string target_procedure_version_id = 3;
+  repeated string source_provision_ids = 4;
+  repeated string satisfied_requirement_ids = 5;
+}
+
+message ProcedureParallelGroup {
+  uint32 ordinal = 1;
+  repeated string procedure_version_ids = 2;
+}
+
+message ProcedurePlanGap {
+  string procedure_version_id = 1;
+  string requirement_id = 2;
+  string goal_predicate_id = 3;
+  string code = 4;
+}
+
+message ProcedurePlanProvenance {
+  uint64 projection_epoch = 1;
+  string selection_hash = 2;
+  string plan_hash = 3;
+  string compatibility_graph_id = 4;
+  string compatibility_graph_hash = 5;
+  string compatibility_matrix_hash = 6;
+  string candidate_set_hash = 7;
+  string planner_manifest_id = 8;
+  string policy_manifest_id = 9;
+  string ranker_manifest_id = 10;
+  string serving_config_id = 11;
+  string document_set_hash = 12;
+}
+
+message ExecutableProcedurePlan {
+  string injection_id = 1;
+  repeated ProcedurePlanNode nodes = 2;
+  repeated ProcedurePlanDependency dependencies = 3;
+  repeated ProcedureParallelGroup parallel_groups = 4;
+  repeated ProcedurePlanGap gaps = 5;
+  repeated string limit_codes = 6;
+  PlanNoveltyClass novelty_class = 7;
+  bool complete = 8;
+  ProcedurePlanProvenance provenance = 9;
+}
+
 message RetrieveResponse {
   string retrieval_run_id = 1;
   RetrievalDisposition disposition = 2;
   repeated RetrievalCandidate candidates = 3;
   string abstention_code = 4;
   RetrievalProvenance provenance = 5;
+  ExecutableProcedurePlan plan = 6;
 }
 
 message ExplainRetrievalRequest {
@@ -96,6 +160,8 @@ message ExplainRetrievalResponse {
   string abstention_code = 3;
   RetrievalProvenance provenance = 4;
   repeated CandidateExplanation candidates = 5;
+  repeated ProcedurePlanDependency composition_edges = 6;
+  repeated ProcedurePlanGap plan_gaps = 7;
 }
 
 service RetrievalService {

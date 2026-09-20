@@ -30,6 +30,10 @@ func TestSelectionRepositoryCommitsBeforeReturningAndReplaysByteIdentically(t *t
 	if err != nil || string(stored.CanonicalJSON) != string(first.Record.CanonicalJSON) {
 		t.Fatalf("stored=%#v error=%v", stored, err)
 	}
+	byRun, err := repository.FindByRetrievalRunID(context.Background(), draft.TenantID, draft.RetrievalRunID)
+	if err != nil || string(byRun.CanonicalJSON) != string(first.Record.CanonicalJSON) {
+		t.Fatalf("stored by run=%#v error=%v", byRun, err)
+	}
 	second, err := repository.Commit(context.Background(), request)
 	if err != nil || second.Disposition != selection.DispositionDuplicate || string(second.Record.CanonicalJSON) != string(first.Record.CanonicalJSON) {
 		t.Fatalf("duplicate=%#v error=%v", second, err)

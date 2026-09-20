@@ -18,6 +18,7 @@ type Explanation struct {
 	Candidates   []CandidateExplanation
 	Degraded     []DegradedChannel
 	Approximate  bool
+	Plan         *PlanArtifact
 }
 
 type CandidateExplanation struct {
@@ -74,6 +75,13 @@ func (s *Service) Explain(ctx context.Context, tenantID domain.TenantID, runID s
 		source := append([]ChannelName(nil), channels[versionID]...)
 		sort.Slice(source, func(i, j int) bool { return source[i] < source[j] })
 		explanation.Candidates = append(explanation.Candidates, CandidateExplanation{VersionID: versionID, Eligible: gate.Eligible, AdvisoryOnly: gate.AdvisoryOnly, SourceChannels: source, Facts: facts, RRFScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.Rank})
+	}
+	if run.Disposition == RunSelected {
+		plan, findErr := s.plans.FindByRetrievalRunID(ctx, tenantID, run.ID)
+		if findErr != nil {
+			return Explanation{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: findErr}
+		}
+		explanation.Plan = &plan
 	}
 	return explanation, nil
 }

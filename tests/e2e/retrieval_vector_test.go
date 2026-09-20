@@ -19,10 +19,13 @@ import (
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/eligibility"
+	"github.com/sauhard74/mem-jev/internal/planning"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/ranking"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/security"
+	"github.com/sauhard74/mem-jev/internal/selection"
+	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 )
 
 func TestHostedFiveChannelRetrievalAndVectorQuarantine(t *testing.T) {
@@ -69,7 +72,15 @@ func TestHostedFiveChannelRetrievalAndVectorQuarantine(t *testing.T) {
 		hostedChannel{name: retrieval.ChannelGraph, manifest: "idx_graph", versionID: document.ProcedureVersionID},
 		vector,
 	}
-	service, err := retrieval.NewService(repository, hostedDocumentReader{document}, hostedManifests{policyManifest, rankerManifest}, hostedEffectInferer{document.EffectSignatureHash}, hostedCipher{}, hostedIDs{}, retrieval.ServiceConfig{Channels: channels, RequiredChannels: []retrieval.ChannelName{retrieval.ChannelExact, retrieval.ChannelLexical, retrieval.ChannelFacet, retrieval.ChannelGraph}, ChannelTimeout: time.Second, Retention: time.Hour, MaximumSelections: 1})
+	selectionRepository, err := storememory.NewSelectionRepository(selection.RetentionPolicy{TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planIssuer, err := planning.NewDeterministicIssuer(selectionRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := retrieval.NewService(repository, hostedDocumentReader{document}, hostedManifests{policyManifest, rankerManifest}, hostedEffectInferer{document.EffectSignatureHash}, hostedCipher{}, hostedIDs{}, retrieval.ServiceConfig{Channels: channels, RequiredChannels: []retrieval.ChannelName{retrieval.ChannelExact, retrieval.ChannelLexical, retrieval.ChannelFacet, retrieval.ChannelGraph}, ChannelTimeout: time.Second, Retention: time.Hour, MaximumSelections: 1}, planIssuer)
 	if err != nil {
 		t.Fatal(err)
 	}

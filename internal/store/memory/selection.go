@@ -96,3 +96,22 @@ func (r *SelectionRepository) FindByInjectionID(ctx context.Context, tenantID do
 	}
 	return selection.CloneRecord(record), nil
 }
+
+func (r *SelectionRepository) FindByRetrievalRunID(ctx context.Context, tenantID domain.TenantID, runID string) (selection.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return selection.Record{}, err
+	}
+	if r == nil || tenantID == "" || runID == "" {
+		return selection.Record{}, selection.ErrInvalidSelection
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	record, found := r.byRun[selectionKey{tenantID: tenantID, identity: runID}]
+	if !found || !r.now().UTC().Before(record.ExpiresAt) {
+		return selection.Record{}, selection.ErrSelectionNotFound
+	}
+	if selection.ValidateRecord(record) != nil {
+		return selection.Record{}, selection.ErrInvalidSelection
+	}
+	return selection.CloneRecord(record), nil
+}

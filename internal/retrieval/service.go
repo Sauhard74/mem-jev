@@ -80,6 +80,7 @@ type Service struct {
 	clock      func() time.Time
 	config     ServiceConfig
 	semantic   SemanticJudge
+	plans      PlanIssuer
 }
 
 type ServiceRequest struct {
@@ -111,6 +112,7 @@ type ServiceResponse struct {
 	Degraded     []DegradedChannel
 	Approximate  bool
 	Replayed     bool
+	Plan         *PlanArtifact
 }
 
 type ServiceError struct {
@@ -121,8 +123,8 @@ type ServiceError struct {
 func (e *ServiceError) Error() string { return fmt.Sprintf("retrieval %s: %v", e.Code, e.Err) }
 func (e *ServiceError) Unwrap() error { return e.Err }
 
-func NewService(repository DecisionRepository, documents DocumentReader, manifests ManifestResolver, effects EffectInferer, cipher EnvelopeCipher, ids RunIDSource, config ServiceConfig) (*Service, error) {
-	if repository == nil || documents == nil || manifests == nil || cipher == nil || ids == nil || config.ChannelTimeout <= 0 || config.Retention <= 0 || config.Retention > 30*24*time.Hour || config.MaximumSelections == 0 || config.MaximumSelections > 100 || len(config.Channels) == 0 {
+func NewService(repository DecisionRepository, documents DocumentReader, manifests ManifestResolver, effects EffectInferer, cipher EnvelopeCipher, ids RunIDSource, config ServiceConfig, plans PlanIssuer) (*Service, error) {
+	if repository == nil || documents == nil || manifests == nil || cipher == nil || ids == nil || plans == nil || config.ChannelTimeout <= 0 || config.Retention <= 0 || config.Retention > 30*24*time.Hour || config.MaximumSelections == 0 || config.MaximumSelections > 100 || len(config.Channels) == 0 {
 		return nil, ErrServiceUnavailable
 	}
 	seen := map[ChannelName]bool{}
@@ -142,7 +144,7 @@ func NewService(repository DecisionRepository, documents DocumentReader, manifes
 		requiredSeen[required] = true
 	}
 	sort.Slice(config.RequiredChannels, func(i, j int) bool { return config.RequiredChannels[i] < config.RequiredChannels[j] })
-	return &Service{repository: repository, documents: documents, manifests: manifests, effects: effects, cipher: cipher, ids: ids, clock: time.Now, config: config}, nil
+	return &Service{repository: repository, documents: documents, manifests: manifests, effects: effects, cipher: cipher, ids: ids, clock: time.Now, config: config, plans: plans}, nil
 }
 
 func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (ServiceResponse, error) {
@@ -313,7 +315,14 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	}
 	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
 	response.Candidates = responseCandidates
-	return response, err
+	if err != nil {
+		return response, err
+	}
+	persisted, lookupErr := s.repository.RetrievalRun(ctx, request.TenantID, runID)
+	if lookupErr != nil {
+		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: runID, Err: lookupErr}
+	}
+	return s.attachPlan(ctx, response, persisted, documents)
 }
 
 func (s *Service) snapshotChannels(snapshot ServingSnapshot) ([]Channel, error) {
@@ -414,6 +423,24 @@ func (s *Service) responseFromRun(ctx context.Context, run Run) (ServiceResponse
 		}
 		response.Candidates = append(response.Candidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd, AdvisoryOnly: gateByID[item.VersionID].AdvisoryOnly})
 	}
+	if run.Disposition != RunSelected {
+		return response, nil
+	}
+	return s.attachPlan(ctx, response, run, documents)
+}
+
+func (s *Service) attachPlan(ctx context.Context, response ServiceResponse, run Run, documents []Document) (ServiceResponse, error) {
+	plan, err := s.plans.FindByRetrievalRunID(ctx, run.TenantID, run.ID)
+	if errors.Is(err, ErrPlanNotFound) {
+		plan, err = s.plans.Issue(ctx, run, documents)
+	}
+	if err != nil {
+		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: err}
+	}
+	if plan.InjectionID == "" || plan.SelectionHash == "" || plan.PlanHash == "" || len(plan.Nodes) == 0 || plan.TenantID != run.TenantID || plan.RetrievalRunID != run.ID || plan.QueryHash != run.QueryHash || plan.RequestContextHash != run.RequestContextHash || plan.ProjectionEpoch != run.Snapshot.ProjectionEpoch {
+		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: ErrPlanUnavailable}
+	}
+	response.Plan = &plan
 	return response, nil
 }
 

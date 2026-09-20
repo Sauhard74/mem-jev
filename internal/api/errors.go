@@ -160,7 +160,7 @@ func mapDomainError(ctx context.Context, err error) error {
 			switch retrievalErr.Code {
 			case "idempotency_conflict":
 				code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
-			case "required_channel_unavailable", "snapshot_unavailable", "serving_config_mismatch", "policy_manifest_unavailable", "ranker_manifest_unavailable", "run_lookup_failed", "run_persistence_failed", "candidate_snapshot_missing", "effect_inference_failed":
+			case "required_channel_unavailable", "snapshot_unavailable", "serving_config_mismatch", "policy_manifest_unavailable", "ranker_manifest_unavailable", "run_lookup_failed", "run_persistence_failed", "plan_persistence_failed", "candidate_snapshot_missing", "effect_inference_failed":
 				code, reason, retryable = connect.CodeUnavailable, retrievalErr.Code, true
 			default:
 				code, reason = connect.CodeInternal, "retrieval_failed"
