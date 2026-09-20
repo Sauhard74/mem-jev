@@ -1,0 +1,237 @@
+-- Append-only outcome aggregate. Corrections create a new record linked by supersedes_outcome_id.
+DEFINE TABLE IF NOT EXISTS outcome_evidence SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE outcome_evidence TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE outcome_evidence TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE outcome_evidence TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS execution_id ON TABLE outcome_evidence TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS selection_id ON TABLE outcome_evidence TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS supersedes_outcome_id ON TABLE outcome_evidence TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS correction_reason ON TABLE outcome_evidence TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS state ON TABLE outcome_evidence TYPE string READONLY ASSERT $value IN ["verified_success", "provisional_success", "inconclusive", "verified_failure"];
+DEFINE FIELD IF NOT EXISTS promotion_eligible ON TABLE outcome_evidence TYPE bool READONLY ASSERT $value = (state = "verified_success");
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE outcome_evidence TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS evidence_count ON TABLE outcome_evidence TYPE int READONLY ASSERT $value > 0 AND $value <= 256;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE outcome_evidence TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE outcome_evidence TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE outcome_evidence TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS outcome_evidence_tenant_outcome_unique ON TABLE outcome_evidence FIELDS tenant_id, outcome_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS outcome_evidence_trace_created ON TABLE outcome_evidence FIELDS tenant_id, trace_id, created_at;
+DEFINE INDEX IF NOT EXISTS outcome_evidence_selection_created ON TABLE outcome_evidence FIELDS tenant_id, selection_id, created_at;
+
+-- One immutable, authenticated fact belonging to an outcome aggregate.
+DEFINE TABLE IF NOT EXISTS verification_result SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS evidence_id ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS class ON TABLE verification_result TYPE string READONLY ASSERT $value IN ["independent_verifier", "goal_predicate", "harness_assertion", "tool_postcondition", "exit_status_or_self_report"];
+DEFINE FIELD IF NOT EXISTS verdict ON TABLE verification_result TYPE string READONLY ASSERT $value IN ["satisfied", "failed", "unknown"];
+DEFINE FIELD IF NOT EXISTS predicate_id ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS verifier_id ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS verifier_version ON TABLE verification_result TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS observed_at ON TABLE verification_result TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS payload ON TABLE verification_result TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE verification_result TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE verification_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE verification_result TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS verification_result_tenant_evidence_unique ON TABLE verification_result FIELDS tenant_id, evidence_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS verification_result_outcome ON TABLE verification_result FIELDS tenant_id, outcome_id, predicate_id;
+
+DEFINE TABLE IF NOT EXISTS tool_contract SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE tool_contract TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_id ON TABLE tool_contract TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE tool_contract TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE tool_contract TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE tool_contract TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS tool_contract_tenant_tool_unique ON TABLE tool_contract FIELDS tenant_id, tool_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS tool_contract_version SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS contract_version_id ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_id ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_version ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS manifest ON TABLE tool_contract_version TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE tool_contract_version TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE tool_contract_version TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS tool_contract_version_tenant_id_unique ON TABLE tool_contract_version FIELDS tenant_id, contract_version_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS tool_contract_version_tenant_version_unique ON TABLE tool_contract_version FIELDS tenant_id, tool_id, tool_version UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS resource_ref SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS resource_id ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS namespace ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS resource_type ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS logical_identity_hash ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS instance_identity_hash ON TABLE resource_ref TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE resource_ref TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE resource_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE resource_ref TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS resource_ref_tenant_id_unique ON TABLE resource_ref FIELDS tenant_id, resource_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS resource_ref_logical_identity ON TABLE resource_ref FIELDS tenant_id, namespace, resource_type, logical_identity_hash;
+
+DEFINE TABLE IF NOT EXISTS procedure SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE procedure TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_id ON TABLE procedure TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS intent_hash ON TABLE procedure TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS effect_signature_hash ON TABLE procedure TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS lifecycle_state ON TABLE procedure TYPE string ASSERT $value IN ["candidate", "trial", "active", "stale", "superseded", "quarantined", "retired"];
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE procedure TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS updated_at ON TABLE procedure TYPE datetime;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE procedure TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE procedure TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS procedure_tenant_id_unique ON TABLE procedure FIELDS tenant_id, procedure_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS procedure_family_unique ON TABLE procedure FIELDS tenant_id, intent_hash, effect_signature_hash UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS procedure_version SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_id ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS graph_hash ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS environment_scope_hash ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS lifecycle_state ON TABLE procedure_version TYPE string ASSERT $value IN ["candidate", "trial", "active", "stale", "superseded", "quarantined", "retired"];
+DEFINE FIELD IF NOT EXISTS observed_end_to_end ON TABLE procedure_version TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS opaque_step_count ON TABLE procedure_version TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS verified_success_count ON TABLE procedure_version TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS unsafe_outcome_count ON TABLE procedure_version TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS last_evidence_at ON TABLE procedure_version TYPE datetime;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE procedure_version TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE procedure_version TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS procedure_version_tenant_id_unique ON TABLE procedure_version FIELDS tenant_id, procedure_version_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS procedure_version_graph_unique ON TABLE procedure_version FIELDS tenant_id, procedure_id, graph_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS procedure_version_serving ON TABLE procedure_version FIELDS tenant_id, lifecycle_state, last_evidence_at;
+
+DEFINE TABLE IF NOT EXISTS step SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE step TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS step_id ON TABLE step TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE step TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS ordinal ON TABLE step TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS event_id ON TABLE step TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_contract_version_id ON TABLE step TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS opaque ON TABLE step TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS uncertain_necessity ON TABLE step TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS payload ON TABLE step TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE step TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE step TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE step TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS step_tenant_id_unique ON TABLE step FIELDS tenant_id, step_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS step_version_ordinal_unique ON TABLE step FIELDS tenant_id, procedure_version_id, ordinal UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS negative_path SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS negative_path_id ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS failure_predicate_id ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS environment_scope_hash ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_scope_hash ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS resource_scope_hash ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS event_ids ON TABLE negative_path TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE negative_path TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE negative_path TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE negative_path TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS negative_path_tenant_id_unique ON TABLE negative_path FIELDS tenant_id, negative_path_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS negative_path_compatibility ON TABLE negative_path FIELDS tenant_id, failure_predicate_id, environment_scope_hash, tool_scope_hash, resource_scope_hash;
+
+DEFINE TABLE IF NOT EXISTS synthesis_manifest SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS synthesis_manifest_id ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE synthesis_manifest TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS archive_hash ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_event_start ON TABLE synthesis_manifest TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_event_end ON TABLE synthesis_manifest TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS sanitizer_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS registry_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS graph_builder_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS synthesizer_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS status ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS abstention_code ON TABLE synthesis_manifest TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE synthesis_manifest TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS synthesis_manifest_tenant_id_unique ON TABLE synthesis_manifest FIELDS tenant_id, synthesis_manifest_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS synthesis_manifest_trace_outcome ON TABLE synthesis_manifest FIELDS tenant_id, trace_id, outcome_id;
+
+DEFINE TABLE IF NOT EXISTS projection_checkpoint SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE projection_checkpoint TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS projection_name ON TABLE projection_checkpoint TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS generation ON TABLE projection_checkpoint TYPE int;
+DEFINE FIELD IF NOT EXISTS input_cursor ON TABLE projection_checkpoint TYPE string;
+DEFINE FIELD IF NOT EXISTS manifest_hash ON TABLE projection_checkpoint TYPE string;
+DEFINE FIELD IF NOT EXISTS updated_at ON TABLE projection_checkpoint TYPE datetime;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE projection_checkpoint TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS projection_checkpoint_tenant_name_unique ON TABLE projection_checkpoint FIELDS tenant_id, projection_name UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS audit_event SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS audit_event_id ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS event_type ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS subject_id ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS reason_code ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS details ON TABLE audit_event TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE audit_event TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE audit_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE audit_event TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS audit_event_tenant_id_unique ON TABLE audit_event FIELDS tenant_id, audit_event_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS audit_event_subject_created ON TABLE audit_event FIELDS tenant_id, subject_id, created_at;
+
+-- Typed graph edges. The tenant assertion provides database-level defense in depth.
+DEFINE TABLE IF NOT EXISTS contains SCHEMAFULL TYPE RELATION IN procedure_version OUT step ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE contains TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE contains TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE contains TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE contains TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS contains_edge_unique ON TABLE contains FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS depends_on SCHEMAFULL TYPE RELATION IN step OUT step ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE depends_on TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS dependency_type ON TABLE depends_on TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE depends_on TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE depends_on TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE depends_on TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS depends_on_edge_unique ON TABLE depends_on FIELDS tenant_id, in, out, dependency_type UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS consumes SCHEMAFULL TYPE RELATION IN step OUT resource_ref ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE consumes TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE consumes TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE consumes TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE consumes TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS consumes_edge_unique ON TABLE consumes FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS produces SCHEMAFULL TYPE RELATION IN step OUT resource_ref ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE produces TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE produces TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE produces TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE produces TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS produces_edge_unique ON TABLE produces FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS verified_by SCHEMAFULL TYPE RELATION IN step OUT verification_result ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE verified_by TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE verified_by TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE verified_by TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE verified_by TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS verified_by_edge_unique ON TABLE verified_by FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS failed_under SCHEMAFULL TYPE RELATION IN step OUT negative_path ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE failed_under TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE failed_under TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE failed_under TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE failed_under TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS failed_under_edge_unique ON TABLE failed_under FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN procedure_version OUT procedure_version ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE supersedes TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE supersedes TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE supersedes TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE supersedes TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS supersedes_edge_unique ON TABLE supersedes FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN procedure_version OUT procedure_version ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE derived_from TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE derived_from TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE derived_from TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE derived_from TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS derived_from_edge_unique ON TABLE derived_from FIELDS tenant_id, in, out UNIQUE;

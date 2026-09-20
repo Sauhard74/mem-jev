@@ -92,6 +92,20 @@ func (m *Migrator) applyWithConflictRetry(ctx context.Context, migration store.M
 		if lastErr == nil {
 			return nil
 		}
+		// Another replica can commit the same migration between our state read and
+		// CREATE ONLY. SurrealDB reports the unique-index collision rather than a
+		// transaction-conflict sentinel, so verify durable state before classifying
+		// the error. A matching checksum means both replicas converged safely.
+		refreshed, refreshErr := m.applied(ctx)
+		if refreshErr != nil {
+			return fmt.Errorf("refresh migration state after apply failure: %w", refreshErr)
+		}
+		if checksum, ok := refreshed[migration.Version]; ok {
+			if checksum != migration.Checksum {
+				return fmt.Errorf("%w: version %d", store.ErrMigrationChecksum, migration.Version)
+			}
+			return nil
+		}
 		if !surrealdb.IsTransactionConflict(lastErr) {
 			return lastErr
 		}

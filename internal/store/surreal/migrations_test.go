@@ -16,7 +16,7 @@ import (
 
 const surrealImage = "surrealdb/surrealdb:v3.2.4"
 
-func TestFoundationMigrationIsIdempotent(t *testing.T) {
+func TestEvidencePipelineMigrationIsIdempotent(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	m := NewMigrator(db)
 	if err := m.Apply(context.Background()); err != nil {
@@ -25,8 +25,8 @@ func TestFoundationMigrationIsIdempotent(t *testing.T) {
 	if err := m.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := schemaVersion(t, db); got != 1 {
-		t.Fatalf("schema version = %d, want 1", got)
+	if got := schemaVersion(t, db); got != 2 {
+		t.Fatalf("schema version = %d, want 2", got)
 	}
 }
 
@@ -71,6 +71,116 @@ func TestFoundationSchemaRejectsMissingTenant(t *testing.T) {
 	}
 }
 
+func TestEvidenceSchemaRejectsMissingTenant(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := surrealdb.Query[any](context.Background(), db, `
+		CREATE outcome_evidence CONTENT {
+			outcome_id: "out_1",
+			trace_id: "tr_1",
+			state: "verified_success",
+			promotion_eligible: true,
+			policy_version: "policy.v1",
+			evidence_count: 1,
+			created_at: time::now(),
+			schema_version: "outcome.v1",
+			content_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		}`, nil)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "tenant_id") {
+		t.Fatalf("error = %v, want missing tenant_id rejection", err)
+	}
+}
+
+func TestEvidenceSchemaRejectsInvalidOutcomeState(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := surrealdb.Query[any](context.Background(), db, `
+		CREATE outcome_evidence CONTENT {
+			tenant_id: "tenant_1", outcome_id: "out_1", trace_id: "tr_1",
+			state: "made_up", promotion_eligible: true, policy_version: "policy.v1",
+			evidence_count: -1, created_at: time::now(), schema_version: "outcome.v1",
+			content_hash: "short"
+		}`, nil)
+	if err == nil {
+		t.Fatal("invalid outcome state, count, and hash were accepted")
+	}
+}
+
+func TestEvidenceRecordsAreImmutable(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	results, err := surrealdb.Query[[]struct {
+		ID string `json:"id"`
+	}](context.Background(), db, `
+		CREATE outcome_evidence CONTENT {
+			tenant_id: "tenant_1",
+			outcome_id: "out_1",
+			trace_id: "tr_1",
+			state: "verified_success",
+			promotion_eligible: true,
+			policy_version: "policy.v1",
+			evidence_count: 1,
+			created_at: time::now(),
+			schema_version: "outcome.v1",
+			content_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		} RETURN id`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		t.Fatal("outcome record was not created")
+	}
+	_, _ = surrealdb.Query[any](context.Background(), db, `
+		UPDATE outcome_evidence SET content_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"`, nil)
+	type hashRow struct {
+		ContentHash string `json:"content_hash"`
+	}
+	selected, err := surrealdb.Query[[]hashRow](context.Background(), db, `SELECT content_hash FROM outcome_evidence`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected == nil || len(*selected) == 0 || len((*selected)[0].Result) != 1 || (*selected)[0].Result[0].ContentHash != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("immutable content_hash changed: %#v", selected)
+	}
+}
+
+func TestEvidenceGraphRejectsCrossTenantEdge(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := surrealdb.Query[any](context.Background(), db, `
+		CREATE procedure_version:one CONTENT {
+			tenant_id: "tenant-a", procedure_version_id: "pv_one", procedure_id: "p_one",
+			graph_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			environment_scope_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			policy_version: "policy.v1", lifecycle_state: "candidate", observed_end_to_end: true,
+			opaque_step_count: 0, verified_success_count: 1, unsafe_outcome_count: 0,
+			last_evidence_at: time::now(), created_at: time::now(), schema_version: "procedure.v1",
+			content_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+		};
+		CREATE step:one CONTENT {
+			tenant_id: "tenant-b", step_id: "step_one", procedure_version_id: "pv_one",
+			ordinal: 0, event_id: "ev_one", opaque: false, uncertain_necessity: false,
+			payload: {}, created_at: time::now(), schema_version: "step.v1",
+			content_hash: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+		};
+		RELATE procedure_version:one->contains->step:one SET
+			tenant_id = "tenant-a", created_at = time::now(), schema_version = "edge.v1",
+			content_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+	`, nil)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "tenant") {
+		t.Fatalf("error = %v, want cross-tenant relation rejection", err)
+	}
+}
+
 func TestFoundationMigrationRejectsChecksumDrift(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	m := NewMigrator(db)
@@ -90,7 +200,7 @@ func TestFoundationMigrationRejectsChecksumDrift(t *testing.T) {
 	}
 }
 
-func TestConcurrentFoundationMigrationConverges(t *testing.T) {
+func TestConcurrentMigrationsConverge(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	const replicas = 8
 	start := make(chan struct{})
@@ -112,8 +222,8 @@ func TestConcurrentFoundationMigrationConverges(t *testing.T) {
 			t.Errorf("concurrent migration: %v", err)
 		}
 	}
-	if got := schemaVersion(t, db); got != 1 {
-		t.Fatalf("schema version = %d, want 1", got)
+	if got := schemaVersion(t, db); got != 2 {
+		t.Fatalf("schema version = %d, want 2", got)
 	}
 }
 
