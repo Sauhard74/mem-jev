@@ -82,6 +82,20 @@ DEFINE FIELD IF NOT EXISTS schema_version ON TABLE embedding_manifest TYPE strin
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE embedding_manifest TYPE string READONLY ASSERT string::len($value) = 64;
 DEFINE INDEX IF NOT EXISTS embedding_manifest_tenant_id_unique ON TABLE embedding_manifest FIELDS tenant_id, embedding_manifest_id UNIQUE;
 
+-- Provider output is stored once by canonical input hash. Serving vector tables
+-- reference this immutable value but carry their own snapshot/facet metadata.
+DEFINE TABLE IF NOT EXISTS embedding_value SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE embedding_value TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS embedding_id ON TABLE embedding_value TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS embedding_manifest_id ON TABLE embedding_value TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS input_hash ON TABLE embedding_value TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS vector_quantized ON TABLE embedding_value TYPE array<int> READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_embedding ON TABLE embedding_value TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE embedding_value TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE embedding_value TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE embedding_value TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS embedding_value_tenant_input_unique ON TABLE embedding_value FIELDS tenant_id, embedding_manifest_id, input_hash UNIQUE;
+
 -- Physical vector tables and DISKANN indexes are provisioned per immutable manifest after dimension validation.
 DEFINE TABLE IF NOT EXISTS embedding_index_generation SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE embedding_index_generation TYPE string READONLY;

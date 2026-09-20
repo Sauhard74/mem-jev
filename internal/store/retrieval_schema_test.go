@@ -20,6 +20,7 @@ func TestRetrievalMigrationDefinesProductionInvariants(t *testing.T) {
 		"DEFINE ANALYZER IF NOT EXISTS retrieval_text_analyzer",
 		"FULLTEXT ANALYZER retrieval_text_analyzer BM25",
 		"DEFINE TABLE IF NOT EXISTS embedding_manifest SCHEMAFULL",
+		"DEFINE TABLE IF NOT EXISTS embedding_value SCHEMAFULL",
 		"DEFINE TABLE IF NOT EXISTS embedding_index_generation SCHEMAFULL",
 		"DEFINE TABLE IF NOT EXISTS ranker_manifest SCHEMAFULL",
 		"DEFINE TABLE IF NOT EXISTS eligibility_policy_manifest SCHEMAFULL",
