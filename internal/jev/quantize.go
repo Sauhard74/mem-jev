@@ -19,6 +19,14 @@ var (
 // with round-half-away-from-zero. Probability input is non-negative, making
 // this equivalent to round-half-up without involving binary floating point.
 func ProbabilityMicros(raw string) (int32, error) {
+	value, err := decimalMicros(raw, 1)
+	if err != nil {
+		return 0, ErrInvalidProbability
+	}
+	return value, nil
+}
+
+func decimalMicros(raw string, maximumUnits int32) (int32, error) {
 	if raw == "" || raw != strings.TrimSpace(raw) || len(raw) > 128 {
 		return 0, ErrInvalidProbability
 	}
@@ -46,7 +54,8 @@ func ProbabilityMicros(raw string) (int32, error) {
 	} else if scale < 0 {
 		numerator.Mul(numerator, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(-scale)), nil))
 	}
-	if numerator.Cmp(denominator) > 0 {
+	maximum := new(big.Int).Mul(denominator, big.NewInt(int64(maximumUnits)))
+	if numerator.Cmp(maximum) > 0 {
 		return 0, ErrInvalidProbability
 	}
 	scaled := new(big.Int).Mul(numerator, big.NewInt(int64(ProbabilityScale)))
@@ -55,7 +64,7 @@ func ProbabilityMicros(raw string) (int32, error) {
 	if new(big.Int).Lsh(remainder, 1).Cmp(denominator) >= 0 {
 		quotient.Add(quotient, big.NewInt(1))
 	}
-	if !quotient.IsInt64() || quotient.Int64() < 0 || quotient.Int64() > int64(ProbabilityScale) {
+	if !quotient.IsInt64() || quotient.Int64() < 0 || quotient.Int64() > int64(maximumUnits)*int64(ProbabilityScale) {
 		return 0, ErrInvalidProbability
 	}
 	return int32(quotient.Int64()), nil
