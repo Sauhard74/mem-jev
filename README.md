@@ -67,6 +67,7 @@ See [Jev operations](docs/runbooks/jev.md) before enabling tenant traffic. The l
 - [Jev judgment-ledger design](docs/superpowers/specs/2026-09-20-jev-judgment-ledger-design.md)
 - [Production deployment and rollback](docs/runbooks/production-deploy.md)
 - [Encrypted backup and verified restore](docs/runbooks/backup-restore.md)
+- [Tenant erasure](docs/runbooks/tenant-erasure.md)
 
 ## Controlled production launch
 

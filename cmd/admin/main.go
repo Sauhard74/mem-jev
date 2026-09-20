@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -24,6 +26,26 @@ func surrealAuthScope() storesurreal.AuthScope {
 	return storesurreal.AuthScopeRoot
 }
 
+func openErasureLedger() (*os.File, error) {
+	if os.Getenv("MEMJEV_ERASURE_LEDGER_REPLAY") == "true" {
+		return nil, nil
+	}
+	path := os.Getenv("MEMJEV_ERASURE_LEDGER_FILE")
+	if path == "" {
+		return nil, errors.New("erasure ledger path is required")
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		_ = file.Close()
+		return nil, errors.New("erasure ledger must be a mode-0600 regular file")
+	}
+	return file, nil
+}
+
 func run() int {
 	if len(os.Args) != 2 || os.Args[1] != "erase-tenant" {
 		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant < request.json")
@@ -35,6 +57,18 @@ func run() int {
 	if err := decoder.Decode(&request); err != nil {
 		fmt.Fprintln(os.Stderr, "erasure request rejected")
 		return 2
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || erasure.ValidateRequest(request) != nil {
+		fmt.Fprintln(os.Stderr, "erasure request rejected")
+		return 2
+	}
+	ledger, err := openErasureLedger()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "erasure ledger unavailable")
+		return 1
+	}
+	if ledger != nil {
+		defer func() { _ = ledger.Close() }()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -76,6 +110,12 @@ func run() int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tenant erasure failed")
 		return 1
+	}
+	if ledger != nil {
+		if err = json.NewEncoder(ledger).Encode(request); err != nil || ledger.Sync() != nil {
+			fmt.Fprintln(os.Stderr, "erasure ledger write failed")
+			return 1
+		}
 	}
 	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"request_id": receipt.RequestID, "tenant_hash": receipt.TenantHash, "completed_at": receipt.CompletedAt, "content_hash": receipt.ContentHash}); err != nil {
 		return 1

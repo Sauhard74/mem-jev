@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sauhard74/mem-jev/internal/erasure"
 	surrealdb "github.com/surrealdb/surrealdb.go"
@@ -15,6 +16,46 @@ import (
 type ErasureRepository struct{ db *surrealdb.DB }
 
 func NewErasureRepository(db *surrealdb.DB) *ErasureRepository { return &ErasureRepository{db: db} }
+
+func (repository *ErasureRepository) BeginErasure(ctx context.Context, tenantID, requestID string) error {
+	if repository == nil || repository.db == nil {
+		return erasure.ErrInvalidRequest
+	}
+	tenantHash, hashErr := erasure.TenantHash(tenantID)
+	if hashErr != nil || strings.TrimSpace(requestID) == "" {
+		return erasure.ErrInvalidRequest
+	}
+	if existing, found, err := readErasureFence(ctx, repository.db, tenantID); err != nil {
+		return databaseFailure("read tenant erasure fence", err)
+	} else if found {
+		if existing != requestID {
+			return erasure.ErrConflict
+		}
+		return nil
+	}
+	now := time.Now().UTC()
+	_, err := surrealdb.Create[map[string]any](ctx, repository.db, models.NewRecordID("tenant_erasure_fence", tenantHash), map[string]any{"tenant_id": tenantID, "request_id": requestID, "state": "erasing", "created_at": now, "updated_at": now})
+	if err != nil {
+		if existing, found, readErr := readErasureFence(ctx, repository.db, tenantID); readErr == nil && found && existing == requestID {
+			return nil
+		}
+		return databaseFailure("begin tenant erasure", err)
+	}
+	return nil
+}
+
+func readErasureFence[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender S, tenantID string) (string, bool, error) {
+	type fenceRow struct {
+		RequestID string `json:"request_id"`
+	}
+	results, err := surrealdb.Query[[]fenceRow](ctx, sender, "SELECT request_id FROM tenant_erasure_fence WHERE tenant_id = $tenant_id LIMIT 1", map[string]any{"tenant_id": tenantID})
+	if err != nil || results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return "", false, err
+	}
+	return (*results)[0].Result[0].RequestID, true, nil
+}
 
 func (repository *ErasureRepository) FindErasure(ctx context.Context, requestID string) (erasure.Receipt, bool, error) {
 	if repository == nil || repository.db == nil {
@@ -69,11 +110,21 @@ func (repository *ErasureRepository) CommitErasure(ctx context.Context, tenantID
 			_ = tx.Cancel(context.Background())
 		}
 	}()
+	type fenceRow struct {
+		RequestID string `json:"request_id"`
+	}
+	fences, fenceErr := surrealdb.Query[[]fenceRow](ctx, tx, "SELECT request_id FROM tenant_erasure_fence WHERE tenant_id = $tenant_id LIMIT 1", map[string]any{"tenant_id": tenantID})
+	if fenceErr != nil || fences == nil || len(*fences) == 0 || len((*fences)[0].Result) == 0 || (*fences)[0].Result[0].RequestID != receipt.RequestID {
+		return erasure.Receipt{}, erasure.ErrConflict
+	}
 	for _, table := range tenantErasureTables {
 		statement := "DELETE " + table + " WHERE tenant_id = $tenant_id"
 		if _, err = surrealdb.Query[any](ctx, tx, statement, map[string]any{"tenant_id": tenantID}); err != nil {
 			return erasure.Receipt{}, databaseFailure("delete tenant table "+table, err)
 		}
+	}
+	if _, err = surrealdb.Query[any](ctx, tx, "UPDATE tenant_erasure_fence SET state = 'erased', updated_at = $completed_at WHERE tenant_id = $tenant_id AND request_id = $request_id", map[string]any{"tenant_id": tenantID, "request_id": receipt.RequestID, "completed_at": receipt.CompletedAt}); err != nil {
+		return erasure.Receipt{}, databaseFailure("complete tenant erasure fence", err)
 	}
 	row := map[string]any{
 		"request_id": receipt.RequestID, "tenant_hash": receipt.TenantHash, "archive_objects_deleted": receipt.ArchiveObjectsDeleted,

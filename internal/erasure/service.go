@@ -12,6 +12,7 @@ type ArchiveEraser interface {
 
 type Repository interface {
 	FindErasure(context.Context, string) (Receipt, bool, error)
+	BeginErasure(context.Context, string, string) error
 	CommitErasure(context.Context, string, Receipt) (Receipt, error)
 }
 
@@ -29,7 +30,7 @@ func NewService(archives ArchiveEraser, repository Repository, clock func() time
 }
 
 func (service *Service) Erase(ctx context.Context, request Request) (Receipt, error) {
-	if service == nil || ctx == nil || !validRequest(request) {
+	if service == nil || ctx == nil || ValidateRequest(request) != nil {
 		return Receipt{}, ErrInvalidRequest
 	}
 	if err := ctx.Err(); err != nil {
@@ -43,6 +44,9 @@ func (service *Service) Erase(ctx context.Context, request Request) (Receipt, er
 			return Receipt{}, ErrConflict
 		}
 		return existing, nil
+	}
+	if err := service.repository.BeginErasure(ctx, request.TenantID, request.RequestID); err != nil {
+		return Receipt{}, err
 	}
 	deleted, err := service.archives.EraseTenant(ctx, request.TenantID)
 	if err != nil {

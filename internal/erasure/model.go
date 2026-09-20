@@ -16,9 +16,9 @@ var (
 )
 
 type Request struct {
-	TenantID     string
-	RequestID    string
-	Confirmation string
+	TenantID     string `json:"tenant_id"`
+	RequestID    string `json:"request_id"`
+	Confirmation string `json:"confirmation"`
 }
 
 type Receipt struct {
@@ -71,4 +71,11 @@ func ValidateReceipt(receipt Receipt) error {
 
 func validRequest(request Request) bool {
 	return tenantPattern.MatchString(request.TenantID) && requestPattern.MatchString(request.RequestID) && request.Confirmation == "erase:"+request.TenantID+":"+request.RequestID
+}
+
+func ValidateRequest(request Request) error {
+	if !validRequest(request) {
+		return ErrInvalidRequest
+	}
+	return nil
 }

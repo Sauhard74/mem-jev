@@ -21,7 +21,7 @@ func TestServiceErasesArchiveBeforeDatabaseAndReturnsStableReceipt(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(order) != 2 || order[0] != "archive" || order[1] != "database" {
+	if len(order) != 3 || order[0] != "fence" || order[1] != "archive" || order[2] != "database" {
 		t.Fatalf("operation order = %#v", order)
 	}
 	if receipt.RequestID != request.RequestID || receipt.ArchiveObjectsDeleted != 3 || receipt.CompletedAt != now || receipt.TenantHash == "" || receipt.ContentHash == "" {
@@ -40,7 +40,7 @@ func TestServiceStopsBeforeDatabaseWhenArchiveErasureFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = service.Erase(context.Background(), Request{TenantID: "tenant_a", RequestID: "erase_01JABCDE1234567890", Confirmation: "erase:tenant_a:erase_01JABCDE1234567890"})
-	if err == nil || len(order) != 1 || order[0] != "archive" {
+	if err == nil || len(order) != 2 || order[0] != "fence" || order[1] != "archive" {
 		t.Fatalf("error=%v order=%#v", err, order)
 	}
 }
@@ -83,6 +83,13 @@ type recordingRepository struct {
 
 func (r *recordingRepository) FindErasure(_ context.Context, _ string) (Receipt, bool, error) {
 	return r.receipt, r.receipt.ContentHash != "", nil
+}
+
+func (r *recordingRepository) BeginErasure(_ context.Context, _ string, _ string) error {
+	if r.order != nil {
+		*r.order = append(*r.order, "fence")
+	}
+	return nil
 }
 
 func (r *recordingRepository) CommitErasure(_ context.Context, _ string, receipt Receipt) (Receipt, error) {
