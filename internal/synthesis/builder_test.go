@@ -34,6 +34,9 @@ func TestBuilderCreatesOnlyDeclaredCausalEdges(t *testing.T) {
 	if !graph.AutoPromotable || graph.Hash == "" {
 		t.Fatalf("graph = %#v", graph)
 	}
+	if graph.SchemaVersion != "causal-graph.v3" || len(graph.Nodes[1].Preconditions) != 1 || graph.Nodes[1].Preconditions[0].ID != "workspace.exists" || graph.Nodes[1].Preconditions[0].ResourceName != "workspace" {
+		t.Fatalf("preconditions were not retained: %#v", graph.Nodes[1])
+	}
 }
 
 func TestBuilderDoesNotTreatTemporalAdjacencyAsCausality(t *testing.T) {
@@ -136,7 +139,7 @@ func registryWithContracts(t *testing.T) *toolcontract.MemoryRegistry {
 }
 
 func contract(name string, writes, reads []toolcontract.ResourceSpec) toolcontract.Manifest {
-	return toolcontract.Manifest{
+	manifest := toolcontract.Manifest{
 		SchemaVersion: "tool-contract.v1", ToolID: name, Version: "1.0.0",
 		Inputs:  []toolcontract.FieldSpec{{Name: "resource_id", Type: "string", Required: len(reads) > 0, Sanitizer: toolcontract.SanitizerToken}},
 		Outputs: []toolcontract.FieldSpec{{Name: "result", Type: "string", Sanitizer: toolcontract.SanitizerText}},
@@ -147,6 +150,10 @@ func contract(name string, writes, reads []toolcontract.ResourceSpec) toolcontra
 		VerificationMethods: []toolcontract.VerificationMethod{{ID: "success", EvidenceClass: "tool_postcondition"}},
 		Compatibility:       []toolcontract.CompatibilityRange{{MinimumInclusive: "1.0.0", MaximumExclusive: "2.0.0"}},
 	}
+	if len(reads) > 0 {
+		manifest.Preconditions = []toolcontract.PredicateSpec{{ID: "workspace.exists", Resource: reads[0].Name}}
+	}
+	return manifest
 }
 
 func graphBatch() domain.CanonicalBatch {

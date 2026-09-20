@@ -12,7 +12,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
 )
 
-const graphSchemaVersion = "causal-graph.v2"
+const graphSchemaVersion = "causal-graph.v3"
 
 type Builder struct {
 	registry toolcontract.Registry
@@ -96,6 +96,9 @@ func buildNode(tenantID domain.TenantID, event domain.CanonicalEvent, resolved t
 	for _, effect := range resolved.Manifest.Effects {
 		node.Effects = append(node.Effects, effect.Name)
 	}
+	for _, predicate := range resolved.Manifest.Preconditions {
+		node.Preconditions = append(node.Preconditions, PredicateReference{ID: predicate.ID, ResourceName: predicate.Resource})
+	}
 	sort.Strings(node.Effects)
 	for _, predicate := range resolved.Manifest.SuccessPredicates {
 		node.SuccessPredicates = append(node.SuccessPredicates, predicate.ID)
@@ -105,6 +108,12 @@ func buildNode(tenantID domain.TenantID, event domain.CanonicalEvent, resolved t
 	}
 	sort.Strings(node.SuccessPredicates)
 	sort.Strings(node.VerificationMethods)
+	sort.Slice(node.Preconditions, func(i, j int) bool {
+		if node.Preconditions[i].ID != node.Preconditions[j].ID {
+			return node.Preconditions[i].ID < node.Preconditions[j].ID
+		}
+		return node.Preconditions[i].ResourceName < node.Preconditions[j].ResourceName
+	})
 	if resolved.Opaque {
 		return node, nil
 	}

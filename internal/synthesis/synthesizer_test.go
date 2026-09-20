@@ -1,7 +1,10 @@
 package synthesis_test
 
 import (
+	"errors"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sauhard74/mem-jev/internal/domain"
@@ -37,6 +40,16 @@ func TestSynthesizerRetainsProvenAndUncertainStepsAndScopesFailures(t *testing.T
 	}
 	if len(result.NegativePaths) != 1 || !result.NegativePaths[0].CompatibleWith(domain.CompatibilityScope{EnvironmentHash: "env-1", ToolHash: "tools-1", ResourceHash: "resources-1"}) || result.NegativePaths[0].CompatibleWith(domain.CompatibilityScope{EnvironmentHash: "other", ToolHash: "tools-1", ResourceHash: "resources-1"}) {
 		t.Fatalf("negative paths = %#v", result.NegativePaths)
+	}
+	if result.SchemaVersion != "synthesis.v2" || len(result.Steps[0].Writes) != 1 || result.Steps[0].Writes[0].IdentityHash != strings.Repeat("a", 64) || len(result.Steps[1].Reads) != 1 || len(result.Steps[1].Preconditions) != 1 || result.Steps[1].Preconditions[0].ID != "workspace.exists" || len(result.Steps[1].Effects) != 1 || result.Steps[1].Effects[0] != "filesystem.write" || result.Steps[1].Risk != "medium" || result.Steps[1].SideEffect != "write" || len(result.Steps[2].SuccessPredicates) != 1 {
+		t.Fatalf("typed step metadata = %#v", result.Steps)
+	}
+	for _, step := range result.Steps {
+		for _, resource := range append(append([]domain.ProcedureResource(nil), step.Reads...), step.Writes...) {
+			if resource.IdentityHash == strings.Repeat("f", 64) {
+				t.Fatal("dead-branch resource leaked into synthesized procedure")
+			}
+		}
 	}
 }
 
@@ -80,8 +93,24 @@ func TestSynthesizerIsStableAcrossSetInputOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Hash != second.Hash || !slices.Equal(first.Steps, second.Steps) || !slices.Equal(first.Edges, second.Edges) {
+	if first.Hash != second.Hash || !reflect.DeepEqual(first.Steps, second.Steps) || !slices.Equal(first.Edges, second.Edges) {
 		t.Fatalf("outputs differ: %#v %#v", first, second)
+	}
+}
+
+func TestSynthesizerRejectsConflictingRetainedResourceMetadata(t *testing.T) {
+	request := validSynthesisRequest()
+	request.Graph.Nodes[0].Writes = append(request.Graph.Nodes[0].Writes, synthesis.Resource{ID: "res_" + strings.Repeat("a", 64), Name: "workspace", Type: "repository", Namespace: "repo", IdentityHash: strings.Repeat("a", 64), SchemaVersion: "v2"})
+	if _, err := synthesis.Synthesize(request); !errors.Is(err, synthesis.ErrInvalidSynthesisRequest) {
+		t.Fatalf("conflicting resource error = %v", err)
+	}
+}
+
+func TestSynthesizerRejectsConflictingResourceMetadataAcrossRetainedSteps(t *testing.T) {
+	request := validSynthesisRequest()
+	request.Graph.Nodes[1].Reads[0].SchemaVersion = "v2"
+	if _, err := synthesis.Synthesize(request); !errors.Is(err, synthesis.ErrInvalidSynthesisRequest) {
+		t.Fatalf("cross-step resource conflict error = %v", err)
 	}
 }
 
@@ -95,13 +124,14 @@ func validSynthesisRequest() synthesis.Request {
 }
 
 func synthesisGraph() synthesis.Graph {
+	workspace := synthesis.Resource{ID: "res_" + strings.Repeat("a", 64), Name: "workspace", Type: "repository", Namespace: "repo", IdentityHash: strings.Repeat("a", 64), SchemaVersion: "v1"}
 	nodes := []synthesis.Node{
-		{ID: "prepare", Position: 0, ToolName: "prepare", ToolContractVersionID: "tcv_prepare", Succeeded: true},
-		{ID: "execute", Position: 1, ToolName: "execute", ToolContractVersionID: "tcv_execute", Succeeded: true, SideEffect: "write"},
-		{ID: "verify", Position: 2, ToolName: "verify", ToolContractVersionID: "tcv_verify", Succeeded: true},
-		{ID: "ambiguous", Position: 3, ToolName: "inspect", ToolContractVersionID: "tcv_inspect", Succeeded: true},
-		{ID: "dead", Position: 4, ToolName: "dead", ToolContractVersionID: "tcv_dead", Succeeded: true},
-		{ID: "failed", Position: 5, ToolName: "failed", ToolContractVersionID: "tcv_failed", Succeeded: false},
+		{ID: "prepare", Position: 0, ToolName: "prepare", ToolContractVersionID: "tcv_prepare", Succeeded: true, SideEffect: "none", Risk: "low", Writes: []synthesis.Resource{workspace}},
+		{ID: "execute", Position: 1, ToolName: "execute", ToolContractVersionID: "tcv_execute", Succeeded: true, SideEffect: "write", Risk: "medium", Reads: []synthesis.Resource{workspace}, Writes: []synthesis.Resource{workspace}, Effects: []string{"filesystem.write"}, Preconditions: []synthesis.PredicateReference{{ID: "workspace.exists", ResourceName: "workspace"}}},
+		{ID: "verify", Position: 2, ToolName: "verify", ToolContractVersionID: "tcv_verify", Succeeded: true, SideEffect: "read", Risk: "low", Reads: []synthesis.Resource{workspace}, SuccessPredicates: []string{"output.exists"}},
+		{ID: "ambiguous", Position: 3, ToolName: "inspect", ToolContractVersionID: "tcv_inspect", Succeeded: true, SideEffect: "read", Risk: "low", Reads: []synthesis.Resource{workspace}},
+		{ID: "dead", Position: 4, ToolName: "dead", ToolContractVersionID: "tcv_dead", Succeeded: true, SideEffect: "write", Risk: "low", Writes: []synthesis.Resource{{ID: "res_" + strings.Repeat("f", 64), Name: "dead", Type: "file", Namespace: "tmp", IdentityHash: strings.Repeat("f", 64)}}},
+		{ID: "failed", Position: 5, ToolName: "failed", ToolContractVersionID: "tcv_failed", Succeeded: false, SideEffect: "write", Risk: "low"},
 	}
 	return synthesis.Graph{
 		SchemaVersion: "causal-graph.v1", TraceID: "tr_one", Nodes: nodes, AutoPromotable: true, Hash: "graph-hash",

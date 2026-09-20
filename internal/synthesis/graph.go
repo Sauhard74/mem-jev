@@ -31,6 +31,11 @@ type Resource struct {
 	SchemaVersion string `json:"schema_version,omitempty"`
 }
 
+type PredicateReference struct {
+	ID           string `json:"id"`
+	ResourceName string `json:"resource_name,omitempty"`
+}
+
 type Node struct {
 	ID                    domain.EventID               `json:"id"`
 	Position              uint32                       `json:"position"`
@@ -43,6 +48,7 @@ type Node struct {
 	Risk                  toolcontract.RiskClass       `json:"risk"`
 	Effects               []string                     `json:"effects,omitempty"`
 	CompensationBoundary  bool                         `json:"compensation_boundary"`
+	Preconditions         []PredicateReference         `json:"preconditions,omitempty"`
 	SuccessPredicates     []string                     `json:"success_predicates,omitempty"`
 	VerificationMethods   []string                     `json:"verification_methods,omitempty"`
 	Reads                 []Resource                   `json:"reads,omitempty"`

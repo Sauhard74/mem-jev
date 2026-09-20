@@ -240,7 +240,7 @@ func buildTemporalTLS(configuration config.TemporalConfig) (*tls.Config, error) 
 func synthesisVersions() synthesis.Versions {
 	return synthesis.Versions{
 		Sanitizer: "sanitizer.v1", Registry: "registry.v1", Policy: "outcome-policy.v1",
-		GraphBuilder: "causal-graph.v2", Synthesizer: "synthesis.v1",
+		GraphBuilder: "causal-graph.v3", Synthesizer: "synthesis.v2",
 	}
 }
 
