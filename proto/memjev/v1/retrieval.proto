@@ -58,6 +58,7 @@ message RetrievalProvenance {
   repeated string index_manifest_ids = 5;
   repeated string degraded_channels = 6;
   bool approximate_candidates = 7;
+  repeated string degraded_enhancements = 8;
 }
 
 enum PlanNoveltyClass {
@@ -153,6 +154,18 @@ message CandidateExplanation {
   int64 fused_rank_score = 5;
   int64 final_score = 6;
   uint32 final_rank = 7;
+  string semantic_disposition = 8;
+  string semantic_judgment_key = 9;
+  string semantic_content_hash = 10;
+  string semantic_provider = 11;
+  string semantic_model = 12;
+  string semantic_rubric_manifest_id = 13;
+  repeated RankedFeature semantic_features = 14;
+}
+
+message RankedFeature {
+  string name = 1;
+  int32 value = 2;
 }
 
 message ExplainRetrievalResponse {

@@ -37,7 +37,7 @@ func (h *retrievalHandler) Retrieve(ctx context.Context, request *connect.Reques
 	if h.service == nil || h.currentPolicyVersion == "" {
 		return nil, safeConnectError(ctx, connect.CodeUnavailable, "retrieval_unavailable", true)
 	}
-	result, err := h.service.Retrieve(ctx, retrieval.ServiceRequest{TenantID: principal.TenantID, CurrentPolicyVersion: h.currentPolicyVersion, RequestIdentityHash: metadata.IdempotencyKeyHash, Input: retrieval.InputFromProto(request.Msg), RecallAllowed: principal.Consent == policy.RecallOnly || principal.Consent == policy.LearnAndRecall, AllowedResidencyRegions: []string{principal.Region}})
+	result, err := h.service.Retrieve(ctx, retrieval.ServiceRequest{TenantID: principal.TenantID, CurrentPolicyVersion: h.currentPolicyVersion, RequestIdentityHash: metadata.IdempotencyKeyHash, Input: retrieval.InputFromProto(request.Msg), RecallAllowed: principal.Consent == policy.RecallOnly || principal.Consent == policy.LearnAndRecall, ExternalInferenceAllowed: principal.AllowExternalInference, AllowedResidencyRegions: []string{principal.Region}})
 	if err != nil {
 		observability.RecordRetrieval(ctx, observability.RetrievalMetrics{ResultCode: retrievalMetricCode(err), Latency: time.Since(started)})
 		return nil, mapDomainError(ctx, err)
@@ -80,7 +80,7 @@ func retrieveResponse(result retrieval.ServiceResponse) *memjevv1.RetrieveRespon
 	for index, item := range result.Candidates {
 		candidates[index] = &memjevv1.RetrievalCandidate{ProcedureVersionId: item.VersionID, ProcedureId: item.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: lifecycle(item.Lifecycle), ObservedEndToEnd: item.ObservedEndToEnd, AdvisoryOnly: item.AdvisoryOnly}
 	}
-	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate), Plan: executablePlan(result.Plan)}
+	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.EnhancementDegraded, result.Approximate), Plan: executablePlan(result.Plan)}
 }
 
 func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalResponse {
@@ -94,9 +94,23 @@ func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalRes
 		for channelIndex, channel := range item.SourceChannels {
 			channels[channelIndex] = string(channel)
 		}
-		candidates[index] = &memjevv1.CandidateExplanation{ProcedureVersionId: item.VersionID, Eligible: item.Eligible, SourceChannels: channels, Facts: facts, FusedRankScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.FinalRank}
+		candidate := &memjevv1.CandidateExplanation{ProcedureVersionId: item.VersionID, Eligible: item.Eligible, SourceChannels: channels, Facts: facts, FusedRankScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.FinalRank}
+		if item.Semantic != nil {
+			features := make([]*memjevv1.RankedFeature, len(item.Semantic.Features))
+			for featureIndex, feature := range item.Semantic.Features {
+				features[featureIndex] = &memjevv1.RankedFeature{Name: feature.Name, Value: feature.Value}
+			}
+			candidate.SemanticDisposition = item.Semantic.Disposition
+			candidate.SemanticJudgmentKey = item.Semantic.JudgmentKey
+			candidate.SemanticContentHash = item.Semantic.ContentHash
+			candidate.SemanticProvider = item.Semantic.Provider
+			candidate.SemanticModel = item.Semantic.Model
+			candidate.SemanticRubricManifestId = item.Semantic.RubricManifestID
+			candidate.SemanticFeatures = features
+		}
+		candidates[index] = candidate
 	}
-	response := &memjevv1.ExplainRetrievalResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.Approximate), Candidates: candidates}
+	response := &memjevv1.ExplainRetrievalResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.EnhancementDegraded, result.Approximate), Candidates: candidates}
 	if result.Plan != nil {
 		response.CompositionEdges = planDependencies(result.Plan.Dependencies)
 		response.PlanGaps = planGaps(result.Plan.Gaps)
@@ -165,7 +179,7 @@ func noveltyClass(value string) memjevv1.PlanNoveltyClass {
 	}
 }
 
-func provenance(snapshot retrieval.ServingSnapshot, queryHash string, degraded []retrieval.DegradedChannel, approximate bool) *memjevv1.RetrievalProvenance {
+func provenance(snapshot retrieval.ServingSnapshot, queryHash string, degraded []retrieval.DegradedChannel, enhancementDegraded []string, approximate bool) *memjevv1.RetrievalProvenance {
 	indexes := make([]string, len(snapshot.Indexes))
 	for index, item := range snapshot.Indexes {
 		indexes[index] = item.ManifestID
@@ -174,7 +188,7 @@ func provenance(snapshot retrieval.ServingSnapshot, queryHash string, degraded [
 	for index, item := range degraded {
 		degradedCodes[index] = string(item.Channel) + ":" + item.Code
 	}
-	return &memjevv1.RetrievalProvenance{ProjectionEpoch: snapshot.ProjectionEpoch, QueryHash: queryHash, PolicyVersion: snapshot.PolicyManifestID, RankerVersion: snapshot.RankerManifestID, IndexManifestIds: indexes, DegradedChannels: degradedCodes, ApproximateCandidates: approximate}
+	return &memjevv1.RetrievalProvenance{ProjectionEpoch: snapshot.ProjectionEpoch, QueryHash: queryHash, PolicyVersion: snapshot.PolicyManifestID, RankerVersion: snapshot.RankerManifestID, IndexManifestIds: indexes, DegradedChannels: degradedCodes, ApproximateCandidates: approximate, DegradedEnhancements: append([]string(nil), enhancementDegraded...)}
 }
 
 func disposition(value retrieval.RunDisposition) memjevv1.RetrievalDisposition {

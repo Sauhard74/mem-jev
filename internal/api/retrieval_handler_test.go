@@ -42,10 +42,11 @@ func (s *recordingRetrievalAPI) Explain(_ context.Context, tenantID domain.Tenan
 func TestRetrievalHTTPBindsServerAuthorityAndMapsResponse(t *testing.T) {
 	fake := &recordingRetrievalAPI{retrieveResult: retrieval.ServiceResponse{
 		RunID: "rrun_" + strings.Repeat("a", 64), Disposition: retrieval.RunSelected, QueryHash: strings.Repeat("b", 64), Approximate: true,
-		Snapshot:   retrieval.ServingSnapshot{ProjectionEpoch: 42, PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", Indexes: []retrieval.SnapshotIndex{{Channel: retrieval.ChannelExact, ManifestID: "idx_exact"}}},
-		Degraded:   []retrieval.DegradedChannel{{Channel: retrieval.ChannelGraph, Code: "deadline"}},
-		Candidates: []retrieval.SelectedCandidate{{VersionID: "pv_1", ProcedureID: "p_1", FinalScore: 77, Rank: 1, Lifecycle: "active", ObservedEndToEnd: true}},
-		Plan:       &retrieval.PlanArtifact{InjectionID: "inj_1", TaskExecutionID: "texec_1", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), ProjectionEpoch: 42, NoveltyClass: "exact", Complete: true, PlannerManifestID: "pman_1", PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", ServingConfigID: "rsc_1", DocumentSetHash: strings.Repeat("3", 64), CompatibilityGraphID: "cgraph_1", CompatibilityGraphHash: strings.Repeat("4", 64), CompatibilityMatrixHash: strings.Repeat("5", 64), CandidateSetHash: strings.Repeat("6", 64), Nodes: []retrieval.PlanNode{{Ordinal: 0, VersionID: "pv_1", InterfaceHash: strings.Repeat("7", 64)}}, ParallelGroups: []retrieval.ParallelGroup{{Ordinal: 0, NodeVersionIDs: []string{"pv_1"}}}},
+		Snapshot:            retrieval.ServingSnapshot{ProjectionEpoch: 42, PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", Indexes: []retrieval.SnapshotIndex{{Channel: retrieval.ChannelExact, ManifestID: "idx_exact"}}},
+		Degraded:            []retrieval.DegradedChannel{{Channel: retrieval.ChannelGraph, Code: "deadline"}},
+		EnhancementDegraded: []string{"circuit_open"},
+		Candidates:          []retrieval.SelectedCandidate{{VersionID: "pv_1", ProcedureID: "p_1", FinalScore: 77, Rank: 1, Lifecycle: "active", ObservedEndToEnd: true}},
+		Plan:                &retrieval.PlanArtifact{InjectionID: "inj_1", TaskExecutionID: "texec_1", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), ProjectionEpoch: 42, NoveltyClass: "exact", Complete: true, PlannerManifestID: "pman_1", PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", ServingConfigID: "rsc_1", DocumentSetHash: strings.Repeat("3", 64), CompatibilityGraphID: "cgraph_1", CompatibilityGraphHash: strings.Repeat("4", 64), CompatibilityMatrixHash: strings.Repeat("5", 64), CandidateSetHash: strings.Repeat("6", 64), Nodes: []retrieval.PlanNode{{Ordinal: 0, VersionID: "pv_1", InterfaceHash: strings.Repeat("7", 64)}}, ParallelGroups: []retrieval.ParallelGroup{{Ordinal: 0, NodeVersionIDs: []string{"pv_1"}}}},
 	}}
 	server := httptest.NewServer(retrievalTestHandler(fake, policy.LearnAndRecall))
 	defer server.Close()
@@ -59,13 +60,13 @@ func TestRetrievalHTTPBindsServerAuthorityAndMapsResponse(t *testing.T) {
 	}
 	wantIdentity := sha256.Sum256([]byte(testIdempotency))
 	got := fake.retrieveRequest
-	if got.TenantID != "tenant_a" || got.CurrentPolicyVersion != "policy-current" || got.RequestIdentityHash != hex.EncodeToString(wantIdentity[:]) || !got.RecallAllowed || len(got.AllowedResidencyRegions) != 1 || got.AllowedResidencyRegions[0] != "local" {
+	if got.TenantID != "tenant_a" || got.CurrentPolicyVersion != "policy-current" || got.RequestIdentityHash != hex.EncodeToString(wantIdentity[:]) || !got.RecallAllowed || !got.ExternalInferenceAllowed || len(got.AllowedResidencyRegions) != 1 || got.AllowedResidencyRegions[0] != "local" {
 		t.Fatalf("server authority binding = %#v", got)
 	}
 	if got.Input.Task != "Deploy app" || got.Input.Harness.Name != "codex" || len(got.Input.Tools) != 1 {
 		t.Fatalf("typed input = %#v", got.Input)
 	}
-	if response.Msg.GetRetrievalRunId() != fake.retrieveResult.RunID || response.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || len(response.Msg.GetCandidates()) != 1 || !response.Msg.GetProvenance().GetApproximateCandidates() || response.Msg.GetProvenance().GetProjectionEpoch() != 42 {
+	if response.Msg.GetRetrievalRunId() != fake.retrieveResult.RunID || response.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || len(response.Msg.GetCandidates()) != 1 || !response.Msg.GetProvenance().GetApproximateCandidates() || response.Msg.GetProvenance().GetProjectionEpoch() != 42 || len(response.Msg.GetProvenance().GetDegradedEnhancements()) != 1 || response.Msg.GetProvenance().GetDegradedEnhancements()[0] != "circuit_open" {
 		t.Fatalf("response = %#v", response.Msg)
 	}
 	if response.Msg.GetPlan().GetInjectionId() != "inj_1" || response.Msg.GetPlan().GetTaskExecutionId() != "texec_1" || len(response.Msg.GetPlan().GetNodes()) != 1 || !response.Msg.GetPlan().GetComplete() || response.Msg.GetPlan().GetProvenance().GetSelectionHash() != strings.Repeat("1", 64) {
@@ -82,7 +83,11 @@ func TestRetrievalHTTPBindsServerAuthorityAndMapsResponse(t *testing.T) {
 }
 
 func TestRetrievalHTTPRequiresIdempotencyOnlyForRetrieve(t *testing.T) {
-	fake := &recordingRetrievalAPI{explainResult: retrieval.Explanation{RunID: "rrun_" + strings.Repeat("c", 64), Disposition: retrieval.RunAbstained, DecisionCode: "no_candidates", QueryHash: strings.Repeat("d", 64), Approximate: true, Snapshot: retrieval.ServingSnapshot{ProjectionEpoch: 7, PolicyManifestID: "epm", RankerManifestID: "rkm"}}}
+	fake := &recordingRetrievalAPI{explainResult: retrieval.Explanation{
+		RunID: "rrun_" + strings.Repeat("c", 64), Disposition: retrieval.RunAbstained, DecisionCode: "no_candidates", QueryHash: strings.Repeat("d", 64), Approximate: true,
+		Snapshot: retrieval.ServingSnapshot{ProjectionEpoch: 7, PolicyManifestID: "epm", RankerManifestID: "rkm"}, EnhancementDegraded: []string{"capacity_exhausted"},
+		Candidates: []retrieval.CandidateExplanation{{VersionID: "pv_1", Eligible: true, Semantic: &retrieval.PersistedSemanticJudgment{VersionID: "pv_1", JudgmentKey: "jevj_" + strings.Repeat("e", 64), Disposition: "committed", ContentHash: strings.Repeat("f", 64), Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_v1", Features: []retrieval.PersistedFeature{{Name: "jev_intent_fit_micros", Value: 900000}}}}},
+	}}
 	server := httptest.NewServer(retrievalTestHandler(fake, policy.RecallOnly))
 	defer server.Close()
 	client := memjevv1connect.NewRetrievalServiceClient(server.Client(), server.URL)
@@ -98,8 +103,12 @@ func TestRetrievalHTTPRequiresIdempotencyOnlyForRetrieve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fake.explainTenant != "tenant_a" || fake.explainRunID != fake.explainResult.RunID || !response.Msg.GetProvenance().GetApproximateCandidates() {
+	if fake.explainTenant != "tenant_a" || fake.explainRunID != fake.explainResult.RunID || !response.Msg.GetProvenance().GetApproximateCandidates() || response.Msg.GetProvenance().GetDegradedEnhancements()[0] != "capacity_exhausted" {
 		t.Fatalf("tenant=%q run=%q response=%#v", fake.explainTenant, fake.explainRunID, response.Msg)
+	}
+	semantic := response.Msg.GetCandidates()[0]
+	if semantic.GetSemanticJudgmentKey() != "jevj_"+strings.Repeat("e", 64) || semantic.GetSemanticProvider() != "typesafe" || semantic.GetSemanticFeatures()[0].GetValue() != 900000 {
+		t.Fatalf("semantic explanation = %#v", semantic)
 	}
 }
 

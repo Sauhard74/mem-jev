@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
@@ -50,14 +51,20 @@ type EnvelopeCipher interface {
 type RunIDSource interface{ NewRunID() (string, error) }
 
 type SemanticJudge interface {
-	Judge(context.Context, SemanticJudgmentRequest) (SemanticJudgment, error)
+	Admit([]ranking.Result) ([]string, error)
+	Judge(context.Context, SemanticJudgmentRequest) SemanticJudgment
 }
 
-type SemanticJudgmentRequest struct{ QueryHash, VersionID, RubricManifestID string }
+type SemanticJudgmentRequest struct {
+	TenantID         domain.TenantID
+	Query            Query
+	Document         Document
+	PolicyManifestID string
+}
 type SemanticJudgment struct {
-	Score       int32
-	ReasonCodes []string
-	ManifestID  string
+	VersionID, JudgmentKey, Disposition, ContentHash string
+	Provider, Model, RubricManifestID                string
+	Features                                         []ranking.FeatureValue
 }
 
 type ServiceConfig struct {
@@ -68,6 +75,7 @@ type ServiceConfig struct {
 	MinimumScore      int64
 	MaximumSelections uint32
 	Aliases           AliasSet
+	SemanticJudge     SemanticJudge
 }
 
 type Service struct {
@@ -84,12 +92,13 @@ type Service struct {
 }
 
 type ServiceRequest struct {
-	TenantID                domain.TenantID
-	CurrentPolicyVersion    string
-	RequestIdentityHash     string
-	Input                   Input
-	RecallAllowed           bool
-	AllowedResidencyRegions []string
+	TenantID                 domain.TenantID
+	CurrentPolicyVersion     string
+	RequestIdentityHash      string
+	Input                    Input
+	RecallAllowed            bool
+	ExternalInferenceAllowed bool
+	AllowedResidencyRegions  []string
 }
 
 type SelectedCandidate struct {
@@ -103,16 +112,17 @@ type SelectedCandidate struct {
 }
 
 type ServiceResponse struct {
-	RunID        string
-	Disposition  RunDisposition
-	DecisionCode string
-	Candidates   []SelectedCandidate
-	Snapshot     ServingSnapshot
-	QueryHash    string
-	Degraded     []DegradedChannel
-	Approximate  bool
-	Replayed     bool
-	Plan         *PlanArtifact
+	RunID               string
+	Disposition         RunDisposition
+	DecisionCode        string
+	Candidates          []SelectedCandidate
+	Snapshot            ServingSnapshot
+	QueryHash           string
+	Degraded            []DegradedChannel
+	EnhancementDegraded []string
+	Approximate         bool
+	Replayed            bool
+	Plan                *PlanArtifact
 }
 
 type ServiceError struct {
@@ -144,7 +154,7 @@ func NewService(repository DecisionRepository, documents DocumentReader, manifes
 		requiredSeen[required] = true
 	}
 	sort.Slice(config.RequiredChannels, func(i, j int) bool { return config.RequiredChannels[i] < config.RequiredChannels[j] })
-	return &Service{repository: repository, documents: documents, manifests: manifests, effects: effects, cipher: cipher, ids: ids, clock: time.Now, config: config, plans: plans}, nil
+	return &Service{repository: repository, documents: documents, manifests: manifests, effects: effects, cipher: cipher, ids: ids, clock: time.Now, config: config, semantic: config.SemanticJudge, plans: plans}, nil
 }
 
 func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (ServiceResponse, error) {
@@ -226,7 +236,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	}
 	executions, hits := persistedChannels(collection)
 	if missing := requiredDegradation(collection.Degraded, s.config.RequiredChannels); missing != "" {
-		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunFailed, "required_channel_unavailable:"+missing, nil, started)
+		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, nil, RunFailed, "required_channel_unavailable:"+missing, nil, started)
 		if buildErr != nil {
 			return ServiceResponse{}, buildErr
 		}
@@ -237,11 +247,11 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		versionIDs[index] = item.VersionID
 	}
 	if len(versionIDs) == 0 {
-		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunAbstained, "no_candidates", nil, started, collection)
+		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, nil, RunAbstained, "no_candidates", nil, started, collection)
 	}
 	documents, err := s.documents.RetrievalDocuments(ctx, request.TenantID, versionIDs, snapshot.ProjectionEpoch)
 	if err != nil || len(documents) != len(versionIDs) {
-		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunFailed, "candidate_snapshot_missing", nil, started)
+		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, nil, RunFailed, "candidate_snapshot_missing", nil, started)
 		if buildErr != nil {
 			return ServiceResponse{}, buildErr
 		}
@@ -286,11 +296,15 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		rankingCandidates = append(rankingCandidates, ranking.Candidate{VersionID: document.ProcedureVersionID, ChannelRanks: ranks, Features: rankingFeatures(ranker, document), VerificationStrength: int32(document.VerificationStrength), ObservedEndToEnd: document.ObservedEndToEnd})
 	}
 	if len(rankingCandidates) == 0 {
-		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, nil, RunAbstained, "no_eligible_candidates", nil, started, collection)
+		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, nil, nil, RunAbstained, "no_eligible_candidates", nil, started, collection)
 	}
 	ranked, err := ranking.Rank(ranker, rankingCandidates)
 	if err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "ranking_failed", RunID: runID, Err: err}
+	}
+	semanticJudgments := []PersistedSemanticJudgment(nil)
+	if s.semantic != nil && request.ExternalInferenceAllowed && supportsSemanticFeatures(ranker) {
+		ranked, semanticJudgments = s.applySemanticJudgments(ctx, request.TenantID, query, snapshot.PolicyManifestID, ranker, docByID, rankingCandidates, ranked)
 	}
 	persistedRanks := persistedRanking(ranked, rankingCandidates)
 	selectedIDs := make([]string, 0, min(int(s.config.MaximumSelections), len(ranked)))
@@ -309,11 +323,11 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		responseCandidates = append(responseCandidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd})
 	}
 	if len(selectedIDs) == 0 {
-		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunAbstained, "below_confidence_threshold", nil, started, collection)
+		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunAbstained, "below_confidence_threshold", nil, started, collection)
 		response.Candidates = responseCandidates
 		return response, persistErr
 	}
-	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
+	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunSelected, "", selectedIDs, started, collection)
 	response.Candidates = responseCandidates
 	if err != nil {
 		return response, err
@@ -367,7 +381,7 @@ func (s *Service) runID(tenantID domain.TenantID, requestIdentityHash string) (s
 }
 
 func (s *Service) responseFromRun(ctx context.Context, run Run) (ServiceResponse, error) {
-	response := ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Replayed: true}
+	response := ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Replayed: true, EnhancementDegraded: semanticDegradations(run.SemanticJudgments)}
 	for _, execution := range run.ChannelExecutions {
 		response.Approximate = response.Approximate || execution.Approximate && execution.Complete
 		if !execution.Complete {
@@ -444,8 +458,8 @@ func (s *Service) attachPlan(ctx context.Context, response ServiceResponse, run 
 	return response, nil
 }
 
-func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {
-	run, err := s.buildRun(runID, tenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, ranks, disposition, code, selected, started)
+func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, semantic []PersistedSemanticJudgment, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {
+	run, err := s.buildRun(runID, tenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, ranks, semantic, disposition, code, selected, started)
 	if err != nil {
 		return ServiceResponse{}, err
 	}
@@ -472,7 +486,18 @@ func (s *Service) persistRun(ctx context.Context, run Run, collection CandidateC
 		}
 		return ServiceResponse{}, &ServiceError{Code: code, RunID: run.ID, Err: ErrServiceUnavailable}
 	}
-	return ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Degraded: append([]DegradedChannel(nil), collection.Degraded...), Approximate: collection.Approximate}, nil
+	return ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Degraded: append([]DegradedChannel(nil), collection.Degraded...), EnhancementDegraded: semanticDegradations(run.SemanticJudgments), Approximate: collection.Approximate}, nil
+}
+
+func semanticDegradations(judgments []PersistedSemanticJudgment) []string {
+	result := []string{}
+	for _, judgment := range judgments {
+		if judgment.Disposition != "committed" && judgment.Disposition != "cache_hit" {
+			result = append(result, judgment.VersionID+":"+judgment.Disposition)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (s *Service) persistedWinner(ctx context.Context, tenantID domain.TenantID, runID string) (Run, error) {
@@ -497,12 +522,12 @@ func (s *Service) persistedWinner(ctx context.Context, tenantID domain.TenantID,
 	return Run{}, lastErr
 }
 
-func (s *Service) buildRun(id string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time) (Run, error) {
+func (s *Service) buildRun(id string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, semantic []PersistedSemanticJudgment, disposition RunDisposition, code string, selected []string, started time.Time) (Run, error) {
 	completed := s.clock().UTC()
 	if completed.Before(started) {
 		completed = started
 	}
-	return BuildRun(RunInput{ID: id, TenantID: tenantID, Query: query, RequestContextHash: requestContextHash, QueryEnvelope: envelope, Snapshot: snapshot, ChannelExecutions: executions, Hits: hits, Gates: gates, Ranked: ranks, Disposition: disposition, DecisionCode: code, SelectedVersionIDs: selected, CreatedAt: started, CompletedAt: completed, ExpiresAt: completed.Add(s.config.Retention)})
+	return BuildRun(RunInput{ID: id, TenantID: tenantID, Query: query, RequestContextHash: requestContextHash, QueryEnvelope: envelope, Snapshot: snapshot, ChannelExecutions: executions, Hits: hits, Gates: gates, Ranked: ranks, SemanticJudgments: semantic, Disposition: disposition, DecisionCode: code, SelectedVersionIDs: selected, CreatedAt: started, CompletedAt: completed, ExpiresAt: completed.Add(s.config.Retention)})
 }
 
 func retrievalRequestContextHash(request ServiceRequest, query Query) (string, error) {
@@ -519,11 +544,12 @@ func retrievalRequestContextHash(request ServiceRequest, query Query) (string, e
 		}
 	}
 	_, hash, err := canonical.MarshalAndHash(struct {
-		TenantID                domain.TenantID `json:"tenant_id"`
-		QueryHash               string          `json:"query_hash"`
-		RecallAllowed           bool            `json:"recall_allowed"`
-		AllowedResidencyRegions []string        `json:"allowed_residency_regions"`
-	}{request.TenantID, query.Hash, request.RecallAllowed, unique})
+		TenantID                 domain.TenantID `json:"tenant_id"`
+		QueryHash                string          `json:"query_hash"`
+		RecallAllowed            bool            `json:"recall_allowed"`
+		ExternalInferenceAllowed bool            `json:"external_inference_allowed"`
+		AllowedResidencyRegions  []string        `json:"allowed_residency_regions"`
+	}{request.TenantID, query.Hash, request.RecallAllowed, request.ExternalInferenceAllowed, unique})
 	if err != nil {
 		return "", fmt.Errorf("canonicalize retrieval request context: %w", err)
 	}
@@ -633,6 +659,122 @@ func rankingFeatures(manifest ranking.Manifest, document Document) []ranking.Fea
 		result = append(result, ranking.FeatureValue{Name: spec.Name, Value: int32(value)})
 	}
 	return result
+}
+
+var semanticFeatureNames = []string{
+	"jev_intent_fit_micros",
+	"jev_non_contradiction_micros",
+	"jev_partial_plan_micros",
+	"jev_preconditions_micros",
+	"jev_task_coverage_micros",
+}
+
+func supportsSemanticFeatures(manifest ranking.Manifest) bool {
+	specs := make(map[string]ranking.FeatureSpec, len(manifest.Features))
+	for _, spec := range manifest.Features {
+		specs[spec.Name] = spec
+	}
+	for _, name := range semanticFeatureNames {
+		spec, ok := specs[name]
+		if !ok || spec.Minimum != 0 || spec.Maximum != 1_000_000 || spec.Missing < 0 || spec.Missing > 1_000_000 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) applySemanticJudgments(ctx context.Context, tenantID domain.TenantID, query Query, policyManifestID string, manifest ranking.Manifest, documents map[string]Document, candidates []ranking.Candidate, preliminary []ranking.Result) ([]ranking.Result, []PersistedSemanticJudgment) {
+	admitted, err := s.semantic.Admit(preliminary)
+	if err != nil || len(admitted) == 0 || len(admitted) > 32 {
+		return preliminary, nil
+	}
+	eligible := make(map[string]struct{}, len(preliminary))
+	for _, item := range preliminary {
+		eligible[item.VersionID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(admitted))
+	for _, versionID := range admitted {
+		if _, ok := eligible[versionID]; !ok {
+			return preliminary, nil
+		}
+		if _, duplicate := seen[versionID]; duplicate {
+			return preliminary, nil
+		}
+		seen[versionID] = struct{}{}
+	}
+	judgments := make([]SemanticJudgment, len(admitted))
+	var group sync.WaitGroup
+	for index, versionID := range admitted {
+		group.Add(1)
+		go func(position int, document Document) {
+			defer group.Done()
+			judgments[position] = s.semantic.Judge(ctx, SemanticJudgmentRequest{TenantID: tenantID, Query: query, Document: document, PolicyManifestID: policyManifestID})
+		}(index, documents[versionID])
+	}
+	group.Wait()
+	candidateCopies := make([]ranking.Candidate, len(candidates))
+	for index, candidate := range candidates {
+		candidateCopies[index] = candidate
+		candidateCopies[index].ChannelRanks = append([]ranking.ChannelRank(nil), candidate.ChannelRanks...)
+		candidateCopies[index].Features = append([]ranking.FeatureValue(nil), candidate.Features...)
+	}
+	byVersion := make(map[string]int, len(candidateCopies))
+	for index, candidate := range candidateCopies {
+		byVersion[candidate.VersionID] = index
+	}
+	persisted := make([]PersistedSemanticJudgment, 0, len(judgments))
+	for _, judgment := range judgments {
+		if !validSemanticJudgment(judgment, manifest) {
+			continue
+		}
+		features := make([]PersistedFeature, len(judgment.Features))
+		for index, feature := range judgment.Features {
+			features[index] = PersistedFeature{Name: feature.Name, Value: feature.Value}
+		}
+		persisted = append(persisted, PersistedSemanticJudgment{VersionID: judgment.VersionID, JudgmentKey: judgment.JudgmentKey, Disposition: judgment.Disposition, ContentHash: judgment.ContentHash, Provider: judgment.Provider, Model: judgment.Model, RubricManifestID: judgment.RubricManifestID, Features: features})
+		if judgment.ContentHash != "" {
+			index := byVersion[judgment.VersionID]
+			candidateCopies[index].Features = append(candidateCopies[index].Features, judgment.Features...)
+		}
+	}
+	if len(persisted) == 0 {
+		return preliminary, nil
+	}
+	reranked, err := ranking.Rank(manifest, candidateCopies)
+	if err != nil {
+		return preliminary, persisted
+	}
+	copy(candidates, candidateCopies)
+	return reranked, persisted
+}
+
+func validSemanticJudgment(judgment SemanticJudgment, manifest ranking.Manifest) bool {
+	if judgment.VersionID == "" || !strings.HasPrefix(judgment.JudgmentKey, "jevj_") || len(judgment.JudgmentKey) != len("jevj_")+64 || judgment.Disposition == "" || len(judgment.Disposition) > 128 || judgment.Provider != "typesafe" || judgment.Model == "" || judgment.RubricManifestID == "" {
+		return false
+	}
+	if judgment.ContentHash == "" {
+		return len(judgment.Features) == 0
+	}
+	if !sha256Pattern.MatchString(judgment.ContentHash) || len(judgment.Features) != len(semanticFeatureNames) {
+		return false
+	}
+	specs := make(map[string]ranking.FeatureSpec, len(manifest.Features))
+	for _, spec := range manifest.Features {
+		specs[spec.Name] = spec
+	}
+	features := append([]ranking.FeatureValue(nil), judgment.Features...)
+	sort.Slice(features, func(i, j int) bool { return features[i].Name < features[j].Name })
+	for index, name := range semanticFeatureNames {
+		if features[index].Name != name {
+			return false
+		}
+		spec, ok := specs[name]
+		if !ok || features[index].Value < spec.Minimum || features[index].Value > spec.Maximum {
+			return false
+		}
+	}
+	judgment.Features = features
+	return true
 }
 
 func persistedRanking(results []ranking.Result, candidates []ranking.Candidate) []PersistedRank {

@@ -105,6 +105,14 @@ type RetrievalMetrics struct {
 	Replayed                bool
 }
 
+type JevJudgmentMetrics struct {
+	Disposition    string
+	ProviderCalled bool
+	Latency        time.Duration
+	InputTokens    int64
+	OutputTokens   int64
+}
+
 var (
 	metricsOnce                 sync.Once
 	requests                    metric.Int64Counter
@@ -146,6 +154,10 @@ var (
 	maintenanceDeadLetters      metric.Int64Counter
 	lifecycleTransitions        metric.Int64Counter
 	experimentBudgetRejections  metric.Int64Counter
+	jevJudgments                metric.Int64Counter
+	jevLatency                  metric.Float64Histogram
+	jevInputTokens              metric.Int64Counter
+	jevOutputTokens             metric.Int64Counter
 )
 
 func initializeMetrics() {
@@ -189,6 +201,26 @@ func initializeMetrics() {
 	maintenanceDeadLetters, _ = meter.Int64Counter("memjev.maintenance.dead_letters")
 	lifecycleTransitions, _ = meter.Int64Counter("memjev.lifecycle.transitions")
 	experimentBudgetRejections, _ = meter.Int64Counter("memjev.experiment.budget_rejections")
+	jevJudgments, _ = meter.Int64Counter("memjev.jev.judgments")
+	jevLatency, _ = meter.Float64Histogram("memjev.jev.duration", metric.WithUnit("ms"))
+	jevInputTokens, _ = meter.Int64Counter("memjev.jev.input_tokens")
+	jevOutputTokens, _ = meter.Int64Counter("memjev.jev.output_tokens")
+}
+
+func RecordJevJudgment(ctx context.Context, facts JevJudgmentMetrics) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(
+		attribute.String("disposition", facts.Disposition),
+		attribute.Bool("provider.called", facts.ProviderCalled),
+	)
+	jevJudgments.Add(ctx, 1, options)
+	jevLatency.Record(ctx, float64(facts.Latency.Microseconds())/1000, options)
+	if facts.InputTokens > 0 {
+		jevInputTokens.Add(ctx, facts.InputTokens, options)
+	}
+	if facts.OutputTokens > 0 {
+		jevOutputTokens.Add(ctx, facts.OutputTokens, options)
+	}
 }
 
 func RecordMaintenanceQueue(ctx context.Context, kind string, pending int64, oldest time.Duration) {

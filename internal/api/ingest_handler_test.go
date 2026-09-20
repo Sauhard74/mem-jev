@@ -400,10 +400,11 @@ func tokenHash(token string) string {
 
 func testPrincipal(consent policy.ConsentMode) security.Principal {
 	return security.Principal{
-		TenantID: domain.TenantID("tenant_a"),
-		Region:   "local",
-		Scopes:   map[string]struct{}{security.ScopeIngestWrite: {}, security.ScopeOutcomeWrite: {}, security.ScopeRetrievalRead: {}},
-		Consent:  consent,
+		TenantID:               domain.TenantID("tenant_a"),
+		Region:                 "local",
+		Scopes:                 map[string]struct{}{security.ScopeIngestWrite: {}, security.ScopeOutcomeWrite: {}, security.ScopeRetrievalRead: {}},
+		Consent:                consent,
+		AllowExternalInference: true,
 	}
 }
 

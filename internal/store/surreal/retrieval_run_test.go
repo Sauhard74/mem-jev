@@ -11,6 +11,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/eligibility"
 	"github.com/sauhard74/mem-jev/internal/ranking"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/store/storetest"
 	surrealdb "github.com/surrealdb/surrealdb.go"
@@ -92,6 +93,44 @@ func TestSurrealRetrievalRunAcceptsCapturedHistoricalSnapshot(t *testing.T) {
 	}
 	if err = repository.SaveRetrievalRun(context.Background(), storetest.ValidRetrievalRun(t, snapshot, 'e')); err != nil {
 		t.Fatalf("save against captured snapshot: %v", err)
+	}
+}
+
+func TestSurrealRetrievalRunPersistsSemanticProvenanceAtomically(t *testing.T) {
+	db := projectionDatabase(t)
+	seedProjectionOutcomes(t, db)
+	if _, err := NewProjectionRepository(db).Publish(context.Background(), storetest.ValidProjection(t, 1, false)); err != nil {
+		t.Fatal(err)
+	}
+	seedServingManifests(t, db)
+	repository := NewRetrievalRunRepository(db)
+	config := storetest.ValidServingConfig(t, "tenant_a")
+	if err := repository.ActivateServingConfig(context.Background(), config); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := repository.AcquireServingSnapshot(context.Background(), "tenant_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := storetest.ValidRetrievalRunInput(t, snapshot, 'f')
+	input.SemanticJudgments = []retrieval.PersistedSemanticJudgment{{
+		VersionID: "pv_a", JudgmentKey: "jevj_" + strings.Repeat("a", 64), Disposition: "committed", ContentHash: strings.Repeat("b", 64),
+		Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_test", Features: []retrieval.PersistedFeature{{Name: "jev_intent_fit_micros", Value: 900_000}},
+	}}
+	run, err := retrieval.BuildRun(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.SaveRetrievalRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repository.RetrievalRun(context.Background(), "tenant_a", run.ID)
+	if err != nil || len(loaded.SemanticJudgments) != 1 || loaded.SemanticJudgments[0].ContentHash != strings.Repeat("b", 64) {
+		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+	counts, err := repository.ChildCounts(context.Background(), run.ID)
+	if err != nil || counts["retrieval_semantic_judgment"] != 1 {
+		t.Fatalf("counts=%#v err=%v", counts, err)
 	}
 }
 

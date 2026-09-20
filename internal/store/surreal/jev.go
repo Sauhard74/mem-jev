@@ -18,6 +18,43 @@ type JevRepository struct{ db *surrealdb.DB }
 
 func NewJevRepository(db *surrealdb.DB) *JevRepository { return &JevRepository{db: db} }
 
+func (repository *JevRepository) EnsureRubric(ctx context.Context, rubric jev.RubricManifest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if repository == nil || repository.db == nil || jev.ValidateRubricManifest(rubric) != nil {
+		return jev.ErrInvalidRubric
+	}
+	type row struct {
+		Hash string `json:"content_hash"`
+	}
+	rows, err := surrealdb.Query[[]row](ctx, repository.db, `SELECT content_hash FROM jev_rubric_manifest WHERE rubric_manifest_id = $id LIMIT 1`, map[string]any{"id": rubric.ID})
+	if err != nil {
+		return databaseFailure("read Jev rubric", err)
+	}
+	if rows != nil && len(*rows) > 0 && len((*rows)[0].Result) > 0 {
+		if (*rows)[0].Result[0].Hash != rubric.ContentHash {
+			return jev.ErrInvalidRubric
+		}
+		return nil
+	}
+	record := map[string]any{
+		"rubric_manifest_id": rubric.ID, "provider": rubric.Provider, "model": rubric.Model, "version": rubric.Version,
+		"admission_version": rubric.AdmissionVersion, "canonical_rubric": string(rubric.CanonicalJSON), "created_at": time.Now().UTC(),
+		"schema_version": rubric.SchemaVersion, "content_hash": rubric.ContentHash,
+	}
+	_, err = surrealdb.Query[any](ctx, repository.db, `CREATE ONLY $id CONTENT $record`, map[string]any{"id": models.NewRecordID("jev_rubric_manifest", strings.TrimPrefix(rubric.ID, "jevr_")), "record": record})
+	if err != nil {
+		// A concurrent creator is authoritative only if the same content won.
+		rows, lookupErr := surrealdb.Query[[]row](ctx, repository.db, `SELECT content_hash FROM jev_rubric_manifest WHERE rubric_manifest_id = $id LIMIT 1`, map[string]any{"id": rubric.ID})
+		if lookupErr == nil && rows != nil && len(*rows) > 0 && len((*rows)[0].Result) > 0 && (*rows)[0].Result[0].Hash == rubric.ContentHash {
+			return nil
+		}
+		return databaseFailure("create Jev rubric", err)
+	}
+	return nil
+}
+
 func (repository *JevRepository) LookupReusable(ctx context.Context, tenantID domain.TenantID, key string, now time.Time) (jev.JudgmentRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return jev.JudgmentRecord{}, err

@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +28,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/embedding"
 	"github.com/sauhard74/mem-jev/internal/ingest"
+	"github.com/sauhard74/mem-jev/internal/jev"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/planning"
@@ -36,6 +39,7 @@ import (
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
 	surrealdb "github.com/surrealdb/surrealdb.go"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -190,7 +194,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		closeDB()
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	retrievalService, err := buildRetrievalService(db, selectionRepository, configuration.Retrieval, configuration.Environment)
+	retrievalService, closeJev, err := buildRetrievalService(ctx, db, selectionRepository, configuration.Retrieval, configuration.Jev, configuration.Environment)
 	if err != nil {
 		closeDB()
 		return nil, nil, nil, nil, nil, nil, nil, err
@@ -202,35 +206,100 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		_, err := s3Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(configuration.Archive.Bucket)})
 		return err
 	}
-	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), selectionRepository, retrievalService, readiness, closeDB, nil
+	closeDependencies := func() {
+		closeJev()
+		closeDB()
+	}
+	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), selectionRepository, retrievalService, readiness, closeDependencies, nil
 }
 
-func buildRetrievalService(db *surrealdb.DB, selectionRepository selection.Repository, configuration config.RetrievalConfig, environment string) (*retrieval.Service, error) {
+func buildRetrievalService(ctx context.Context, db *surrealdb.DB, selectionRepository selection.Repository, configuration config.RetrievalConfig, jevConfiguration config.JevConfig, environment string) (*retrieval.Service, func(), error) {
 	key, err := base64.StdEncoding.DecodeString(configuration.QueryKeyBase64)
 	if err != nil || len(key) != 32 {
-		return nil, fmt.Errorf("retrieval encryption configuration is invalid")
+		return nil, nil, fmt.Errorf("retrieval encryption configuration is invalid")
 	}
 	cipher, err := retrieval.NewAESGCMEnvelopeCipher(configuration.QueryKeyID, key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	manifestRepository, err := storesurreal.NewRetrievalManifestRepository(db)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	channels, required, err := buildRetrievalChannels(db, configuration, environment)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	projectionRepository := storesurreal.NewProjectionRepository(db)
 	planIssuer, err := planning.NewDeterministicIssuer(selectionRepository)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
+	semanticJudge, closeJev, err := buildJevJudge(ctx, db, jevConfiguration)
+	if err != nil {
+		return nil, nil, err
+	}
+	service, err := retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
 		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
-		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections,
+		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections, SemanticJudge: semanticJudge,
 	}, planIssuer)
+	if err != nil {
+		closeJev()
+		return nil, nil, err
+	}
+	return service, closeJev, nil
+}
+
+func buildJevJudge(ctx context.Context, db *surrealdb.DB, configuration config.JevConfig) (retrieval.SemanticJudge, func(), error) {
+	if !configuration.Enabled {
+		return nil, func() {}, nil
+	}
+	rubric, err := jev.DefaultRubricV1(configuration.Model)
+	if err != nil {
+		return nil, nil, err
+	}
+	secret, err := jev.NewFileSecret(configuration.APIKeyFile, 64<<10)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err = secret.Token(); err != nil {
+		return nil, nil, err
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		Proxy: nil, DialContext: dialer.DialContext, ForceAttemptHTTP2: true,
+		MaxIdleConns: configuration.MaximumConcurrent * 2, MaxIdleConnsPerHost: configuration.MaximumConcurrent,
+		MaxConnsPerHost: configuration.MaximumConcurrent, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 5 * time.Second,
+		ResponseHeaderTimeout: configuration.Timeout, ExpectContinueTimeout: time.Second,
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	httpClient := &http.Client{Transport: transport}
+	provider, err := jev.NewClient(jev.ClientConfig{Endpoint: configuration.Endpoint, AllowedHost: configuration.AllowedHost, Model: configuration.Model, Rubric: rubric, Secret: secret, HTTPClient: httpClient, Timeout: configuration.Timeout, MaximumRequestBytes: configuration.MaximumRequestBytes, MaximumResponseBytes: configuration.MaximumResponseBytes})
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, err
+	}
+	repository := storesurreal.NewJevRepository(db)
+	if err = repository.EnsureRubric(ctx, rubric); err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, err
+	}
+	judgments, err := jev.NewService(jev.ServiceConfig{Evaluator: provider, Repository: repository, Rubric: rubric, Limits: jev.ServiceLimits{
+		ReuseDuration: configuration.ReuseDuration, MinimumRemaining: configuration.MinimumRemaining, MaximumConcurrent: configuration.MaximumConcurrent,
+		GlobalTokenRate: rate.Limit(configuration.GlobalTokenRate), GlobalTokenBurst: configuration.GlobalTokenBurst,
+		TenantTokenRate: rate.Limit(configuration.TenantTokenRate), TenantTokenBurst: configuration.TenantTokenBurst,
+		MaximumTenantLimiters: configuration.MaximumTenantLimiters, CircuitFailureThreshold: configuration.CircuitFailureThreshold, CircuitOpenDuration: configuration.CircuitOpenDuration,
+	}})
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, err
+	}
+	judge, err := retrieval.NewJevSemanticJudge(judgments, rubric, jev.AdmissionPolicy{MaximumCandidates: configuration.MaximumCandidates, AmbiguityScoreDistance: configuration.AmbiguityScoreDistance})
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, err
+	}
+	return judge, transport.CloseIdleConnections, nil
 }
 
 func buildRetrievalChannels(db *surrealdb.DB, configuration config.RetrievalConfig, environment string) ([]retrieval.Channel, []retrieval.ChannelName, error) {

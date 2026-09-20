@@ -10,15 +10,16 @@ import (
 )
 
 type Explanation struct {
-	RunID        string
-	Disposition  RunDisposition
-	DecisionCode string
-	QueryHash    string
-	Snapshot     ServingSnapshot
-	Candidates   []CandidateExplanation
-	Degraded     []DegradedChannel
-	Approximate  bool
-	Plan         *PlanArtifact
+	RunID               string
+	Disposition         RunDisposition
+	DecisionCode        string
+	QueryHash           string
+	Snapshot            ServingSnapshot
+	Candidates          []CandidateExplanation
+	Degraded            []DegradedChannel
+	EnhancementDegraded []string
+	Approximate         bool
+	Plan                *PlanArtifact
 }
 
 type CandidateExplanation struct {
@@ -30,6 +31,7 @@ type CandidateExplanation struct {
 	RRFScore       int64
 	FinalScore     int64
 	FinalRank      uint32
+	Semantic       *PersistedSemanticJudgment
 }
 
 func (s *Service) Explain(ctx context.Context, tenantID domain.TenantID, runID string) (Explanation, error) {
@@ -51,11 +53,15 @@ func (s *Service) Explain(ctx context.Context, tenantID domain.TenantID, runID s
 	for _, item := range run.Ranked {
 		ranks[item.VersionID] = item
 	}
+	semantic := make(map[string]PersistedSemanticJudgment, len(run.SemanticJudgments))
+	for _, item := range run.SemanticJudgments {
+		semantic[item.VersionID] = item
+	}
 	gates := make(map[string]PersistedGate, len(run.Gates))
 	for _, item := range run.Gates {
 		gates[item.VersionID] = item
 	}
-	explanation := Explanation{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, QueryHash: run.QueryHash, Snapshot: run.Snapshot}
+	explanation := Explanation{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, QueryHash: run.QueryHash, Snapshot: run.Snapshot, EnhancementDegraded: semanticDegradations(run.SemanticJudgments)}
 	for _, execution := range run.ChannelExecutions {
 		explanation.Approximate = explanation.Approximate || execution.Complete && execution.Approximate
 		if !execution.Complete {
@@ -74,7 +80,13 @@ func (s *Service) Explain(ctx context.Context, tenantID domain.TenantID, runID s
 		item := ranks[versionID]
 		source := append([]ChannelName(nil), channels[versionID]...)
 		sort.Slice(source, func(i, j int) bool { return source[i] < source[j] })
-		explanation.Candidates = append(explanation.Candidates, CandidateExplanation{VersionID: versionID, Eligible: gate.Eligible, AdvisoryOnly: gate.AdvisoryOnly, SourceChannels: source, Facts: facts, RRFScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.Rank})
+		candidate := CandidateExplanation{VersionID: versionID, Eligible: gate.Eligible, AdvisoryOnly: gate.AdvisoryOnly, SourceChannels: source, Facts: facts, RRFScore: item.RRFScore, FinalScore: item.FinalScore, FinalRank: item.Rank}
+		if judgment, ok := semantic[versionID]; ok {
+			copyOfJudgment := judgment
+			copyOfJudgment.Features = append([]PersistedFeature(nil), judgment.Features...)
+			candidate.Semantic = &copyOfJudgment
+		}
+		explanation.Candidates = append(explanation.Candidates, candidate)
 	}
 	if run.Disposition == RunSelected {
 		plan, findErr := s.plans.FindByRetrievalRunID(ctx, tenantID, run.ID)

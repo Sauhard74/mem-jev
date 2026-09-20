@@ -110,7 +110,7 @@ func TestServiceAbstainsOnHardGateAndThreshold(t *testing.T) {
 	})
 }
 
-func TestServiceNeverServesUnpersistedDecisionOrCallsDormantJudge(t *testing.T) {
+func TestServiceNeverServesUnpersistedDecisionOrCallsSemanticJudgeWithoutTenantConsent(t *testing.T) {
 	fixture := newServiceFixture(t, false)
 	judge := &countingJudge{}
 	fixture.service.semantic = judge
@@ -119,6 +119,35 @@ func TestServiceNeverServesUnpersistedDecisionOrCallsDormantJudge(t *testing.T) 
 	var serviceErr *ServiceError
 	if response.Disposition != "" || !errors.As(err, &serviceErr) || serviceErr.Code != "run_persistence_failed" || judge.calls != 0 {
 		t.Fatalf("response=%#v error=%v judge_calls=%d", response, err, judge.calls)
+	}
+}
+
+func TestServiceAppliesSemanticFeaturesOnlyAfterEligibilityAndReplaysWithoutCallingJudge(t *testing.T) {
+	fixture := newSemanticServiceFixture(t)
+	fixture.request.ExternalInferenceAllowed = true
+	fixture.request.RequestIdentityHash = strings.Repeat("e", 64)
+	first, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Disposition != RunSelected || len(first.Candidates) != 1 || first.Candidates[0].VersionID != "pv_b" || fixture.judge.calls != 2 {
+		t.Fatalf("response=%#v judge_calls=%d", first, fixture.judge.calls)
+	}
+	run := fixture.repository.runs[0]
+	if len(run.SemanticJudgments) != 2 || len(run.Ranked) != 2 || run.Ranked[0].VersionID != "pv_b" {
+		t.Fatalf("run=%#v", run)
+	}
+	second, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil || !second.Replayed || fixture.judge.calls != 2 || second.Candidates[0].VersionID != "pv_b" {
+		t.Fatalf("replay=%#v err=%v judge_calls=%d", second, err, fixture.judge.calls)
+	}
+
+	blocked := newSemanticServiceFixture(t)
+	blocked.request.Input.ForbiddenEffects = []string{"filesystem.write"}
+	blocked.request.ExternalInferenceAllowed = true
+	result, err := blocked.service.Retrieve(context.Background(), blocked.request)
+	if err != nil || result.Disposition != RunAbstained || blocked.judge.calls != 0 {
+		t.Fatalf("blocked response=%#v err=%v calls=%d", result, err, blocked.judge.calls)
 	}
 }
 
@@ -230,6 +259,44 @@ type serviceFixture struct {
 	exact      *serviceChannel
 	plans      *fakePlanIssuer
 	request    ServiceRequest
+}
+
+type semanticServiceFixture struct {
+	service    *Service
+	repository *fakeDecisionRepository
+	judge      *countingJudge
+	request    ServiceRequest
+}
+
+func newSemanticServiceFixture(t *testing.T) semanticServiceFixture {
+	t.Helper()
+	base := newServiceFixture(t, false)
+	now := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
+	procedureInterface, err := NewProcedureInterface(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := BuildDocument(DocumentInput{TenantID: "tenant_a", ProcedureVersionID: "pv_b", ProcedureID: "proc_b", TaskText: "release", IntentHash: base.document.IntentHash, EffectSignatureHash: base.document.EffectSignatureHash, Tools: []ToolRequirement{{Name: "shell", ContractVersionID: "tcv_shell"}}, OrderedStepContractIDs: []string{"tcv_shell"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: base.document.EnvironmentScopeHash, Harness: Harness{Name: "ci", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5, VerifiedSuccessCount: 3, ValidatedAt: now.Add(-time.Minute), ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "medium", Interface: &procedureInterface})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranker, err := ranking.NewManifest(ranking.ManifestSpec{Version: "ranker.semantic.v1", RRFK: 60, RRFCoefficient: 1, MaxCandidates: 100, Channels: []ranking.ChannelWeight{{Channel: "exact", WeightMicros: 1_000_000}}, Features: []ranking.FeatureSpec{
+		{Name: "jev_intent_fit_micros", Minimum: 0, Maximum: 1_000_000, Missing: 0, Coefficient: 100_000},
+		{Name: "jev_non_contradiction_micros", Minimum: 0, Maximum: 1_000_000, Missing: 0, Coefficient: 1},
+		{Name: "jev_partial_plan_micros", Minimum: 0, Maximum: 1_000_000, Missing: 0, Coefficient: 1},
+		{Name: "jev_preconditions_micros", Minimum: 0, Maximum: 1_000_000, Missing: 0, Coefficient: 1},
+		{Name: "jev_task_coverage_micros", Minimum: 0, Maximum: 1_000_000, Missing: 0, Coefficient: 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.service.manifests = fakeManifestResolver{policy: base.service.manifests.(fakeManifestResolver).policy, ranker: ranker}
+	base.repository.snapshot.RankerManifestID = ranker.ID
+	base.service.documents = fakeDocumentReader{documents: []Document{base.document, second}}
+	base.exact.hits = []Hit{{VersionID: base.document.ProcedureVersionID, RawScoreQuantized: 1_000_000, IndexManifestID: "idx_exact"}, {VersionID: second.ProcedureVersionID, RawScoreQuantized: 900_000, IndexManifestID: "idx_exact"}}
+	judge := &countingJudge{admitted: []string{"pv_a", "pv_b"}}
+	base.service.semantic = judge
+	return semanticServiceFixture{service: base.service, repository: base.repository, judge: judge, request: base.request}
 }
 
 func newServiceFixture(t *testing.T, degradedVector bool) serviceFixture {
@@ -378,8 +445,21 @@ type fakeDocumentReader struct {
 	err       error
 }
 
-func (r fakeDocumentReader) RetrievalDocuments(context.Context, domain.TenantID, []string, uint64) ([]Document, error) {
-	return r.documents, r.err
+func (r fakeDocumentReader) RetrievalDocuments(_ context.Context, _ domain.TenantID, ids []string, _ uint64) ([]Document, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	requested := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		requested[id] = struct{}{}
+	}
+	result := make([]Document, 0, len(ids))
+	for _, document := range r.documents {
+		if _, ok := requested[document.ProcedureVersionID]; ok {
+			result = append(result, document)
+		}
+	}
+	return result, nil
 }
 
 type fakeManifestResolver struct {
@@ -410,11 +490,25 @@ type fixedIDs struct{}
 
 func (fixedIDs) NewRunID() (string, error) { return "rrun_" + strings.Repeat("d", 64), nil }
 
-type countingJudge struct{ calls int }
+type countingJudge struct {
+	mu       sync.Mutex
+	calls    int
+	admitted []string
+}
 
-func (j *countingJudge) Judge(context.Context, SemanticJudgmentRequest) (SemanticJudgment, error) {
+func (j *countingJudge) Admit([]ranking.Result) ([]string, error) {
+	return append([]string(nil), j.admitted...), nil
+}
+
+func (j *countingJudge) Judge(_ context.Context, request SemanticJudgmentRequest) SemanticJudgment {
+	j.mu.Lock()
 	j.calls++
-	return SemanticJudgment{}, nil
+	j.mu.Unlock()
+	value := int32(0)
+	if request.Document.ProcedureVersionID == "pv_b" {
+		value = 1_000_000
+	}
+	return SemanticJudgment{VersionID: request.Document.ProcedureVersionID, JudgmentKey: "jevj_" + strings.Repeat("a", 64), Disposition: "committed", ContentHash: strings.Repeat("b", 64), Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_test", Features: []ranking.FeatureValue{{Name: "jev_intent_fit_micros", Value: value}, {Name: "jev_non_contradiction_micros", Value: 1_000_000}, {Name: "jev_partial_plan_micros", Value: 500_000}, {Name: "jev_preconditions_micros", Value: 1_000_000}, {Name: "jev_task_coverage_micros", Value: value}}}
 }
 
 type fakePlanIssuer struct {

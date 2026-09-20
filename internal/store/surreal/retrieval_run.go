@@ -244,6 +244,11 @@ func (r *RetrievalRunRepository) SaveRetrievalRun(ctx context.Context, run retri
 			return err
 		}
 	}
+	for _, item := range run.SemanticJudgments {
+		if err = saveSemanticJudgment(ctx, tx, run, item); err != nil {
+			return err
+		}
+	}
 	if r.failure == failureAfterRetrievalChildren {
 		return errInjectedFailure
 	}
@@ -327,6 +332,27 @@ func saveRank(ctx context.Context, tx *surrealdb.Transaction, run retrieval.Run,
 	return createRecord(ctx, tx, models.NewRecordID("retrieval_ranked_candidate", "rrc_"+hash), record)
 }
 
+func saveSemanticJudgment(ctx context.Context, tx *surrealdb.Transaction, run retrieval.Run, item retrieval.PersistedSemanticJudgment) error {
+	hash := childHash(struct {
+		Tenant, Run string
+		Item        retrieval.PersistedSemanticJudgment
+	}{string(run.TenantID), run.ID, item})
+	features := make(map[string]int32, len(item.Features))
+	for _, feature := range item.Features {
+		features[feature.Name] = feature.Value
+	}
+	record := map[string]any{
+		"tenant_id": string(run.TenantID), "retrieval_run_id": run.ID, "procedure_version_id": item.VersionID,
+		"judgment_key": item.JudgmentKey, "disposition": item.Disposition, "provider": item.Provider, "model": item.Model,
+		"rubric_manifest_id": item.RubricManifestID, "feature_values": features, "created_at": run.CompletedAt,
+		"expires_at": run.ExpiresAt, "schema_version": "retrieval-semantic-judgment.v1", "content_hash": hash,
+	}
+	if item.ContentHash != "" {
+		record["judgment_content_hash"] = item.ContentHash
+	}
+	return createRecord(ctx, tx, models.NewRecordID("retrieval_semantic_judgment", "rsj_"+hash), record)
+}
+
 func nonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -372,7 +398,7 @@ func (r *RetrievalRunRepository) RetrievalRun(ctx context.Context, tenantID doma
 
 func (r *RetrievalRunRepository) ChildCounts(ctx context.Context, runID string) (map[string]int, error) {
 	result := make(map[string]int)
-	for _, table := range []string{"retrieval_channel_result", "retrieval_channel_hit", "retrieval_gate_decision", "retrieval_ranked_candidate"} {
+	for _, table := range []string{"retrieval_channel_result", "retrieval_channel_hit", "retrieval_gate_decision", "retrieval_ranked_candidate", "retrieval_semantic_judgment"} {
 		rows, err := surrealdb.Query[[]struct {
 			Count int `json:"count"`
 		}](ctx, r.db, fmt.Sprintf("SELECT count() AS count FROM %s WHERE retrieval_run_id = $id GROUP ALL", table), map[string]any{"id": runID})

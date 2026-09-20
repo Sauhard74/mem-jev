@@ -521,6 +521,7 @@ type RetrievalProvenance struct {
 	IndexManifestIds      []string               `protobuf:"bytes,5,rep,name=index_manifest_ids,json=indexManifestIds,proto3" json:"index_manifest_ids,omitempty"`
 	DegradedChannels      []string               `protobuf:"bytes,6,rep,name=degraded_channels,json=degradedChannels,proto3" json:"degraded_channels,omitempty"`
 	ApproximateCandidates bool                   `protobuf:"varint,7,opt,name=approximate_candidates,json=approximateCandidates,proto3" json:"approximate_candidates,omitempty"`
+	DegradedEnhancements  []string               `protobuf:"bytes,8,rep,name=degraded_enhancements,json=degradedEnhancements,proto3" json:"degraded_enhancements,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -602,6 +603,13 @@ func (x *RetrievalProvenance) GetApproximateCandidates() bool {
 		return x.ApproximateCandidates
 	}
 	return false
+}
+
+func (x *RetrievalProvenance) GetDegradedEnhancements() []string {
+	if x != nil {
+		return x.DegradedEnhancements
+	}
+	return nil
 }
 
 type ProcedurePlanNode struct {
@@ -1321,16 +1329,23 @@ func (x *ExplanationFact) GetObserved() string {
 }
 
 type CandidateExplanation struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	ProcedureVersionId string                 `protobuf:"bytes,1,opt,name=procedure_version_id,json=procedureVersionId,proto3" json:"procedure_version_id,omitempty"`
-	Eligible           bool                   `protobuf:"varint,2,opt,name=eligible,proto3" json:"eligible,omitempty"`
-	SourceChannels     []string               `protobuf:"bytes,3,rep,name=source_channels,json=sourceChannels,proto3" json:"source_channels,omitempty"`
-	Facts              []*ExplanationFact     `protobuf:"bytes,4,rep,name=facts,proto3" json:"facts,omitempty"`
-	FusedRankScore     int64                  `protobuf:"varint,5,opt,name=fused_rank_score,json=fusedRankScore,proto3" json:"fused_rank_score,omitempty"`
-	FinalScore         int64                  `protobuf:"varint,6,opt,name=final_score,json=finalScore,proto3" json:"final_score,omitempty"`
-	FinalRank          uint32                 `protobuf:"varint,7,opt,name=final_rank,json=finalRank,proto3" json:"final_rank,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	ProcedureVersionId       string                 `protobuf:"bytes,1,opt,name=procedure_version_id,json=procedureVersionId,proto3" json:"procedure_version_id,omitempty"`
+	Eligible                 bool                   `protobuf:"varint,2,opt,name=eligible,proto3" json:"eligible,omitempty"`
+	SourceChannels           []string               `protobuf:"bytes,3,rep,name=source_channels,json=sourceChannels,proto3" json:"source_channels,omitempty"`
+	Facts                    []*ExplanationFact     `protobuf:"bytes,4,rep,name=facts,proto3" json:"facts,omitempty"`
+	FusedRankScore           int64                  `protobuf:"varint,5,opt,name=fused_rank_score,json=fusedRankScore,proto3" json:"fused_rank_score,omitempty"`
+	FinalScore               int64                  `protobuf:"varint,6,opt,name=final_score,json=finalScore,proto3" json:"final_score,omitempty"`
+	FinalRank                uint32                 `protobuf:"varint,7,opt,name=final_rank,json=finalRank,proto3" json:"final_rank,omitempty"`
+	SemanticDisposition      string                 `protobuf:"bytes,8,opt,name=semantic_disposition,json=semanticDisposition,proto3" json:"semantic_disposition,omitempty"`
+	SemanticJudgmentKey      string                 `protobuf:"bytes,9,opt,name=semantic_judgment_key,json=semanticJudgmentKey,proto3" json:"semantic_judgment_key,omitempty"`
+	SemanticContentHash      string                 `protobuf:"bytes,10,opt,name=semantic_content_hash,json=semanticContentHash,proto3" json:"semantic_content_hash,omitempty"`
+	SemanticProvider         string                 `protobuf:"bytes,11,opt,name=semantic_provider,json=semanticProvider,proto3" json:"semantic_provider,omitempty"`
+	SemanticModel            string                 `protobuf:"bytes,12,opt,name=semantic_model,json=semanticModel,proto3" json:"semantic_model,omitempty"`
+	SemanticRubricManifestId string                 `protobuf:"bytes,13,opt,name=semantic_rubric_manifest_id,json=semanticRubricManifestId,proto3" json:"semantic_rubric_manifest_id,omitempty"`
+	SemanticFeatures         []*RankedFeature       `protobuf:"bytes,14,rep,name=semantic_features,json=semanticFeatures,proto3" json:"semantic_features,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *CandidateExplanation) Reset() {
@@ -1412,6 +1427,107 @@ func (x *CandidateExplanation) GetFinalRank() uint32 {
 	return 0
 }
 
+func (x *CandidateExplanation) GetSemanticDisposition() string {
+	if x != nil {
+		return x.SemanticDisposition
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticJudgmentKey() string {
+	if x != nil {
+		return x.SemanticJudgmentKey
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticContentHash() string {
+	if x != nil {
+		return x.SemanticContentHash
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticProvider() string {
+	if x != nil {
+		return x.SemanticProvider
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticModel() string {
+	if x != nil {
+		return x.SemanticModel
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticRubricManifestId() string {
+	if x != nil {
+		return x.SemanticRubricManifestId
+	}
+	return ""
+}
+
+func (x *CandidateExplanation) GetSemanticFeatures() []*RankedFeature {
+	if x != nil {
+		return x.SemanticFeatures
+	}
+	return nil
+}
+
+type RankedFeature struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         int32                  `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RankedFeature) Reset() {
+	*x = RankedFeature{}
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RankedFeature) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RankedFeature) ProtoMessage() {}
+
+func (x *RankedFeature) ProtoReflect() protoreflect.Message {
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RankedFeature.ProtoReflect.Descriptor instead.
+func (*RankedFeature) Descriptor() ([]byte, []int) {
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RankedFeature) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RankedFeature) GetValue() int32 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
 type ExplainRetrievalResponse struct {
 	state            protoimpl.MessageState     `protogen:"open.v1"`
 	RetrievalRunId   string                     `protobuf:"bytes,1,opt,name=retrieval_run_id,json=retrievalRunId,proto3" json:"retrieval_run_id,omitempty"`
@@ -1427,7 +1543,7 @@ type ExplainRetrievalResponse struct {
 
 func (x *ExplainRetrievalResponse) Reset() {
 	*x = ExplainRetrievalResponse{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1439,7 +1555,7 @@ func (x *ExplainRetrievalResponse) String() string {
 func (*ExplainRetrievalResponse) ProtoMessage() {}
 
 func (x *ExplainRetrievalResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1452,7 +1568,7 @@ func (x *ExplainRetrievalResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainRetrievalResponse.ProtoReflect.Descriptor instead.
 func (*ExplainRetrievalResponse) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{17}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ExplainRetrievalResponse) GetRetrievalRunId() string {
@@ -1552,7 +1668,7 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\x04rank\x18\x04 \x01(\rR\x04rank\x12;\n" +
 	"\tlifecycle\x18\x05 \x01(\x0e2\x1d.memjev.v1.CandidateLifecycleR\tlifecycle\x12-\n" +
 	"\x13observed_end_to_end\x18\x06 \x01(\bR\x10observedEndToEnd\x12#\n" +
-	"\radvisory_only\x18\a \x01(\bR\fadvisoryOnly\"\xbf\x02\n" +
+	"\radvisory_only\x18\a \x01(\bR\fadvisoryOnly\"\xf4\x02\n" +
 	"\x13RetrievalProvenance\x12)\n" +
 	"\x10projection_epoch\x18\x01 \x01(\x04R\x0fprojectionEpoch\x12\x1d\n" +
 	"\n" +
@@ -1561,7 +1677,8 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\x0eranker_version\x18\x04 \x01(\tR\rrankerVersion\x12,\n" +
 	"\x12index_manifest_ids\x18\x05 \x03(\tR\x10indexManifestIds\x12+\n" +
 	"\x11degraded_channels\x18\x06 \x03(\tR\x10degradedChannels\x125\n" +
-	"\x16approximate_candidates\x18\a \x01(\bR\x15approximateCandidates\"\x9e\x01\n" +
+	"\x16approximate_candidates\x18\a \x01(\bR\x15approximateCandidates\x123\n" +
+	"\x15degraded_enhancements\x18\b \x03(\tR\x14degradedEnhancements\"\x9e\x01\n" +
 	"\x11ProcedurePlanNode\x12\x18\n" +
 	"\aordinal\x18\x01 \x01(\rR\aordinal\x120\n" +
 	"\x14procedure_version_id\x18\x02 \x01(\tR\x12procedureVersionId\x12%\n" +
@@ -1629,7 +1746,7 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"subject_id\x18\x02 \x01(\tR\tsubjectId\x12\x14\n" +
 	"\x05field\x18\x03 \x01(\tR\x05field\x12\x1a\n" +
 	"\bexpected\x18\x04 \x01(\tR\bexpected\x12\x1a\n" +
-	"\bobserved\x18\x05 \x01(\tR\bobserved\"\xa9\x02\n" +
+	"\bobserved\x18\x05 \x01(\tR\bobserved\"\x9e\x05\n" +
 	"\x14CandidateExplanation\x120\n" +
 	"\x14procedure_version_id\x18\x01 \x01(\tR\x12procedureVersionId\x12\x1a\n" +
 	"\beligible\x18\x02 \x01(\bR\beligible\x12'\n" +
@@ -1639,7 +1756,18 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\vfinal_score\x18\x06 \x01(\x03R\n" +
 	"finalScore\x12\x1d\n" +
 	"\n" +
-	"final_rank\x18\a \x01(\rR\tfinalRank\"\xbc\x03\n" +
+	"final_rank\x18\a \x01(\rR\tfinalRank\x121\n" +
+	"\x14semantic_disposition\x18\b \x01(\tR\x13semanticDisposition\x122\n" +
+	"\x15semantic_judgment_key\x18\t \x01(\tR\x13semanticJudgmentKey\x122\n" +
+	"\x15semantic_content_hash\x18\n" +
+	" \x01(\tR\x13semanticContentHash\x12+\n" +
+	"\x11semantic_provider\x18\v \x01(\tR\x10semanticProvider\x12%\n" +
+	"\x0esemantic_model\x18\f \x01(\tR\rsemanticModel\x12=\n" +
+	"\x1bsemantic_rubric_manifest_id\x18\r \x01(\tR\x18semanticRubricManifestId\x12E\n" +
+	"\x11semantic_features\x18\x0e \x03(\v2\x18.memjev.v1.RankedFeatureR\x10semanticFeatures\"9\n" +
+	"\rRankedFeature\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value\"\xbc\x03\n" +
 	"\x18ExplainRetrievalResponse\x12(\n" +
 	"\x10retrieval_run_id\x18\x01 \x01(\tR\x0eretrievalRunId\x12A\n" +
 	"\vdisposition\x18\x02 \x01(\x0e2\x1f.memjev.v1.RetrievalDispositionR\vdisposition\x12'\n" +
@@ -1678,7 +1806,7 @@ func file_memjev_v1_retrieval_proto_rawDescGZIP() []byte {
 }
 
 var file_memjev_v1_retrieval_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_memjev_v1_retrieval_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_memjev_v1_retrieval_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_memjev_v1_retrieval_proto_goTypes = []any{
 	(PlanNoveltyClass)(0),            // 0: memjev.v1.PlanNoveltyClass
 	(*AvailableTool)(nil),            // 1: memjev.v1.AvailableTool
@@ -1698,11 +1826,12 @@ var file_memjev_v1_retrieval_proto_goTypes = []any{
 	(*ExplainRetrievalRequest)(nil),  // 15: memjev.v1.ExplainRetrievalRequest
 	(*ExplanationFact)(nil),          // 16: memjev.v1.ExplanationFact
 	(*CandidateExplanation)(nil),     // 17: memjev.v1.CandidateExplanation
-	(*ExplainRetrievalResponse)(nil), // 18: memjev.v1.ExplainRetrievalResponse
-	(RiskClass)(0),                   // 19: memjev.v1.RiskClass
-	(LatencyClass)(0),                // 20: memjev.v1.LatencyClass
-	(CandidateLifecycle)(0),          // 21: memjev.v1.CandidateLifecycle
-	(RetrievalDisposition)(0),        // 22: memjev.v1.RetrievalDisposition
+	(*RankedFeature)(nil),            // 18: memjev.v1.RankedFeature
+	(*ExplainRetrievalResponse)(nil), // 19: memjev.v1.ExplainRetrievalResponse
+	(RiskClass)(0),                   // 20: memjev.v1.RiskClass
+	(LatencyClass)(0),                // 21: memjev.v1.LatencyClass
+	(CandidateLifecycle)(0),          // 22: memjev.v1.CandidateLifecycle
+	(RetrievalDisposition)(0),        // 23: memjev.v1.RetrievalDisposition
 }
 var file_memjev_v1_retrieval_proto_depIdxs = []int32{
 	1,  // 0: memjev.v1.RetrieveRequest.tools:type_name -> memjev.v1.AvailableTool
@@ -1710,34 +1839,35 @@ var file_memjev_v1_retrieval_proto_depIdxs = []int32{
 	3,  // 2: memjev.v1.RetrieveRequest.environment:type_name -> memjev.v1.QueryFact
 	4,  // 3: memjev.v1.RetrieveRequest.resources:type_name -> memjev.v1.AccessibleResource
 	3,  // 4: memjev.v1.RetrieveRequest.constraints:type_name -> memjev.v1.QueryFact
-	19, // 5: memjev.v1.RetrieveRequest.risk_class:type_name -> memjev.v1.RiskClass
-	20, // 6: memjev.v1.RetrieveRequest.latency_class:type_name -> memjev.v1.LatencyClass
-	21, // 7: memjev.v1.RetrievalCandidate.lifecycle:type_name -> memjev.v1.CandidateLifecycle
+	20, // 5: memjev.v1.RetrieveRequest.risk_class:type_name -> memjev.v1.RiskClass
+	21, // 6: memjev.v1.RetrieveRequest.latency_class:type_name -> memjev.v1.LatencyClass
+	22, // 7: memjev.v1.RetrievalCandidate.lifecycle:type_name -> memjev.v1.CandidateLifecycle
 	8,  // 8: memjev.v1.ExecutableProcedurePlan.nodes:type_name -> memjev.v1.ProcedurePlanNode
 	9,  // 9: memjev.v1.ExecutableProcedurePlan.dependencies:type_name -> memjev.v1.ProcedurePlanDependency
 	10, // 10: memjev.v1.ExecutableProcedurePlan.parallel_groups:type_name -> memjev.v1.ProcedureParallelGroup
 	11, // 11: memjev.v1.ExecutableProcedurePlan.gaps:type_name -> memjev.v1.ProcedurePlanGap
 	0,  // 12: memjev.v1.ExecutableProcedurePlan.novelty_class:type_name -> memjev.v1.PlanNoveltyClass
 	12, // 13: memjev.v1.ExecutableProcedurePlan.provenance:type_name -> memjev.v1.ProcedurePlanProvenance
-	22, // 14: memjev.v1.RetrieveResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
+	23, // 14: memjev.v1.RetrieveResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
 	6,  // 15: memjev.v1.RetrieveResponse.candidates:type_name -> memjev.v1.RetrievalCandidate
 	7,  // 16: memjev.v1.RetrieveResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
 	13, // 17: memjev.v1.RetrieveResponse.plan:type_name -> memjev.v1.ExecutableProcedurePlan
 	16, // 18: memjev.v1.CandidateExplanation.facts:type_name -> memjev.v1.ExplanationFact
-	22, // 19: memjev.v1.ExplainRetrievalResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
-	7,  // 20: memjev.v1.ExplainRetrievalResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
-	17, // 21: memjev.v1.ExplainRetrievalResponse.candidates:type_name -> memjev.v1.CandidateExplanation
-	9,  // 22: memjev.v1.ExplainRetrievalResponse.composition_edges:type_name -> memjev.v1.ProcedurePlanDependency
-	11, // 23: memjev.v1.ExplainRetrievalResponse.plan_gaps:type_name -> memjev.v1.ProcedurePlanGap
-	5,  // 24: memjev.v1.RetrievalService.Retrieve:input_type -> memjev.v1.RetrieveRequest
-	15, // 25: memjev.v1.RetrievalService.ExplainRetrieval:input_type -> memjev.v1.ExplainRetrievalRequest
-	14, // 26: memjev.v1.RetrievalService.Retrieve:output_type -> memjev.v1.RetrieveResponse
-	18, // 27: memjev.v1.RetrievalService.ExplainRetrieval:output_type -> memjev.v1.ExplainRetrievalResponse
-	26, // [26:28] is the sub-list for method output_type
-	24, // [24:26] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	18, // 19: memjev.v1.CandidateExplanation.semantic_features:type_name -> memjev.v1.RankedFeature
+	23, // 20: memjev.v1.ExplainRetrievalResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
+	7,  // 21: memjev.v1.ExplainRetrievalResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
+	17, // 22: memjev.v1.ExplainRetrievalResponse.candidates:type_name -> memjev.v1.CandidateExplanation
+	9,  // 23: memjev.v1.ExplainRetrievalResponse.composition_edges:type_name -> memjev.v1.ProcedurePlanDependency
+	11, // 24: memjev.v1.ExplainRetrievalResponse.plan_gaps:type_name -> memjev.v1.ProcedurePlanGap
+	5,  // 25: memjev.v1.RetrievalService.Retrieve:input_type -> memjev.v1.RetrieveRequest
+	15, // 26: memjev.v1.RetrievalService.ExplainRetrieval:input_type -> memjev.v1.ExplainRetrievalRequest
+	14, // 27: memjev.v1.RetrievalService.Retrieve:output_type -> memjev.v1.RetrieveResponse
+	19, // 28: memjev.v1.RetrievalService.ExplainRetrieval:output_type -> memjev.v1.ExplainRetrievalResponse
+	27, // [27:29] is the sub-list for method output_type
+	25, // [25:27] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_memjev_v1_retrieval_proto_init() }
@@ -1752,7 +1882,7 @@ func file_memjev_v1_retrieval_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memjev_v1_retrieval_proto_rawDesc), len(file_memjev_v1_retrieval_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

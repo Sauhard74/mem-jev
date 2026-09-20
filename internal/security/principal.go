@@ -14,10 +14,11 @@ const (
 )
 
 type Principal struct {
-	TenantID domain.TenantID
-	Region   string
-	Scopes   map[string]struct{}
-	Consent  policy.ConsentMode
+	TenantID               domain.TenantID
+	Region                 string
+	Scopes                 map[string]struct{}
+	Consent                policy.ConsentMode
+	AllowExternalInference bool
 }
 
 func (p Principal) HasScope(scope string) bool {

@@ -15,6 +15,16 @@ import (
 func TestSurrealJevRepositoryContract(t *testing.T) {
 	db := projectionDatabase(t)
 	repository := NewJevRepository(db)
+	rubric, err := jev.DefaultRubricV1("jev-1.13.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.EnsureRubric(context.Background(), rubric); err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.EnsureRubric(context.Background(), rubric); err != nil {
+		t.Fatalf("idempotent rubric registration: %v", err)
+	}
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	first := surrealJevRecord(t, 875_000, now)
 	winner, created, err := repository.Commit(context.Background(), first)

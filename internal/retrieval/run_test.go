@@ -37,7 +37,7 @@ func TestDecodeRunPreservesLegacyV1ForExplanationButNotContextReplay(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := bytes.Replace(run.CanonicalJSON, []byte(`"schema_version":"retrieval-run.v2"`), []byte(`"schema_version":"retrieval-run.v1"`), 1)
+	legacy := bytes.Replace(run.CanonicalJSON, []byte(`"schema_version":"retrieval-run.v3"`), []byte(`"schema_version":"retrieval-run.v1"`), 1)
 	legacy = bytes.Replace(legacy, []byte(`,"request_context_hash":"`+strings.Repeat("d", 64)+`"`), nil, 1)
 	legacy = bytes.Replace(legacy, []byte(`,"projection_created_at":"0001-01-01T00:00:00Z"`), nil, 1)
 	legacy = bytes.Replace(legacy, []byte(`,"vector_index_created_at":"0001-01-01T00:00:00Z"`), nil, 1)

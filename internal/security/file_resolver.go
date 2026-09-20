@@ -18,11 +18,12 @@ type credentialFile struct {
 }
 
 type credentialEntry struct {
-	CredentialSHA256 string             `json:"credential_sha256"`
-	TenantID         domain.TenantID    `json:"tenant_id"`
-	Region           string             `json:"region"`
-	Scopes           []string           `json:"scopes"`
-	Consent          policy.ConsentMode `json:"consent"`
+	CredentialSHA256       string             `json:"credential_sha256"`
+	TenantID               domain.TenantID    `json:"tenant_id"`
+	Region                 string             `json:"region"`
+	Scopes                 []string           `json:"scopes"`
+	Consent                policy.ConsentMode `json:"consent"`
+	AllowExternalInference bool               `json:"allow_external_inference"`
 }
 
 type FileCredentialResolver struct {
@@ -70,7 +71,7 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 			}
 			scopes[scope] = struct{}{}
 		}
-		resolver.principals[hash] = Principal{TenantID: entry.TenantID, Region: entry.Region, Scopes: scopes, Consent: entry.Consent}
+		resolver.principals[hash] = Principal{TenantID: entry.TenantID, Region: entry.Region, Scopes: scopes, Consent: entry.Consent, AllowExternalInference: entry.AllowExternalInference}
 	}
 	return resolver, nil
 }
