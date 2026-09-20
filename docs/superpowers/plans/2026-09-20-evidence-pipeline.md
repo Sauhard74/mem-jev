@@ -235,12 +235,12 @@
 
 **Produces:** reproducible proof that a real authenticated trace plus outcome becomes exactly one verified immutable procedure and rebuilds identically after projection deletion.
 
-- [ ] Add E2E cases for verified success, contradictory evidence, unknown tool abstention, negative-path scoping, cross-tenant denial, duplicate delivery, worker restart, and corrupted archive quarantine.
-- [ ] Add metrics/alerts for outcome conflicts, archive corruption, synthesis abstention, lease age, retry/dead-letter, projection lag, and rebuild mismatch.
-- [ ] Exercise clean-stack startup, API/worker health, migration replay, encrypted archive, Surreal records, workflow completion, and byte-identical rebuild.
-- [ ] Run `make verify && ./scripts/integration.sh && ./scripts/smoke.sh` twice from a clean stack.
-- [ ] Request an independent production review; resolve every Critical/Important finding with focused RED/GREEN tests.
-- [ ] Commit as `test: qualify the production evidence pipeline`.
+- [x] Add E2E cases for verified success, contradictory evidence, unknown tool abstention, negative-path scoping, cross-tenant denial, duplicate delivery, worker restart, and corrupted archive quarantine.
+- [x] Add metrics/alerts for outcome conflicts, archive corruption, synthesis abstention, lease age, retry/dead-letter, projection lag, and rebuild mismatch.
+- [x] Exercise clean-stack startup, API/worker health, migration replay, encrypted archive, Surreal records, workflow completion, and byte-identical rebuild.
+- [x] Run `make verify && ./scripts/integration.sh && ./scripts/smoke.sh` twice from a clean stack.
+- [x] Request an independent production review; resolve every Critical/Important finding with focused RED/GREEN tests.
+- [x] Commit as `test: qualify the production evidence pipeline`.
 
 ## Completion gate
 

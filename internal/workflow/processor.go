@@ -11,6 +11,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/evidence"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/projection"
 	"github.com/sauhard74/mem-jev/internal/store"
@@ -30,6 +31,7 @@ type StoredOutcome struct {
 	PromotionEligible bool                     `json:"promotion_eligible"`
 	PolicyVersion     string                   `json:"policy_version"`
 	Evidence          []domain.OutcomeEvidence `json:"evidence"`
+	CreatedAt         time.Time                `json:"created_at"`
 }
 
 type LoadedSource struct {
@@ -115,6 +117,7 @@ type graphArtifact struct {
 	GraphHash           string                      `json:"graph_hash"`
 	Goals               []synthesis.GoalRequirement `json:"goals"`
 	RequiredEffects     []domain.EventID            `json:"required_effects"`
+	FailedBranches      []synthesis.FailedBranch    `json:"failed_branches,omitempty"`
 	IntentHash          string                      `json:"intent_hash"`
 	EffectSignatureHash string                      `json:"effect_signature_hash"`
 	EnvironmentHash     string                      `json:"environment_hash"`
@@ -192,7 +195,11 @@ func (p *Processor) BuildGraph(ctx context.Context, request StageRequest) (Stage
 		if versioned, ok := registry.(VersionedRegistry); ok && versioned.SnapshotVersion() != "" {
 			registryVersion = versioned.SnapshotVersion()
 		}
-		return graphArtifact{Graph: graph, GraphHash: graph.Hash, Goals: goals, RequiredEffects: required, IntentHash: intentHash, EffectSignatureHash: effectHash, EnvironmentHash: environmentHash, RegistryVersion: registryVersion}, StageStatusReady, "", nil
+		failedBranches, err := inferFailedBranches(graph, source.Batch, environmentHash)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return graphArtifact{Graph: graph, GraphHash: graph.Hash, Goals: goals, RequiredEffects: required, FailedBranches: failedBranches, IntentHash: intentHash, EffectSignatureHash: effectHash, EnvironmentHash: environmentHash, RegistryVersion: registryVersion}, StageStatusReady, "", nil
 	})
 }
 
@@ -212,10 +219,13 @@ func (p *Processor) Synthesize(ctx context.Context, request StageRequest) (Stage
 		versions.Policy = evaluated.PolicyVersion
 		result, err := synthesis.Synthesize(synthesis.Request{
 			Graph: graph.Graph, OutcomeState: evaluated.State, Goals: graph.Goals,
-			RequiredEffects: graph.RequiredEffects, Versions: versions,
+			RequiredEffects: graph.RequiredEffects, FailedBranches: graph.FailedBranches, Versions: versions,
 		})
 		if err != nil {
 			return nil, "", "", &StageError{Code: "synthesis_failed", Err: err}
+		}
+		if result.Status == synthesis.StatusAbstained {
+			observability.RecordSynthesisAbstention(ctx, result.AbstentionCode)
 		}
 		return synthesisArtifact{Result: result, ResultHash: result.Hash}, StageStatusReady, "", nil
 	})
@@ -249,6 +259,13 @@ func (p *Processor) Publish(ctx context.Context, request StageRequest) (StageRes
 		receipt, err := p.projections.Publish(ctx, value)
 		if err != nil {
 			return nil, "", "", err
+		}
+		if source.Outcome != nil && !source.Outcome.CreatedAt.IsZero() {
+			lag := p.now().UTC().Sub(source.Outcome.CreatedAt)
+			if lag < 0 {
+				lag = 0
+			}
+			observability.RecordProjectionLag(ctx, lag)
 		}
 		payload := struct {
 			ManifestID  string                 `json:"manifest_id"`
@@ -421,6 +438,56 @@ func requiredEffects(graph synthesis.Graph) []domain.EventID {
 		}
 	}
 	return result
+}
+
+func inferFailedBranches(graph synthesis.Graph, batch domain.CanonicalBatch, environmentHash string) ([]synthesis.FailedBranch, error) {
+	events := make(map[domain.EventID]domain.CanonicalEvent, len(batch.Events))
+	for _, event := range batch.Events {
+		events[event.ID] = event
+	}
+	result := make([]synthesis.FailedBranch, 0)
+	for _, node := range graph.Nodes {
+		if node.Succeeded || node.Opaque {
+			continue
+		}
+		event, found := events[node.ID]
+		if !found || event.Result == nil {
+			return nil, ErrInvalidStartRequest
+		}
+		_, toolHash, err := canonical.MarshalAndHash(struct {
+			ContractVersionID string                  `json:"contract_version_id"`
+			Inputs            []domain.CanonicalField `json:"inputs"`
+		}{node.ToolContractVersionID, event.Fields})
+		if err != nil {
+			return nil, err
+		}
+		_, failureHash, err := canonical.MarshalAndHash(struct {
+			State    string                  `json:"state"`
+			ExitCode *int32                  `json:"exit_code,omitempty"`
+			Evidence []domain.CanonicalField `json:"evidence,omitempty"`
+		}{event.Result.State, event.Result.ExitCode, event.Result.Evidence})
+		if err != nil {
+			return nil, err
+		}
+		resources := make([]string, 0, len(node.Reads)+len(node.Writes))
+		for _, resource := range node.Reads {
+			resources = append(resources, resource.IdentityHash)
+		}
+		for _, resource := range node.Writes {
+			resources = append(resources, resource.IdentityHash)
+		}
+		sort.Strings(resources)
+		_, resourceHash, err := canonical.MarshalAndHash(resources)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, synthesis.FailedBranch{
+			FailurePredicateID: "tool_failure:" + node.ToolContractVersionID + ":" + failureHash,
+			EventIDs:           []domain.EventID{node.ID},
+			Scope:              domain.CompatibilityScope{EnvironmentHash: environmentHash, ToolHash: toolHash, ResourceHash: resourceHash},
+		})
+	}
+	return result, nil
 }
 
 func projectionIdentities(batch domain.CanonicalBatch, graph synthesis.Graph, required []domain.EventID) (string, string, string, error) {

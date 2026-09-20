@@ -13,6 +13,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/rebuild"
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
@@ -157,7 +158,15 @@ func (l *WorkflowSourceLoader) Load(ctx context.Context, input memworkflow.Synth
 		ContentHash: trace.ContentHash, ArchiveKey: archive.Key(trace.ArchiveKey),
 	})
 	if err != nil {
-		return memworkflow.LoadedSource{}, classifySourceError(err)
+		classified := classifySourceError(err)
+		var stageError *memworkflow.StageError
+		if errors.As(classified, &stageError) && stageError.Code == "archive_corrupt" {
+			observability.RecordArchiveCorruption(ctx, stageError.Code)
+			if auditErr := recordPipelineQuarantine(ctx, l.db, input, stageError.Code); auditErr != nil {
+				return memworkflow.LoadedSource{}, &memworkflow.StageError{Code: "quarantine_write_failed", Retryable: true, Err: auditErr}
+			}
+		}
+		return memworkflow.LoadedSource{}, classified
 	}
 	result := memworkflow.LoadedSource{SchemaVersion: "loaded-source.v1", Batch: batch, ArchiveHash: trace.ContentHash}
 	if input.JobType == store.OutboxJobSynthesizeOutcome {
@@ -196,14 +205,15 @@ func findTraceSource(ctx context.Context, db *surrealdb.DB, tenantID domain.Tena
 
 func loadStoredOutcome(ctx context.Context, db *surrealdb.DB, tenantID domain.TenantID, outcomeID domain.OutcomeID) (memworkflow.StoredOutcome, bool, error) {
 	type outcomeRow struct {
-		ID                string `json:"outcome_id"`
-		ContentHash       string `json:"content_hash"`
-		State             string `json:"state"`
-		PromotionEligible bool   `json:"promotion_eligible"`
-		PolicyVersion     string `json:"policy_version"`
-		EvidenceCount     int    `json:"evidence_count"`
+		ID                string    `json:"outcome_id"`
+		ContentHash       string    `json:"content_hash"`
+		State             string    `json:"state"`
+		PromotionEligible bool      `json:"promotion_eligible"`
+		PolicyVersion     string    `json:"policy_version"`
+		EvidenceCount     int       `json:"evidence_count"`
+		CreatedAt         time.Time `json:"created_at"`
 	}
-	results, err := surrealdb.Query[[]outcomeRow](ctx, db, `SELECT outcome_id, content_hash, state, promotion_eligible, policy_version, evidence_count
+	results, err := surrealdb.Query[[]outcomeRow](ctx, db, `SELECT outcome_id, content_hash, state, promotion_eligible, policy_version, evidence_count, created_at
 		FROM outcome_evidence WHERE tenant_id = $tenant_id AND outcome_id = $outcome_id LIMIT 1`, map[string]any{
 		"tenant_id": string(tenantID), "outcome_id": string(outcomeID),
 	})
@@ -228,8 +238,40 @@ func loadStoredOutcome(ctx context.Context, db *surrealdb.DB, tenantID domain.Te
 	}
 	return memworkflow.StoredOutcome{
 		ID: domain.OutcomeID(row.ID), ContentHash: row.ContentHash, State: domain.OutcomeState(row.State),
-		PromotionEligible: row.PromotionEligible, PolicyVersion: row.PolicyVersion, Evidence: facts,
+		PromotionEligible: row.PromotionEligible, PolicyVersion: row.PolicyVersion, Evidence: facts, CreatedAt: row.CreatedAt.UTC(),
 	}, true, nil
+}
+
+func recordPipelineQuarantine(ctx context.Context, db *surrealdb.DB, input memworkflow.SynthesisInput, reason string) error {
+	workflowID := store.WorkflowID(input.TenantID, input.TraceID)
+	if input.JobType == store.OutboxJobSynthesizeOutcome {
+		workflowID = store.OutcomeWorkflowID(input.TenantID, input.TraceID, input.OutcomeID)
+	}
+	hash := hashString(string(input.TenantID) + "\x00" + workflowID + "\x00" + reason)
+	id := models.NewRecordID("audit_event", "audit_"+hash)
+	record := map[string]any{
+		"tenant_id": string(input.TenantID), "audit_event_id": "audit_" + hash,
+		"event_type": "pipeline_quarantine", "subject_id": workflowID, "reason_code": reason,
+		"details":    map[string]any{"trace_id": string(input.TraceID), "outcome_id": string(input.OutcomeID)},
+		"created_at": time.Now().UTC(), "schema_version": "audit.v1", "content_hash": hash,
+	}
+	_, err := surrealdb.Query[any](ctx, db, `CREATE ONLY $id CONTENT $record`, map[string]any{"id": id, "record": record})
+	if err == nil {
+		return nil
+	}
+	type row struct {
+		ID string `json:"audit_event_id"`
+	}
+	existing, lookupErr := surrealdb.Query[[]row](ctx, db, `SELECT audit_event_id FROM audit_event WHERE tenant_id = $tenant_id AND audit_event_id = $audit_event_id LIMIT 1`, map[string]any{
+		"tenant_id": string(input.TenantID), "audit_event_id": "audit_" + hash,
+	})
+	if lookupErr == nil && existing != nil && len(*existing) > 0 && len((*existing)[0].Result) == 1 {
+		return nil
+	}
+	if lookupErr != nil {
+		return databaseFailure("resolve pipeline quarantine audit", lookupErr)
+	}
+	return databaseFailure("write pipeline quarantine audit", err)
 }
 
 type verificationRow struct {

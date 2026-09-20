@@ -99,21 +99,28 @@ type OutcomeMetrics struct {
 }
 
 var (
-	metricsOnce        sync.Once
-	requests           metric.Int64Counter
-	latency            metric.Float64Histogram
-	events             metric.Int64Histogram
-	requestBytes       metric.Int64Histogram
-	archiveReuse       metric.Int64Counter
-	transactionRetries metric.Int64Counter
-	outboxCreated      metric.Int64Counter
-	httpRequests       metric.Int64Counter
-	httpLatency        metric.Float64Histogram
-	httpBytes          metric.Int64Histogram
-	outcomeRequests    metric.Int64Counter
-	outcomeLatency     metric.Float64Histogram
-	outcomeEvidence    metric.Int64Histogram
-	outcomeConflicts   metric.Int64Counter
+	metricsOnce                 sync.Once
+	requests                    metric.Int64Counter
+	latency                     metric.Float64Histogram
+	events                      metric.Int64Histogram
+	requestBytes                metric.Int64Histogram
+	archiveReuse                metric.Int64Counter
+	transactionRetries          metric.Int64Counter
+	outboxCreated               metric.Int64Counter
+	httpRequests                metric.Int64Counter
+	httpLatency                 metric.Float64Histogram
+	httpBytes                   metric.Int64Histogram
+	outcomeRequests             metric.Int64Counter
+	outcomeLatency              metric.Float64Histogram
+	outcomeEvidence             metric.Int64Histogram
+	outcomeConflicts            metric.Int64Counter
+	archiveCorruptions          metric.Int64Counter
+	synthesisAbstentions        metric.Int64Counter
+	outboxLeaseAge              metric.Float64Histogram
+	outboxRetries               metric.Int64Counter
+	outboxDeadLetters           metric.Int64Counter
+	projectionLag               metric.Float64Histogram
+	projectionRebuildMismatches metric.Int64Counter
 )
 
 func initializeMetrics() {
@@ -132,6 +139,48 @@ func initializeMetrics() {
 	outcomeLatency, _ = meter.Float64Histogram("memjev.outcome.duration", metric.WithUnit("ms"))
 	outcomeEvidence, _ = meter.Int64Histogram("memjev.outcome.evidence")
 	outcomeConflicts, _ = meter.Int64Counter("memjev.outcome.conflicts")
+	archiveCorruptions, _ = meter.Int64Counter("memjev.archive.corruptions")
+	synthesisAbstentions, _ = meter.Int64Counter("memjev.synthesis.abstentions")
+	outboxLeaseAge, _ = meter.Float64Histogram("memjev.outbox.lease_age", metric.WithUnit("s"))
+	outboxRetries, _ = meter.Int64Counter("memjev.outbox.retries")
+	outboxDeadLetters, _ = meter.Int64Counter("memjev.outbox.dead_letters")
+	projectionLag, _ = meter.Float64Histogram("memjev.projection.lag", metric.WithUnit("s"))
+	projectionRebuildMismatches, _ = meter.Int64Counter("memjev.projection.rebuild_mismatches")
+}
+
+func RecordArchiveCorruption(ctx context.Context, code string) {
+	metricsOnce.Do(initializeMetrics)
+	archiveCorruptions.Add(ctx, 1, metric.WithAttributes(attribute.String("reason.code", code)))
+}
+
+func RecordSynthesisAbstention(ctx context.Context, code string) {
+	metricsOnce.Do(initializeMetrics)
+	synthesisAbstentions.Add(ctx, 1, metric.WithAttributes(attribute.String("reason.code", code)))
+}
+
+func RecordOutboxLeaseAge(ctx context.Context, age time.Duration) {
+	metricsOnce.Do(initializeMetrics)
+	outboxLeaseAge.Record(ctx, age.Seconds())
+}
+
+func RecordOutboxRetry(ctx context.Context, code string, deadLetter bool) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("reason.code", code))
+	if deadLetter {
+		outboxDeadLetters.Add(ctx, 1, options)
+		return
+	}
+	outboxRetries.Add(ctx, 1, options)
+}
+
+func RecordProjectionLag(ctx context.Context, lag time.Duration) {
+	metricsOnce.Do(initializeMetrics)
+	projectionLag.Record(ctx, lag.Seconds())
+}
+
+func RecordRebuildMismatch(ctx context.Context, component string) {
+	metricsOnce.Do(initializeMetrics)
+	projectionRebuildMismatches.Add(ctx, 1, metric.WithAttributes(attribute.String("component", component)))
 }
 
 func RecordOutcome(ctx context.Context, facts OutcomeMetrics) {

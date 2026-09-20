@@ -26,6 +26,8 @@ jobs:
           cache: true
       - name: Verify generated code, contracts, tests, and static analysis
         run: make verify
+      - name: Validate executable alert rules
+        run: ./scripts/check-alert-rules.sh
       - name: Check protobuf compatibility
         if: github.event_name == 'pull_request'
         run: go run github.com/bufbuild/buf/cmd/buf@v1.47.2 breaking --against ".git#branch=origin/${{ github.event.pull_request.base.ref }}"
@@ -33,6 +35,8 @@ jobs:
         run: ./scripts/integration.sh
       - name: Run public smoke test
         run: ./scripts/smoke.sh
+      - name: Prove clean-stack reproducibility
+        run: ./scripts/integration.sh && ./scripts/smoke.sh
       - name: Build release image
         run: docker build --build-arg VERSION=ci --build-arg REVISION=${{ github.sha }} --build-arg BUILT_AT=ci -t memjev-api:${{ github.sha }} .
       - name: Scan release image

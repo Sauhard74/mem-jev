@@ -1,0 +1,45 @@
+groups:
+  - name: memjev-evidence-pipeline
+    rules:
+      - alert: MemjevArchiveCorruption
+        expr: increase(memjev_archive_corruptions_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: Canonical trace archive failed integrity verification
+      - alert: MemjevOutboxDeadLetter
+        expr: increase(memjev_outbox_dead_letters_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: Evidence pipeline delivery entered the dead-letter state
+      - alert: MemjevProjectionRebuildMismatch
+        expr: increase(memjev_projection_rebuild_mismatches_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: Rebuilt projection was not byte-identical
+      - alert: MemjevOutboxLeaseAgeHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(memjev_outbox_lease_age_bucket[10m]))) > 30
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Outbox p95 lease age exceeds 30 seconds
+      - alert: MemjevProjectionLagHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(memjev_projection_lag_bucket[10m]))) > 60
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Projection p95 publication lag exceeds 60 seconds
+      - alert: MemjevSynthesisAbstentionSurge
+        expr: sum(rate(memjev_synthesis_abstentions_total[15m])) / clamp_min(sum(rate(memjev_outcome_requests_total[15m])), 0.001) > 0.25
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 25 percent of outcome workflows are abstaining
+      - alert: MemjevOutcomeConflictSurge
+        expr: sum(rate(memjev_outcome_conflicts_total[15m])) / clamp_min(sum(rate(memjev_outcome_requests_total[15m])), 0.001) > 0.10
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 10 percent of outcomes contain strong conflicts

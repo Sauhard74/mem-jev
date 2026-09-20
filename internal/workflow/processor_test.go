@@ -126,6 +126,45 @@ func TestProcessorRejectsIncorrectStageChain(t *testing.T) {
 	}
 }
 
+func TestInferFailedBranchesScopesEveryFailureToExactEnvironmentToolAndResources(t *testing.T) {
+	node := synthesis.Node{
+		ID: domain.EventID("ev_" + strings.Repeat("f", 64)), ToolContractVersionID: "tcv_writer_1", Succeeded: false,
+		Reads:  []synthesis.Resource{{IdentityHash: "read-b"}, {IdentityHash: "read-a"}},
+		Writes: []synthesis.Resource{{IdentityHash: "write-a"}},
+	}
+	batch := domain.CanonicalBatch{Events: []domain.CanonicalEvent{{ID: node.ID, Fields: []domain.CanonicalField{{Name: "path", Value: "a"}}, Result: &domain.CanonicalResult{State: "TOOL_RESULT_STATE_FAILURE"}}}}
+	branches, err := inferFailedBranches(synthesis.Graph{Nodes: []synthesis.Node{node}}, batch, "environment-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 1 || !strings.HasPrefix(branches[0].FailurePredicateID, "tool_failure:tcv_writer_1:") ||
+		len(branches[0].EventIDs) != 1 || branches[0].EventIDs[0] != node.ID || !branches[0].Scope.Valid() {
+		t.Fatalf("branches = %#v", branches)
+	}
+	second, err := inferFailedBranches(synthesis.Graph{Nodes: []synthesis.Node{node}}, batch, "environment-hash")
+	if err != nil || branches[0].Scope != second[0].Scope {
+		t.Fatalf("scope is not deterministic: first=%#v second=%#v err=%v", branches, second, err)
+	}
+	different, err := inferFailedBranches(synthesis.Graph{Nodes: []synthesis.Node{{
+		ID: node.ID, ToolContractVersionID: node.ToolContractVersionID, Succeeded: false,
+		Writes: []synthesis.Resource{{IdentityHash: "write-b"}},
+	}}}, batch, "environment-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branches[0].Scope.ResourceHash == different[0].Scope.ResourceHash {
+		t.Fatal("resource scope did not change")
+	}
+	changedFailure := batch
+	changedFailure.Events = append([]domain.CanonicalEvent(nil), batch.Events...)
+	exitCode := int32(13)
+	changedFailure.Events[0].Result = &domain.CanonicalResult{State: "TOOL_RESULT_STATE_FAILURE", ExitCode: &exitCode}
+	classified, err := inferFailedBranches(synthesis.Graph{Nodes: []synthesis.Node{node}}, changedFailure, "environment-hash")
+	if err != nil || branches[0].FailurePredicateID == classified[0].FailurePredicateID {
+		t.Fatalf("failure class was not isolated: %#v %#v err=%v", branches, classified, err)
+	}
+}
+
 func testProcessor(t *testing.T, withOutcome bool) (*Processor, *storememory.ProjectionRepository, StartRequest) {
 	t.Helper()
 	tenantID := domain.TenantID("tenant-a")

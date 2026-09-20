@@ -36,6 +36,12 @@ func TestSetupRoutesOTLPSignalsToTheirStandardPaths(t *testing.T) {
 	RecordIngest(context.Background(), IngestMetrics{ResultCode: "accepted", Latency: time.Millisecond, Events: 1, Bytes: 1})
 	RecordOutcome(context.Background(), OutcomeMetrics{ResultCode: "verified_success", Latency: time.Millisecond, Evidence: 1})
 	RecordHTTPRequest(context.Background(), HTTPMetrics{ResultCode: "400", Latency: time.Millisecond, Bytes: 1})
+	RecordArchiveCorruption(context.Background(), "hash_mismatch")
+	RecordSynthesisAbstention(context.Background(), "opaque_tool")
+	RecordOutboxLeaseAge(context.Background(), time.Second)
+	RecordOutboxRetry(context.Background(), "temporal_unavailable", false)
+	RecordProjectionLag(context.Background(), 2*time.Second)
+	RecordRebuildMismatch(context.Background(), "canonical_projection")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := shutdown(ctx); err != nil {
@@ -55,5 +61,10 @@ func TestSetupRoutesOTLPSignalsToTheirStandardPaths(t *testing.T) {
 	}
 	if !bytes.Contains(payloads["/otlp/v1/metrics"], []byte("memjev.outcome.requests")) {
 		t.Fatalf("outcome metric missing from payload")
+	}
+	for _, name := range []string{"memjev.archive.corruptions", "memjev.synthesis.abstentions", "memjev.outbox.lease_age", "memjev.outbox.retries", "memjev.projection.lag", "memjev.projection.rebuild_mismatches"} {
+		if !bytes.Contains(payloads["/otlp/v1/metrics"], []byte(name)) {
+			t.Fatalf("operational metric %q missing from payload", name)
+		}
 	}
 }

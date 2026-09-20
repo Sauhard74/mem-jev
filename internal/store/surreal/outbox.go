@@ -35,6 +35,7 @@ type outboxRow struct {
 	LeaseGeneration int             `json:"lease_generation"`
 	LeaseExpiresAt  *time.Time      `json:"lease_expires_at"`
 	LastErrorCode   *string         `json:"last_error_code"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 func (r *OutboxRepository) ClaimOutbox(ctx context.Context, request store.ClaimOutboxRequest) ([]store.OutboxLease, error) {
@@ -95,6 +96,7 @@ func (r *OutboxRepository) claimOnce(ctx context.Context, request store.ClaimOut
 		return nil, err
 	}
 	leases := make([]store.OutboxLease, 0, len(candidates))
+	leaseAges := make([]time.Duration, 0, len(candidates))
 	leaseExpiry := now.Add(request.LeaseDuration)
 	for _, candidate := range candidates {
 		updated, updateErr := queryOutboxRows(ctx, tx, `UPDATE $id SET
@@ -113,10 +115,16 @@ func (r *OutboxRepository) claimOnce(ctx context.Context, request store.ClaimOut
 		}
 		if len(updated) == 1 {
 			leases = append(leases, leaseFromRow(updated[0]))
+			if !updated[0].CreatedAt.IsZero() {
+				leaseAges = append(leaseAges, now.Sub(updated[0].CreatedAt))
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, age := range leaseAges {
+		observability.RecordOutboxLeaseAge(ctx, age)
 	}
 	return leases, nil
 }

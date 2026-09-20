@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
 
@@ -98,10 +99,14 @@ func (r *Relay) dispatch(ctx context.Context, lease store.OutboxLease) error {
 	if !deadLetter {
 		retryDelay = min(time.Second<<min(lease.AttemptCount-1, 20), r.config.MaximumBackoff)
 	}
-	return r.repository.ReleaseOutbox(ctx, store.ReleaseOutboxRequest{
+	err = r.repository.ReleaseOutbox(ctx, store.ReleaseOutboxRequest{
 		TenantID: lease.TenantID, WorkflowID: lease.WorkflowID, WorkerID: lease.LeaseOwner, FencingToken: lease.FencingToken,
 		RetryDelay: retryDelay, ErrorCode: code, DeadLetter: deadLetter,
 	})
+	if err == nil {
+		observability.RecordOutboxRetry(ctx, code, deadLetter)
+	}
+	return err
 }
 
 func dispatchError(err error) (bool, string) {
