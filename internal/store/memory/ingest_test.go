@@ -22,6 +22,12 @@ func TestOutcomeCommitContract(t *testing.T) {
 	})
 }
 
+func TestProjectionContract(t *testing.T) {
+	storetest.RunProjectionContract(t, func(*testing.T) storetest.ProjectionRepository {
+		return NewProjectionRepository()
+	})
+}
+
 func TestCommitRollsBackAfterEventFailure(t *testing.T) {
 	repository := newIngestRepository(failureAfterEvents)
 	_, err := repository.Commit(context.Background(), storetest.ValidCommitRequest(t))

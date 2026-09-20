@@ -105,6 +105,8 @@ DEFINE FIELD IF NOT EXISTS procedure_id ON TABLE procedure_version TYPE string R
 DEFINE FIELD IF NOT EXISTS graph_hash ON TABLE procedure_version TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS environment_scope_hash ON TABLE procedure_version TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS policy_version ON TABLE procedure_version TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS goal_predicates ON TABLE procedure_version TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_projection ON TABLE procedure_version TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS lifecycle_state ON TABLE procedure_version TYPE string ASSERT $value IN ["candidate", "trial", "active", "stale", "superseded", "quarantined", "retired"];
 DEFINE FIELD IF NOT EXISTS observed_end_to_end ON TABLE procedure_version TYPE bool READONLY;
 DEFINE FIELD IF NOT EXISTS opaque_step_count ON TABLE procedure_version TYPE int READONLY ASSERT $value >= 0;
@@ -163,6 +165,7 @@ DEFINE FIELD IF NOT EXISTS registry_version ON TABLE synthesis_manifest TYPE str
 DEFINE FIELD IF NOT EXISTS policy_version ON TABLE synthesis_manifest TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS graph_builder_version ON TABLE synthesis_manifest TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS synthesizer_version ON TABLE synthesis_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS synthesis_hash ON TABLE synthesis_manifest TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS status ON TABLE synthesis_manifest TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS abstention_code ON TABLE synthesis_manifest TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE synthesis_manifest TYPE datetime READONLY;
@@ -179,6 +182,7 @@ DEFINE FIELD IF NOT EXISTS input_cursor ON TABLE projection_checkpoint TYPE stri
 DEFINE FIELD IF NOT EXISTS manifest_hash ON TABLE projection_checkpoint TYPE string;
 DEFINE FIELD IF NOT EXISTS updated_at ON TABLE projection_checkpoint TYPE datetime;
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE projection_checkpoint TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE projection_checkpoint TYPE string;
 DEFINE INDEX IF NOT EXISTS projection_checkpoint_tenant_name_unique ON TABLE projection_checkpoint FIELDS tenant_id, projection_name UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS audit_event SCHEMAFULL PERMISSIONS NONE;
@@ -205,10 +209,13 @@ DEFINE INDEX IF NOT EXISTS contains_edge_unique ON TABLE contains FIELDS tenant_
 DEFINE TABLE IF NOT EXISTS depends_on SCHEMAFULL TYPE RELATION IN step OUT step ENFORCED PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE depends_on TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
 DEFINE FIELD IF NOT EXISTS dependency_type ON TABLE depends_on TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS resource_name ON TABLE depends_on TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_type ON TABLE depends_on TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_namespace ON TABLE depends_on TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE depends_on TYPE datetime READONLY;
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE depends_on TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE depends_on TYPE string READONLY;
-DEFINE INDEX IF NOT EXISTS depends_on_edge_unique ON TABLE depends_on FIELDS tenant_id, in, out, dependency_type UNIQUE;
+DEFINE INDEX IF NOT EXISTS depends_on_edge_unique ON TABLE depends_on FIELDS tenant_id, in, out, dependency_type, resource_namespace, resource_type, resource_name UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS consumes SCHEMAFULL TYPE RELATION IN step OUT resource_ref ENFORCED PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE consumes TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
@@ -251,3 +258,10 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE derived_from TYPE datetime READON
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE derived_from TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE derived_from TYPE string READONLY;
 DEFINE INDEX IF NOT EXISTS derived_from_edge_unique ON TABLE derived_from FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS supported_by SCHEMAFULL TYPE RELATION IN procedure_version OUT outcome_evidence ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE supported_by TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE supported_by TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE supported_by TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE supported_by TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS supported_by_edge_unique ON TABLE supported_by FIELDS tenant_id, in, out UNIQUE;

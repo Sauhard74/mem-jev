@@ -53,7 +53,10 @@ func (b *Builder) Build(ctx context.Context, request BuildRequest) (Graph, error
 		}
 		for _, resource := range node.Reads {
 			if producer, exists := lastWriter[resource.ID]; exists {
-				addEdge(edges, Edge{From: producer, To: node.ID, Type: EdgeResourceFlow, ResourceID: resource.ID})
+				addEdge(edges, Edge{
+					From: producer, To: node.ID, Type: EdgeResourceFlow, ResourceID: resource.ID,
+					ResourceName: resource.Name, ResourceType: resource.Type, ResourceNamespace: resource.Namespace,
+				})
 			}
 		}
 		for _, resource := range node.Writes {
@@ -144,7 +147,7 @@ func addDeclaredEdges(edges map[string]Edge, positions map[domain.EventID]int, d
 }
 
 func addEdge(edges map[string]Edge, edge Edge) {
-	key := string(edge.From) + "\x00" + string(edge.To) + "\x00" + string(edge.Type) + "\x00" + edge.ResourceID
+	key := string(edge.From) + "\x00" + string(edge.To) + "\x00" + string(edge.Type) + "\x00" + edge.ResourceID + "\x00" + edge.ResourceNamespace + "\x00" + edge.ResourceType + "\x00" + edge.ResourceName
 	edges[key] = edge
 }
 
@@ -156,8 +159,8 @@ func sortEdges(edges []Edge, positions map[domain.EventID]int) {
 		if positions[edges[i].To] != positions[edges[j].To] {
 			return positions[edges[i].To] < positions[edges[j].To]
 		}
-		left := string(edges[i].From) + "\x00" + string(edges[i].To) + "\x00" + string(edges[i].Type) + "\x00" + edges[i].ResourceID
-		right := string(edges[j].From) + "\x00" + string(edges[j].To) + "\x00" + string(edges[j].Type) + "\x00" + edges[j].ResourceID
+		left := string(edges[i].From) + "\x00" + string(edges[i].To) + "\x00" + string(edges[i].Type) + "\x00" + edges[i].ResourceID + "\x00" + edges[i].ResourceNamespace + "\x00" + edges[i].ResourceType + "\x00" + edges[i].ResourceName
+		right := string(edges[j].From) + "\x00" + string(edges[j].To) + "\x00" + string(edges[j].Type) + "\x00" + edges[j].ResourceID + "\x00" + edges[j].ResourceNamespace + "\x00" + edges[j].ResourceType + "\x00" + edges[j].ResourceName
 		return left < right
 	})
 }

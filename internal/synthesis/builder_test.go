@@ -24,7 +24,7 @@ func TestBuilderCreatesOnlyDeclaredCausalEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []synthesis.Edge{
-		{From: batch.Events[0].ID, To: batch.Events[1].ID, Type: synthesis.EdgeResourceFlow, ResourceID: graph.Nodes[0].Writes[0].ID},
+		{From: batch.Events[0].ID, To: batch.Events[1].ID, Type: synthesis.EdgeResourceFlow, ResourceID: graph.Nodes[0].Writes[0].ID, ResourceName: "workspace", ResourceType: "repository", ResourceNamespace: "repo"},
 		{From: batch.Events[0].ID, To: batch.Events[2].ID, Type: synthesis.EdgeVerifier},
 		{From: batch.Events[1].ID, To: batch.Events[2].ID, Type: synthesis.EdgeControl},
 	}

@@ -45,10 +45,13 @@ type Node struct {
 }
 
 type Edge struct {
-	From       domain.EventID `json:"from"`
-	To         domain.EventID `json:"to"`
-	Type       EdgeType       `json:"type"`
-	ResourceID string         `json:"resource_id,omitempty"`
+	From              domain.EventID `json:"from"`
+	To                domain.EventID `json:"to"`
+	Type              EdgeType       `json:"type"`
+	ResourceID        string         `json:"resource_id,omitempty"`
+	ResourceName      string         `json:"resource_name,omitempty"`
+	ResourceType      string         `json:"resource_type,omitempty"`
+	ResourceNamespace string         `json:"resource_namespace,omitempty"`
 }
 
 type Graph struct {

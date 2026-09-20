@@ -161,7 +161,8 @@ func TestEvidenceGraphRejectsCrossTenantEdge(t *testing.T) {
 			tenant_id: "tenant-a", procedure_version_id: "pv_one", procedure_id: "p_one",
 			graph_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			environment_scope_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			policy_version: "policy.v1", lifecycle_state: "candidate", observed_end_to_end: true,
+			policy_version: "policy.v1", goal_predicates: [], canonical_projection: "{}",
+			lifecycle_state: "candidate", observed_end_to_end: true,
 			opaque_step_count: 0, verified_success_count: 1, unsafe_outcome_count: 0,
 			last_evidence_at: time::now(), created_at: time::now(), schema_version: "procedure.v1",
 			content_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
