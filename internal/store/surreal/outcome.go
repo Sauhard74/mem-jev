@@ -277,7 +277,7 @@ func createOutcomeConflictAudit(ctx context.Context, tx *surrealdb.Transaction, 
 func createOutcomeOutbox(ctx context.Context, tx *surrealdb.Transaction, request store.CommitOutcomeRequest, receipt store.OutcomeReceipt, createdAt time.Time) error {
 	return execute(ctx, tx, "create outcome outbox job", "CREATE ONLY outbox_job CONTENT $record", map[string]any{"record": map[string]any{
 		"tenant_id": string(request.TenantID), "workflow_id": receipt.WorkflowID, "trace_id": string(request.Outcome.TraceID),
-		"outcome_id": string(request.Outcome.ID), "job_type": "synthesize_outcome", "state": "pending", "attempt_count": 0,
+		"outcome_id": string(request.Outcome.ID), "job_type": "synthesize_outcome", "state": "pending", "attempt_count": 0, "lease_generation": 0,
 		"available_at": createdAt, "created_at": createdAt, "schema_version": request.Outcome.SchemaVersion, "content_hash": request.Outcome.Hash,
 	}})
 }

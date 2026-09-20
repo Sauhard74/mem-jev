@@ -299,16 +299,17 @@ func createEvent(ctx context.Context, tx *surrealdb.Transaction, request store.C
 
 func createOutbox(ctx context.Context, tx *surrealdb.Transaction, request store.CommitIngestRequest, receipt store.IngestReceipt, createdAt time.Time) error {
 	return execute(ctx, tx, "create outbox job", "CREATE ONLY outbox_job CONTENT $record", map[string]any{"record": map[string]any{
-		"tenant_id":      string(request.TenantID),
-		"workflow_id":    receipt.WorkflowID,
-		"trace_id":       string(request.Batch.Trace.ID),
-		"job_type":       "synthesize_trace",
-		"state":          "pending",
-		"attempt_count":  0,
-		"available_at":   createdAt,
-		"created_at":     createdAt,
-		"schema_version": request.Batch.SchemaVersion,
-		"content_hash":   request.Batch.Hash,
+		"tenant_id":        string(request.TenantID),
+		"workflow_id":      receipt.WorkflowID,
+		"trace_id":         string(request.Batch.Trace.ID),
+		"job_type":         "synthesize_trace",
+		"state":            "pending",
+		"attempt_count":    0,
+		"lease_generation": 0,
+		"available_at":     createdAt,
+		"created_at":       createdAt,
+		"schema_version":   request.Batch.SchemaVersion,
+		"content_hash":     request.Batch.Hash,
 	}})
 }
 

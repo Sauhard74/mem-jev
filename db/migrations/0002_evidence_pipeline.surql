@@ -14,6 +14,13 @@ DEFINE FIELD IF NOT EXISTS content_hash ON TABLE outcome_receipt TYPE string REA
 DEFINE INDEX IF NOT EXISTS outcome_receipt_tenant_idempotency_unique ON TABLE outcome_receipt FIELDS tenant_id, idempotency_key_hash UNIQUE;
 
 DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE outbox_job TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS lease_owner ON TABLE outbox_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS lease_generation ON TABLE outbox_job TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS lease_expires_at ON TABLE outbox_job TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_error_code ON TABLE outbox_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS completed_at ON TABLE outbox_job TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS outbox_job_lease_scan ON TABLE outbox_job FIELDS state, available_at, lease_expires_at, created_at;
+UPDATE outbox_job SET lease_generation = 0 WHERE lease_generation = NONE;
 
 DEFINE TABLE IF NOT EXISTS outcome_evidence SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE outcome_evidence TYPE string READONLY;
