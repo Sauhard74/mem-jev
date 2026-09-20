@@ -85,6 +85,7 @@ type Query struct {
 	Tools            []Tool          `json:"tools"`
 	Harness          Harness         `json:"harness"`
 	Environment      []Fact          `json:"environment,omitempty"`
+	EnvironmentHash  string          `json:"environment_hash"`
 	Resources        []Resource      `json:"resources,omitempty"`
 	Constraints      []Fact          `json:"constraints,omitempty"`
 	ForbiddenEffects []string        `json:"forbidden_effects,omitempty"`
@@ -156,6 +157,10 @@ func BuildQuery(tenantID domain.TenantID, policyVersion string, aliases AliasSet
 		return Query{}, err
 	}
 	query.Environment, err = normalizeFacts("environment", input.Environment)
+	if err != nil {
+		return Query{}, err
+	}
+	_, query.EnvironmentHash, err = canonical.MarshalAndHash(query.Environment)
 	if err != nil {
 		return Query{}, err
 	}

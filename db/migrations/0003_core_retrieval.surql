@@ -61,6 +61,9 @@ DEFINE INDEX IF NOT EXISTS retrieval_document_tenant_version_epoch_unique ON TAB
 DEFINE INDEX IF NOT EXISTS retrieval_document_exact ON TABLE retrieval_document FIELDS tenant_id, intent_hash, effect_signature_hash, projection_epoch;
 DEFINE INDEX IF NOT EXISTS retrieval_document_serving ON TABLE retrieval_document FIELDS tenant_id, lifecycle_state, projection_epoch, validated_at;
 DEFINE INDEX IF NOT EXISTS retrieval_document_environment ON TABLE retrieval_document FIELDS tenant_id, environment_scope_hash, projection_epoch;
+DEFINE INDEX IF NOT EXISTS retrieval_document_harness ON TABLE retrieval_document FIELDS tenant_id, harness_name, harness_version, projection_epoch;
+DEFINE INDEX IF NOT EXISTS retrieval_document_tools ON TABLE retrieval_document FIELDS tenant_id, tool_contract_version_ids, projection_epoch;
+DEFINE INDEX IF NOT EXISTS retrieval_document_resources ON TABLE retrieval_document FIELDS tenant_id, resource_types, resource_namespaces, projection_epoch;
 DEFINE ANALYZER IF NOT EXISTS retrieval_text_analyzer TOKENIZERS class, camel, punct FILTERS lowercase, ascii;
 DEFINE INDEX IF NOT EXISTS retrieval_document_task_text ON TABLE retrieval_document FIELDS task_text FULLTEXT ANALYZER retrieval_text_analyzer BM25;
 
@@ -234,6 +237,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_uses_tool TYPE datetime
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_uses_tool TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_uses_tool TYPE string READONLY;
 DEFINE INDEX IF NOT EXISTS retrieval_uses_tool_unique ON TABLE retrieval_uses_tool FIELDS tenant_id, in, out UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_uses_tool_reverse ON TABLE retrieval_uses_tool FIELDS tenant_id, out, in;
 
 DEFINE TABLE IF NOT EXISTS retrieval_requires_resource SCHEMAFULL TYPE RELATION IN retrieval_document OUT resource_ref ENFORCED PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_requires_resource TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
@@ -241,6 +245,7 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_requires_resource TYPE 
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_requires_resource TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_requires_resource TYPE string READONLY;
 DEFINE INDEX IF NOT EXISTS retrieval_requires_resource_unique ON TABLE retrieval_requires_resource FIELDS tenant_id, in, out UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_requires_resource_reverse ON TABLE retrieval_requires_resource FIELDS tenant_id, out, in;
 
 DEFINE TABLE IF NOT EXISTS retrieval_has_effect SCHEMAFULL TYPE RELATION IN retrieval_document OUT effect_ref ENFORCED PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_has_effect TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
@@ -255,3 +260,4 @@ DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_has_prefix TYPE datetim
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_has_prefix TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_has_prefix TYPE string READONLY;
 DEFINE INDEX IF NOT EXISTS retrieval_has_prefix_unique ON TABLE retrieval_has_prefix FIELDS tenant_id, in, out UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_has_prefix_reverse ON TABLE retrieval_has_prefix FIELDS tenant_id, out, in;
