@@ -126,6 +126,7 @@ func cloneManifest(source Manifest) Manifest {
 	result.Outputs = slices.Clone(source.Outputs)
 	result.Reads = slices.Clone(source.Reads)
 	result.Writes = slices.Clone(source.Writes)
+	result.Effects = slices.Clone(source.Effects)
 	result.Preconditions = slices.Clone(source.Preconditions)
 	result.SuccessPredicates = slices.Clone(source.SuccessPredicates)
 	result.VerificationMethods = slices.Clone(source.VerificationMethods)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
@@ -14,6 +15,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/projection"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/synthesis"
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
@@ -83,8 +85,10 @@ type StageArtifactRepository interface {
 }
 
 type ProcessorConfig struct {
-	ArtifactRetention time.Duration
-	Versions          synthesis.Versions
+	ArtifactRetention        time.Duration
+	Versions                 synthesis.Versions
+	ResidencyRegion          string
+	LearnedWithRecallConsent bool
 }
 
 type Processor struct {
@@ -99,7 +103,7 @@ type Processor struct {
 func NewProcessor(sources SourceLoader, registries RegistryProvider, artifacts StageArtifactRepository, projections projection.Repository, config ProcessorConfig) (*Processor, error) {
 	if sources == nil || registries == nil || artifacts == nil || projections == nil || config.ArtifactRetention < time.Hour ||
 		config.Versions.Sanitizer == "" || config.Versions.Registry == "" || config.Versions.Policy == "" ||
-		config.Versions.GraphBuilder == "" || config.Versions.Synthesizer == "" {
+		config.Versions.GraphBuilder == "" || config.Versions.Synthesizer == "" || config.ResidencyRegion == "" || !config.LearnedWithRecallConsent {
 		return nil, errors.New("invalid pipeline processor configuration")
 	}
 	return &Processor{sources: sources, registries: registries, artifacts: artifacts, projections: projections, config: config, now: time.Now}, nil
@@ -251,7 +255,7 @@ func (p *Processor) Publish(ctx context.Context, request StageRequest) (StageRes
 			TenantID: request.Input.TenantID, OutcomeID: request.Input.OutcomeID,
 			IntentHash: graph.IntentHash, EffectSignatureHash: graph.EffectSignatureHash, EnvironmentScopeHash: graph.EnvironmentHash,
 			ArchiveHash: source.ArchiveHash, CanonicalEventStart: 0, CanonicalEventEnd: uint32(len(source.Batch.Events) - 1),
-			CreatedAt: p.now().UTC(), Synthesis: synthesized,
+			CreatedAt: p.now().UTC(), Synthesis: synthesized, Serving: servingMetadata(source, graph.Graph, synthesized, p.config),
 		})
 		if err != nil {
 			return nil, "", "", &StageError{Code: "projection_build_failed", Err: err}
@@ -278,6 +282,83 @@ func (p *Processor) Publish(ctx context.Context, request StageRequest) (StageRes
 		}
 		return payload, StageStatusReady, code, nil
 	})
+}
+
+func servingMetadata(source LoadedSource, graph synthesis.Graph, result synthesis.Result, config ProcessorConfig) projection.ServingMetadata {
+	selected := make(map[domain.EventID]struct{}, len(result.Steps))
+	for _, step := range result.Steps {
+		selected[step.EventID] = struct{}{}
+	}
+	resources := make(map[string]retrieval.ResourceRequirement)
+	effects := make(map[string]struct{})
+	risk := toolcontract.RiskLow
+	for _, node := range graph.Nodes {
+		if _, ok := selected[node.ID]; !ok {
+			continue
+		}
+		allResources := append(append([]synthesis.Resource(nil), node.Reads...), node.Writes...)
+		for _, resource := range allResources {
+			key := resource.Type + "\x00" + resource.Namespace + "\x00" + resource.IdentityHash
+			resources[key] = retrieval.ResourceRequirement{Type: resource.Type, Namespace: resource.Namespace, IdentityHash: resource.IdentityHash, SchemaVersion: resource.SchemaVersion}
+		}
+		for _, effect := range node.Effects {
+			effects[effect] = struct{}{}
+		}
+		if len(node.Effects) == 0 && node.SideEffect != toolcontract.SideEffectNone {
+			effects["side_effect:"+string(node.SideEffect)] = struct{}{}
+		}
+		if riskOrder(node.Risk) > riskOrder(risk) {
+			risk = node.Risk
+		}
+	}
+	resourceList := make([]retrieval.ResourceRequirement, 0, len(resources))
+	for _, resource := range resources {
+		resourceList = append(resourceList, resource)
+	}
+	effectList := make([]string, 0, len(effects))
+	for effect := range effects {
+		effectList = append(effectList, effect)
+	}
+	environment := make([]retrieval.Fact, len(source.Batch.Trace.Environment))
+	for index, fact := range source.Batch.Trace.Environment {
+		environment[index] = retrieval.Fact{Name: fact.Name, Value: fact.Value}
+	}
+	task := source.Batch.Trace.Task
+	if strings.TrimSpace(task) == "" {
+		parts := make([]string, len(result.Steps))
+		for index, step := range result.Steps {
+			parts[index] = step.ToolName
+		}
+		task = "tools " + strings.Join(parts, " then ") + " goals " + strings.Join(result.GoalPredicates, " ")
+	}
+	return projection.ServingMetadata{
+		TaskText: task, Harness: retrieval.Harness{Name: source.Batch.Trace.Harness, Version: source.Batch.Trace.HarnessVersion},
+		Environment: environment, Resources: resourceList, Effects: effectList, RiskClass: string(risk),
+		VerificationStrength: verificationStrength(source.Outcome), LearnedWithRecallConsent: config.LearnedWithRecallConsent,
+		ResidencyRegion: config.ResidencyRegion,
+	}
+}
+
+func verificationStrength(outcome *StoredOutcome) uint8 {
+	strength := uint8(0)
+	if outcome == nil {
+		return strength
+	}
+	weights := map[domain.EvidenceClass]uint8{
+		domain.EvidenceClassIndependentVerifier: 5, domain.EvidenceClassGoalPredicate: 4,
+		domain.EvidenceClassHarnessAssertion: 3, domain.EvidenceClassToolPostcondition: 2,
+		domain.EvidenceClassExitStatusOrSelfReport: 1,
+	}
+	for _, item := range outcome.Evidence {
+		if item.Verdict == domain.EvidenceVerdictSatisfied && weights[item.Class] > strength {
+			strength = weights[item.Class]
+		}
+	}
+	return strength
+}
+
+func riskOrder(risk toolcontract.RiskClass) int {
+	return map[toolcontract.RiskClass]int{toolcontract.RiskLow: 1, toolcontract.RiskMedium: 2, toolcontract.RiskHigh: 3, toolcontract.RiskCritical: 4}[risk]
 }
 
 func (p *Processor) runStage(ctx context.Context, request StageRequest, prerequisites []Stage, build func() (any, StageStatus, string, error)) (StageResult, error) {

@@ -44,6 +44,9 @@ func Canonicalize(source Manifest) (Manifest, error) {
 	if manifest.Writes, err = canonicalResources(source.Writes, fields); err != nil {
 		return Manifest{}, fmt.Errorf("%w: writes: %w", ErrInvalidManifest, err)
 	}
+	if manifest.Effects, err = canonicalEffects(source.Effects); err != nil {
+		return Manifest{}, err
+	}
 	resources := make(map[string]struct{}, len(manifest.Reads)+len(manifest.Writes))
 	for _, resource := range append(append([]ResourceSpec(nil), manifest.Reads...), manifest.Writes...) {
 		resources[resource.Name] = struct{}{}
@@ -100,7 +103,7 @@ func canonicalResources(source []ResourceSpec, fields map[string]struct{}) ([]Re
 	result := make([]ResourceSpec, len(source))
 	seen := make(map[string]struct{}, len(source))
 	for index, resource := range source {
-		result[index] = ResourceSpec{Name: token(resource.Name), Type: token(resource.Type), Namespace: token(resource.Namespace), Field: token(resource.Field)}
+		result[index] = ResourceSpec{Name: token(resource.Name), Type: token(resource.Type), Namespace: token(resource.Namespace), Field: token(resource.Field), SchemaVersion: token(resource.SchemaVersion)}
 		item := result[index]
 		if item.Name == "" || item.Type == "" || item.Namespace == "" || item.Field == "" {
 			return nil, errors.New("resource name, type, namespace, and identity field are required")
@@ -118,6 +121,23 @@ func canonicalResources(source []ResourceSpec, fields map[string]struct{}) ([]Re
 		left, right := result[i].Namespace+"\x00"+result[i].Name, result[j].Namespace+"\x00"+result[j].Name
 		return left < right
 	})
+	return result, nil
+}
+
+func canonicalEffects(source []EffectSpec) ([]EffectSpec, error) {
+	result := make([]EffectSpec, len(source))
+	seen := make(map[string]struct{}, len(source))
+	for index, effect := range source {
+		result[index] = EffectSpec{Name: token(effect.Name), Risk: RiskClass(token(string(effect.Risk)))}
+		if result[index].Name == "" || !validRisk(result[index].Risk) {
+			return nil, invalid("effects require a name and risk")
+		}
+		if _, exists := seen[result[index].Name]; exists {
+			return nil, invalid("duplicate effect")
+		}
+		seen[result[index].Name] = struct{}{}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil
 }
 

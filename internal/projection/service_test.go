@@ -8,6 +8,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/projection"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/synthesis"
 )
 
@@ -91,6 +92,12 @@ func buildRequest() projection.BuildRequest {
 		IntentHash: strings.Repeat("a", 64), EffectSignatureHash: strings.Repeat("b", 64), EnvironmentScopeHash: strings.Repeat("c", 64),
 		ArchiveHash: strings.Repeat("f", 64), CanonicalEventStart: 0, CanonicalEventEnd: 1,
 		CreatedAt: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+		Serving: projection.ServingMetadata{
+			TaskText: "write and verify", Harness: retrieval.Harness{Name: "test-harness", Version: "1"},
+			Resources: []retrieval.ResourceRequirement{{Type: "repository", Namespace: "repo", IdentityHash: strings.Repeat("9", 64), SchemaVersion: "v1"}},
+			Effects:   []string{"filesystem.write"}, RiskClass: "medium", VerificationStrength: 5,
+			LearnedWithRecallConsent: true, ResidencyRegion: "local",
+		},
 		Synthesis: synthesis.Result{
 			SchemaVersion: "synthesis.v1", Status: synthesis.StatusSynthesized, TraceID: "tr_first",
 			CausalGraphHash: "source-graph", ObservedEndToEnd: true, Hash: strings.Repeat("8", 64),

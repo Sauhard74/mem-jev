@@ -3,11 +3,14 @@ package memory
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/projection"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 )
 
 type ProjectionRepository struct {
@@ -20,6 +23,8 @@ type ProjectionRepository struct {
 	manifests map[string]projection.Manifest
 	evidence  map[string]struct{}
 	canonical map[string][]byte
+	documents map[string]retrieval.Document
+	epochs    map[domain.TenantID]uint64
 }
 
 func NewProjectionRepository() *ProjectionRepository {
@@ -27,6 +32,7 @@ func NewProjectionRepository() *ProjectionRepository {
 		families: make(map[string]projection.Family), versions: make(map[string]projection.Version),
 		steps: make(map[string]projection.Step), edges: make(map[string]projection.Edge), negative: make(map[string]struct{}),
 		manifests: make(map[string]projection.Manifest), evidence: make(map[string]struct{}), canonical: make(map[string][]byte),
+		documents: make(map[string]retrieval.Document), epochs: make(map[domain.TenantID]uint64),
 	}
 }
 
@@ -82,6 +88,20 @@ func (r *ProjectionRepository) Publish(ctx context.Context, value projection.Pro
 		receipt.EvidenceAdded = true
 	}
 	r.manifests[value.Manifest.ID] = value.Manifest
+	count := uint64(0)
+	for key := range r.evidence {
+		if strings.HasPrefix(key, value.Version.ID+"\x00") {
+			count++
+		}
+	}
+	document, err := retrieval.ReviseEvidence(value.RetrievalDocument, count, 0, value.CreatedAt)
+	if err != nil {
+		return projection.PublishReceipt{}, err
+	}
+	r.epochs[value.TenantID]++
+	receipt.ProjectionEpoch = r.epochs[value.TenantID]
+	receipt.RetrievalDocumentID = document.ID
+	r.documents[documentKey(value.TenantID, value.Version.ID, receipt.ProjectionEpoch)] = document
 	return receipt, nil
 }
 
@@ -91,7 +111,32 @@ func (r *ProjectionRepository) Counts(ctx context.Context) (projection.Counts, e
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return projection.Counts{Families: len(r.families), Versions: len(r.versions), Steps: len(r.steps), Edges: len(r.edges), NegativePaths: len(r.negative), Manifests: len(r.manifests), EvidenceLinks: len(r.evidence)}, nil
+	return projection.Counts{Families: len(r.families), Versions: len(r.versions), Steps: len(r.steps), Edges: len(r.edges), NegativePaths: len(r.negative), Manifests: len(r.manifests), EvidenceLinks: len(r.evidence), RetrievalDocuments: len(r.documents), ProjectionEpochs: epochCount(r.epochs)}, nil
+}
+
+func (r *ProjectionRepository) RetrievalDocument(ctx context.Context, tenantID domain.TenantID, versionID string, epoch uint64) (retrieval.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return retrieval.Document{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	document, ok := r.documents[documentKey(tenantID, versionID, epoch)]
+	if !ok {
+		return retrieval.Document{}, projection.ErrProjectionNotFound
+	}
+	return document, nil
+}
+
+func documentKey(tenantID domain.TenantID, versionID string, epoch uint64) string {
+	return fmt.Sprintf("%s\x00%s\x00%020d", tenantID, versionID, epoch)
+}
+
+func epochCount(epochs map[domain.TenantID]uint64) int {
+	total := 0
+	for _, epoch := range epochs {
+		total += int(epoch)
+	}
+	return total
 }
 
 func (r *ProjectionRepository) Canonical(ctx context.Context, tenantID domain.TenantID, versionID string) ([]byte, error) {

@@ -63,6 +63,19 @@ func seedProjectionOutcomes(t *testing.T, db *surrealdb.DB) {
 			t.Fatal(err)
 		}
 	}
+	for index, contractID := range []string{"tcv_write", "tcv_verify", "tcv_verify_v2"} {
+		_, err := surrealdb.Query[any](context.Background(), db, `CREATE ONLY type::record("tool_contract_version", $id) CONTENT $record`, map[string]any{
+			"id": contractID,
+			"record": map[string]any{
+				"tenant_id": "tenant_a", "contract_version_id": contractID, "tool_id": "tool_" + contractID,
+				"tool_version": "1.0.0", "manifest": map[string]any{}, "created_at": time.Date(2026, 9, 20, 0, 0, index+1, 0, time.UTC),
+				"schema_version": "tool-contract.v1", "content_hash": fmt.Sprintf("%064x", index+500),
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestCommitRollsBackAfterEventFailure(t *testing.T) {

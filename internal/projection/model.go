@@ -9,6 +9,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/synthesis"
 )
 
@@ -27,6 +28,19 @@ type BuildRequest struct {
 	CanonicalEventEnd    uint32
 	CreatedAt            time.Time
 	Synthesis            synthesis.Result
+	Serving              ServingMetadata
+}
+
+type ServingMetadata struct {
+	TaskText                 string
+	Harness                  retrieval.Harness
+	Environment              []retrieval.Fact
+	Resources                []retrieval.ResourceRequirement
+	Effects                  []string
+	RiskClass                string
+	VerificationStrength     uint8
+	LearnedWithRecallConsent bool
+	ResidencyRegion          string
 }
 
 type Family struct {
@@ -95,6 +109,7 @@ type Projection struct {
 	Manifest                Manifest              `json:"manifest"`
 	CreatedAt               time.Time             `json:"-"`
 	CanonicalProjectionJSON []byte                `json:"-"`
+	RetrievalDocument       retrieval.Document    `json:"-"`
 }
 
 type logicalStep struct {
@@ -142,6 +157,27 @@ func Build(request BuildRequest) (Projection, error) {
 		projection.GoalPredicates = append([]string(nil), request.Synthesis.GoalPredicates...)
 		sort.Strings(projection.GoalPredicates)
 		projection.CanonicalProjectionJSON = canonicalJSON
+		toolRequirements := make([]retrieval.ToolRequirement, len(projection.Steps))
+		orderedContracts := make([]string, len(projection.Steps))
+		for index, step := range projection.Steps {
+			toolRequirements[index] = retrieval.ToolRequirement{Name: step.ToolName, ContractVersionID: step.ToolContractVersionID}
+			orderedContracts[index] = step.ToolContractVersionID
+		}
+		projection.RetrievalDocument, err = retrieval.BuildDocument(retrieval.DocumentInput{
+			TenantID: request.TenantID, ProcedureVersionID: version.ID, ProcedureID: family.ID,
+			TaskText: request.Serving.TaskText, IntentHash: family.IntentHash, EffectSignatureHash: family.EffectSignatureHash,
+			Tools: toolRequirements, OrderedStepContractIDs: orderedContracts, Resources: request.Serving.Resources,
+			Effects: request.Serving.Effects, EnvironmentScopeHash: version.EnvironmentScopeHash,
+			Harness: request.Serving.Harness, Environment: request.Serving.Environment,
+			Lifecycle: "candidate", ObservedEndToEnd: version.ObservedEndToEnd,
+			VerificationStrength: request.Serving.VerificationStrength, VerifiedSuccessCount: 1,
+			ValidatedAt: request.CreatedAt, ValidationPolicyVersion: version.PolicyVersion,
+			LearnedWithRecallConsent: request.Serving.LearnedWithRecallConsent,
+			ResidencyRegion:          request.Serving.ResidencyRegion, RiskClass: request.Serving.RiskClass,
+		})
+		if err != nil {
+			return Projection{}, err
+		}
 	} else if request.Synthesis.Status != synthesis.StatusAbstained || request.Synthesis.AbstentionCode == "" {
 		return Projection{}, ErrInvalidBuildRequest
 	}

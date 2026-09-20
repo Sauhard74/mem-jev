@@ -23,11 +23,12 @@ const (
 )
 
 type Resource struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Namespace    string `json:"namespace"`
-	IdentityHash string `json:"identity_hash"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Namespace     string `json:"namespace"`
+	IdentityHash  string `json:"identity_hash"`
+	SchemaVersion string `json:"schema_version,omitempty"`
 }
 
 type Node struct {
@@ -39,6 +40,8 @@ type Node struct {
 	Opaque                bool                         `json:"opaque"`
 	Succeeded             bool                         `json:"succeeded"`
 	SideEffect            toolcontract.SideEffectClass `json:"side_effect"`
+	Risk                  toolcontract.RiskClass       `json:"risk"`
+	Effects               []string                     `json:"effects,omitempty"`
 	CompensationBoundary  bool                         `json:"compensation_boundary"`
 	SuccessPredicates     []string                     `json:"success_predicates,omitempty"`
 	VerificationMethods   []string                     `json:"verification_methods,omitempty"`

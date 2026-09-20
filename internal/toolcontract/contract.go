@@ -53,10 +53,16 @@ type FieldSpec struct {
 }
 
 type ResourceSpec struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Namespace string `json:"namespace"`
-	Field     string `json:"field"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Namespace     string `json:"namespace"`
+	Field         string `json:"field"`
+	SchemaVersion string `json:"schema_version,omitempty"`
+}
+
+type EffectSpec struct {
+	Name string    `json:"name"`
+	Risk RiskClass `json:"risk"`
 }
 
 type IdempotencySpec struct {
@@ -102,6 +108,7 @@ type Manifest struct {
 	Outputs             []FieldSpec          `json:"outputs,omitempty"`
 	Reads               []ResourceSpec       `json:"reads,omitempty"`
 	Writes              []ResourceSpec       `json:"writes,omitempty"`
+	Effects             []EffectSpec         `json:"effects,omitempty"`
 	SideEffect          SideEffectClass      `json:"side_effect"`
 	Risk                RiskClass            `json:"risk"`
 	Idempotency         IdempotencySpec      `json:"idempotency"`

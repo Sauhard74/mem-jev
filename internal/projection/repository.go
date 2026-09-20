@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 )
 
 var (
@@ -24,13 +25,15 @@ const (
 )
 
 type PublishReceipt struct {
-	ManifestID         string
-	ProcedureID        string
-	ProcedureVersionID string
-	Disposition        Disposition
-	NewFamily          bool
-	NewVersion         bool
-	EvidenceAdded      bool
+	ManifestID          string
+	ProcedureID         string
+	ProcedureVersionID  string
+	Disposition         Disposition
+	NewFamily           bool
+	NewVersion          bool
+	EvidenceAdded       bool
+	ProjectionEpoch     uint64
+	RetrievalDocumentID string
 }
 
 type Repository interface {
@@ -38,13 +41,15 @@ type Repository interface {
 }
 
 type Counts struct {
-	Families      int
-	Versions      int
-	Steps         int
-	Edges         int
-	NegativePaths int
-	Manifests     int
-	EvidenceLinks int
+	Families           int
+	Versions           int
+	Steps              int
+	Edges              int
+	NegativePaths      int
+	Manifests          int
+	EvidenceLinks      int
+	RetrievalDocuments int
+	ProjectionEpochs   int
 }
 
 func Validate(value Projection) error {
@@ -60,6 +65,10 @@ func Validate(value Projection) error {
 	if value.Manifest.Status != "synthesized" || value.Family.ID == "" || value.Version.ID == "" ||
 		value.Version.ProcedureID != value.Family.ID || value.Manifest.ProcedureVersionID != value.Version.ID ||
 		len(value.Steps) == 0 || len(value.CanonicalProjectionJSON) == 0 {
+		return ErrInvalidProjection
+	}
+	if err := retrieval.ValidateDocument(value.RetrievalDocument); err != nil || value.RetrievalDocument.TenantID != value.TenantID ||
+		value.RetrievalDocument.ProcedureVersionID != value.Version.ID || value.RetrievalDocument.ProcedureID != value.Family.ID {
 		return ErrInvalidProjection
 	}
 	for index, step := range value.Steps {

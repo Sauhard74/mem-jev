@@ -10,7 +10,7 @@ DEFINE FIELD IF NOT EXISTS content_hash ON TABLE projection_epoch TYPE string RE
 DEFINE INDEX IF NOT EXISTS projection_epoch_tenant_epoch_unique ON TABLE projection_epoch FIELDS tenant_id, epoch UNIQUE;
 DEFINE INDEX IF NOT EXISTS projection_epoch_latest ON TABLE projection_epoch FIELDS tenant_id, epoch;
 
--- One tenant-scoped allocation record is locked FOR UPDATE while a writer publishes the next epoch.
+-- One tenant-scoped allocation record is updated by every publisher, making concurrent commits conflict.
 DEFINE TABLE IF NOT EXISTS projection_epoch_head SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE projection_epoch_head TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS current_epoch ON TABLE projection_epoch_head TYPE int ASSERT $value >= 0;
@@ -23,6 +23,7 @@ DEFINE INDEX IF NOT EXISTS projection_epoch_head_tenant_unique ON TABLE projecti
 -- Immutable denormalized serving documents. Mutable lifecycle changes publish a new serving revision/epoch.
 DEFINE TABLE IF NOT EXISTS retrieval_document SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_document_id ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS procedure_id ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS projection_epoch ON TABLE retrieval_document TYPE int READONLY ASSERT $value > 0;
@@ -34,10 +35,13 @@ DEFINE FIELD IF NOT EXISTS tool_contract_version_ids ON TABLE retrieval_document
 DEFINE FIELD IF NOT EXISTS resource_types ON TABLE retrieval_document TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS resource_namespaces ON TABLE retrieval_document TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS resource_identity_hashes ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_schema_versions ON TABLE retrieval_document TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS effects ON TABLE retrieval_document TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS environment_scope_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;
 DEFINE FIELD IF NOT EXISTS harness_name ON TABLE retrieval_document TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS harness_version ON TABLE retrieval_document TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS environment_facts ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS prefix_hashes ON TABLE retrieval_document TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS lifecycle_state ON TABLE retrieval_document TYPE string READONLY ASSERT $value IN ["candidate", "trial", "active", "stale", "superseded", "quarantined", "retired"];
 DEFINE FIELD IF NOT EXISTS superseded_by ON TABLE retrieval_document TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS observed_end_to_end ON TABLE retrieval_document TYPE bool READONLY;
@@ -46,9 +50,10 @@ DEFINE FIELD IF NOT EXISTS verified_success_count ON TABLE retrieval_document TY
 DEFINE FIELD IF NOT EXISTS unsafe_outcome_count ON TABLE retrieval_document TYPE int READONLY ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS validated_at ON TABLE retrieval_document TYPE datetime READONLY;
 DEFINE FIELD IF NOT EXISTS validation_policy_version ON TABLE retrieval_document TYPE string READONLY;
-DEFINE FIELD IF NOT EXISTS recall_allowed ON TABLE retrieval_document TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS learned_with_recall_consent ON TABLE retrieval_document TYPE bool READONLY ASSERT $value = true;
 DEFINE FIELD IF NOT EXISTS residency_region ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS risk_class ON TABLE retrieval_document TYPE string READONLY ASSERT $value IN ["low", "medium", "high", "critical"];
+DEFINE FIELD IF NOT EXISTS canonical_document ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_document TYPE datetime READONLY;
 DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_document TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;

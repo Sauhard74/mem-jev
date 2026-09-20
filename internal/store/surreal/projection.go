@@ -2,12 +2,15 @@ package surreal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/projection"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 )
@@ -155,6 +158,19 @@ func (r *ProjectionRepository) publishOnce(ctx context.Context, value projection
 			return projection.PublishReceipt{}, err
 		}
 	}
+	verifiedCount, unsafeCount, err := versionEvidenceCounts(ctx, tx, versionID)
+	if err != nil {
+		return projection.PublishReceipt{}, err
+	}
+	document, err := retrieval.ReviseEvidence(value.RetrievalDocument, uint64(verifiedCount), uint64(unsafeCount), value.CreatedAt)
+	if err != nil {
+		return projection.PublishReceipt{}, err
+	}
+	epoch, err := publishRetrievalDocument(ctx, tx, value, document)
+	if err != nil {
+		return projection.PublishReceipt{}, err
+	}
+	receipt.ProjectionEpoch, receipt.RetrievalDocumentID = epoch, document.ID
 	if err := createManifest(ctx, tx, value); err != nil {
 		return projection.PublishReceipt{}, err
 	}
@@ -165,6 +181,206 @@ func (r *ProjectionRepository) publishOnce(ctx context.Context, value projection
 		return projection.PublishReceipt{}, err
 	}
 	return receipt, nil
+}
+
+func versionEvidenceCounts(ctx context.Context, tx *surrealdb.Transaction, id models.RecordID) (int, int, error) {
+	type row struct {
+		Verified int `json:"verified_success_count"`
+		Unsafe   int `json:"unsafe_outcome_count"`
+	}
+	results, err := surrealdb.Query[[]row](ctx, tx, `SELECT verified_success_count, unsafe_outcome_count FROM $id LIMIT 1`, map[string]any{"id": id})
+	if err != nil || results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		if err == nil {
+			err = projection.ErrInvalidProjection
+		}
+		return 0, 0, err
+	}
+	rowValue := (*results)[0].Result[0]
+	return rowValue.Verified, rowValue.Unsafe, nil
+}
+
+func publishRetrievalDocument(ctx context.Context, tx *surrealdb.Transaction, value projection.Projection, document retrieval.Document) (uint64, error) {
+	type headRow struct {
+		CurrentEpoch    uint64 `json:"current_epoch"`
+		DocumentSetHash string `json:"document_set_hash"`
+	}
+	headID := models.NewRecordID("projection_epoch_head", "retrieval_"+string(value.TenantID))
+	results, err := surrealdb.Query[[]headRow](ctx, tx, `SELECT current_epoch, document_set_hash FROM $id`, map[string]any{"id": headID})
+	if err != nil {
+		return 0, err
+	}
+	var current uint64
+	previousHash := strings.Repeat("0", 64)
+	if results != nil && len(*results) > 0 && len((*results)[0].Result) > 0 {
+		current = (*results)[0].Result[0].CurrentEpoch
+		previousHash = (*results)[0].Result[0].DocumentSetHash
+	}
+	epoch := current + 1
+	_, documentSetHash, err := canonical.MarshalAndHash(struct {
+		TenantID           domain.TenantID `json:"tenant_id"`
+		Epoch              uint64          `json:"epoch"`
+		PreviousHash       string          `json:"previous_hash"`
+		ProcedureVersionID string          `json:"procedure_version_id"`
+		DocumentHash       string          `json:"document_hash"`
+	}{value.TenantID, epoch, previousHash, value.Version.ID, document.ContentHash})
+	if err != nil {
+		return 0, err
+	}
+	if current == 0 {
+		if err := createRecord(ctx, tx, headID, map[string]any{
+			"tenant_id": string(value.TenantID), "current_epoch": epoch, "document_set_hash": documentSetHash,
+			"updated_at": value.CreatedAt, "schema_version": "projection-epoch-head.v1", "content_hash": documentSetHash,
+		}); err != nil {
+			return 0, err
+		}
+	} else {
+		if _, err := surrealdb.Query[any](ctx, tx, `UPDATE $id SET current_epoch = $epoch, document_set_hash = $hash, updated_at = $at, content_hash = $hash`, map[string]any{"id": headID, "epoch": epoch, "hash": documentSetHash, "at": value.CreatedAt}); err != nil {
+			return 0, err
+		}
+	}
+	_, epochIDHash, err := canonical.MarshalAndHash(struct {
+		TenantID domain.TenantID `json:"tenant_id"`
+		Epoch    uint64          `json:"epoch"`
+	}{value.TenantID, epoch})
+	if err != nil {
+		return 0, err
+	}
+	epochRecord := map[string]any{
+		"tenant_id": string(value.TenantID), "epoch": epoch, "document_set_hash": documentSetHash,
+		"created_at": value.CreatedAt, "schema_version": "projection-epoch.v1", "content_hash": documentSetHash,
+	}
+	if current > 0 {
+		epochRecord["previous_epoch"] = current
+	}
+	if err := createRecord(ctx, tx, models.NewRecordID("projection_epoch", "pe_"+epochIDHash), epochRecord); err != nil {
+		return 0, err
+	}
+	environmentJSON, _, err := canonical.MarshalAndHash(document.Environment)
+	if err != nil {
+		return 0, err
+	}
+	toolNames := make([]string, len(document.Tools))
+	toolVersions := make([]string, len(document.Tools))
+	for index, tool := range document.Tools {
+		toolNames[index], toolVersions[index] = tool.Name, tool.ContractVersionID
+	}
+	resourceTypes := make([]string, len(document.Resources))
+	resourceNamespaces := make([]string, len(document.Resources))
+	resourceHashes := make([]string, len(document.Resources))
+	resourceSchemas := make([]string, len(document.Resources))
+	for index, resource := range document.Resources {
+		resourceTypes[index], resourceNamespaces[index], resourceHashes[index] = resource.Type, resource.Namespace, resource.IdentityHash
+		resourceSchemas[index] = resource.SchemaVersion
+	}
+	record := map[string]any{
+		"tenant_id": string(value.TenantID), "retrieval_document_id": document.ID,
+		"procedure_version_id": document.ProcedureVersionID, "procedure_id": document.ProcedureID, "projection_epoch": epoch,
+		"task_text": document.TaskText, "intent_hash": document.IntentHash, "effect_signature_hash": document.EffectSignatureHash,
+		"tool_names": toolNames, "tool_contract_version_ids": toolVersions, "resource_types": resourceTypes,
+		"resource_namespaces": resourceNamespaces, "resource_identity_hashes": resourceHashes, "effects": document.Effects,
+		"resource_schema_versions": resourceSchemas,
+		"environment_scope_hash":   document.EnvironmentScopeHash, "harness_name": document.Harness.Name,
+		"environment_facts": string(environmentJSON), "prefix_hashes": document.PrefixHashes,
+		"lifecycle_state": document.Lifecycle, "observed_end_to_end": document.ObservedEndToEnd,
+		"verification_strength": document.VerificationStrength, "verified_success_count": document.VerifiedSuccessCount,
+		"unsafe_outcome_count": document.UnsafeOutcomeCount, "validated_at": value.CreatedAt,
+		"validation_policy_version": document.ValidationPolicyVersion, "learned_with_recall_consent": document.LearnedWithRecallConsent,
+		"residency_region": document.ResidencyRegion, "risk_class": document.RiskClass,
+		"canonical_document": string(document.CanonicalJSON), "created_at": value.CreatedAt,
+		"schema_version": document.SchemaVersion, "content_hash": document.ContentHash,
+	}
+	if document.Harness.Version != "" {
+		record["harness_version"] = document.Harness.Version
+	}
+	documentID := models.NewRecordID("retrieval_document", document.ID)
+	if err := createRecord(ctx, tx, documentID, record); err != nil {
+		return 0, err
+	}
+	if err := createRetrievalRelations(ctx, tx, value, document, documentID); err != nil {
+		return 0, err
+	}
+	return epoch, nil
+}
+
+func createRetrievalRelations(ctx context.Context, tx *surrealdb.Transaction, value projection.Projection, document retrieval.Document, documentID models.RecordID) error {
+	type idRow struct {
+		ID models.RecordID `json:"id"`
+	}
+	for _, tool := range document.Tools {
+		rows, err := surrealdb.Query[[]idRow](ctx, tx, `SELECT id FROM tool_contract_version WHERE tenant_id = $tenant_id AND contract_version_id = $version LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "version": tool.ContractVersionID})
+		if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
+			if err == nil {
+				err = projection.ErrInvalidProjection
+			}
+			return err
+		}
+		if err := relate(ctx, tx, documentID, "retrieval_uses_tool", (*rows)[0].Result[0].ID, edgeRecord(value, document.ContentHash)); err != nil {
+			return err
+		}
+	}
+	for _, resource := range document.Resources {
+		rows, err := surrealdb.Query[[]idRow](ctx, tx, `SELECT id FROM resource_ref WHERE tenant_id = $tenant_id AND namespace = $namespace AND resource_type = $type AND logical_identity_hash = $hash LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "namespace": resource.Namespace, "type": resource.Type, "hash": resource.IdentityHash})
+		if err != nil {
+			return err
+		}
+		var resourceID models.RecordID
+		if rows != nil && len(*rows) > 0 && len((*rows)[0].Result) > 0 {
+			resourceID = (*rows)[0].Result[0].ID
+		} else {
+			_, hash, hashErr := canonical.MarshalAndHash(struct {
+				TenantID domain.TenantID               `json:"tenant_id"`
+				Resource retrieval.ResourceRequirement `json:"resource"`
+			}{value.TenantID, resource})
+			if hashErr != nil {
+				return hashErr
+			}
+			resourceID = models.NewRecordID("resource_ref", "rr_"+hash)
+			if err := createRecord(ctx, tx, resourceID, map[string]any{"tenant_id": string(value.TenantID), "resource_id": "rr_" + hash, "namespace": resource.Namespace, "resource_type": resource.Type, "logical_identity_hash": resource.IdentityHash, "created_at": value.CreatedAt, "schema_version": "resource-ref.v1", "content_hash": hash}); err != nil {
+				return err
+			}
+		}
+		if err := relate(ctx, tx, documentID, "retrieval_requires_resource", resourceID, edgeRecord(value, document.ContentHash)); err != nil {
+			return err
+		}
+	}
+	for _, effect := range document.Effects {
+		_, hash, err := canonical.MarshalAndHash(struct {
+			TenantID domain.TenantID `json:"tenant_id"`
+			Effect   string          `json:"effect"`
+		}{value.TenantID, effect})
+		if err != nil {
+			return err
+		}
+		effectID := models.NewRecordID("effect_ref", "eff_"+hash)
+		if _, found, findErr := findContentHash(ctx, tx, "effect_ref", "effect_id", value.TenantID, "eff_"+hash); findErr != nil {
+			return findErr
+		} else if !found {
+			if err := createRecord(ctx, tx, effectID, map[string]any{"tenant_id": string(value.TenantID), "effect_id": "eff_" + hash, "effect_name": effect, "risk_class": document.RiskClass, "created_at": value.CreatedAt, "schema_version": "effect-ref.v1", "content_hash": hash}); err != nil {
+				return err
+			}
+		}
+		if err := relate(ctx, tx, documentID, "retrieval_has_effect", effectID, edgeRecord(value, document.ContentHash)); err != nil {
+			return err
+		}
+	}
+	for index, prefixHash := range document.PrefixHashes {
+		prefixID := models.NewRecordID("procedure_prefix", "pfx_"+prefixHash)
+		if _, found, findErr := findContentHash(ctx, tx, "procedure_prefix", "prefix_hash", value.TenantID, prefixHash); findErr != nil {
+			return findErr
+		} else if !found {
+			if err := createRecord(ctx, tx, prefixID, map[string]any{"tenant_id": string(value.TenantID), "prefix_hash": prefixHash, "length": index + 1, "created_at": value.CreatedAt, "schema_version": "procedure-prefix.v1", "content_hash": prefixHash}); err != nil {
+				return err
+			}
+		}
+		if err := relate(ctx, tx, documentID, "retrieval_has_prefix", prefixID, edgeRecord(value, document.ContentHash)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func edgeRecord(value projection.Projection, hash string) map[string]any {
+	return map[string]any{"tenant_id": string(value.TenantID), "created_at": value.CreatedAt, "schema_version": "retrieval-edge.v1", "content_hash": hash}
 }
 
 type manifestRow struct {
@@ -369,7 +585,7 @@ func (r *ProjectionRepository) Counts(ctx context.Context) (projection.Counts, e
 	if r == nil || r.db == nil {
 		return projection.Counts{}, errors.New("SurrealDB projection repository is not configured")
 	}
-	tables := []string{"procedure", "procedure_version", "step", "depends_on", "negative_path", "synthesis_manifest", "supported_by"}
+	tables := []string{"procedure", "procedure_version", "step", "depends_on", "negative_path", "synthesis_manifest", "supported_by", "retrieval_document", "projection_epoch"}
 	values := make([]int, len(tables))
 	for index, table := range tables {
 		count, err := tableCount(ctx, r.db, table)
@@ -378,7 +594,38 @@ func (r *ProjectionRepository) Counts(ctx context.Context) (projection.Counts, e
 		}
 		values[index] = count
 	}
-	return projection.Counts{Families: values[0], Versions: values[1], Steps: values[2], Edges: values[3], NegativePaths: values[4], Manifests: values[5], EvidenceLinks: values[6]}, nil
+	return projection.Counts{Families: values[0], Versions: values[1], Steps: values[2], Edges: values[3], NegativePaths: values[4], Manifests: values[5], EvidenceLinks: values[6], RetrievalDocuments: values[7], ProjectionEpochs: values[8]}, nil
+}
+
+func (r *ProjectionRepository) RetrievalDocument(ctx context.Context, tenantID domain.TenantID, versionID string, epoch uint64) (retrieval.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return retrieval.Document{}, err
+	}
+	if r == nil || r.db == nil {
+		return retrieval.Document{}, errors.New("SurrealDB projection repository is not configured")
+	}
+	type row struct {
+		ID        string `json:"retrieval_document_id"`
+		Hash      string `json:"content_hash"`
+		Canonical string `json:"canonical_document"`
+	}
+	results, err := surrealdb.Query[[]row](ctx, r.db, `SELECT retrieval_document_id, content_hash, canonical_document FROM retrieval_document WHERE tenant_id = $tenant_id AND procedure_version_id = $version_id AND projection_epoch = $epoch LIMIT 1`, map[string]any{"tenant_id": string(tenantID), "version_id": versionID, "epoch": epoch})
+	if err != nil {
+		return retrieval.Document{}, databaseFailure("read retrieval document", err)
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return retrieval.Document{}, projection.ErrProjectionNotFound
+	}
+	stored := (*results)[0].Result[0]
+	var document retrieval.Document
+	if err := json.Unmarshal([]byte(stored.Canonical), &document); err != nil {
+		return retrieval.Document{}, databaseFailure("decode retrieval document", err)
+	}
+	document.ID, document.ContentHash, document.CanonicalJSON = stored.ID, stored.Hash, []byte(stored.Canonical)
+	if err := retrieval.ValidateDocument(document); err != nil {
+		return retrieval.Document{}, projection.ErrProjectionConflict
+	}
+	return document, nil
 }
 
 func (r *ProjectionRepository) Canonical(ctx context.Context, tenantID domain.TenantID, versionID string) ([]byte, error) {

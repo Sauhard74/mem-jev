@@ -89,7 +89,7 @@ func TestProcessorBuildsAndPublishesDeterministicProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts != (projection.Counts{Families: 1, Versions: 1, Steps: 1, Manifests: 1, EvidenceLinks: 1}) {
+	if counts != (projection.Counts{Families: 1, Versions: 1, Steps: 1, Manifests: 1, EvidenceLinks: 1, RetrievalDocuments: 1, ProjectionEpochs: 1}) {
 		t.Fatalf("counts = %#v", counts)
 	}
 	duplicate, err := processor.Publish(context.Background(), StageRequest{SchemaVersion: "stage-request.v1", Input: request.Input, Stage: StagePublish, PriorHash: publishInputHash})
@@ -211,7 +211,7 @@ func testProcessor(t *testing.T, withOutcome bool) (*Processor, *storememory.Pro
 		staticSourceLoader{source: source}, staticRegistryProvider{registry: registry}, newMemoryStageArtifacts(), projections,
 		ProcessorConfig{ArtifactRetention: 24 * time.Hour, Versions: synthesis.Versions{
 			Sanitizer: "sanitizer.v1", Registry: "registry.v1", Policy: "outcome-policy.v1", GraphBuilder: "graph.v1", Synthesizer: "synth.v1",
-		}},
+		}, ResidencyRegion: "local", LearnedWithRecallConsent: true},
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -123,7 +123,7 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 			MaximumBytes: configuration.Worker.ArchiveMaximumBytes, AcceptedSchemas: []string{"canonical.v1"},
 		})),
 		storesurreal.NewTenantRegistryProvider(db), storesurreal.NewStageArtifactRepository(db), storesurreal.NewProjectionRepository(db),
-		memworkflow.ProcessorConfig{ArtifactRetention: configuration.Worker.StageRetention, Versions: synthesisVersions()},
+		memworkflow.ProcessorConfig{ArtifactRetention: configuration.Worker.StageRetention, Versions: synthesisVersions(), ResidencyRegion: configuration.Archive.Region, LearnedWithRecallConsent: true},
 	)
 	if err != nil {
 		logger.Error("pipeline startup failed", "error", err)
@@ -240,7 +240,7 @@ func buildTemporalTLS(configuration config.TemporalConfig) (*tls.Config, error) 
 func synthesisVersions() synthesis.Versions {
 	return synthesis.Versions{
 		Sanitizer: "sanitizer.v1", Registry: "registry.v1", Policy: "outcome-policy.v1",
-		GraphBuilder: "causal-graph.v1", Synthesizer: "synthesis.v1",
+		GraphBuilder: "causal-graph.v2", Synthesizer: "synthesis.v1",
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
 )
 
-const graphSchemaVersion = "causal-graph.v1"
+const graphSchemaVersion = "causal-graph.v2"
 
 type Builder struct {
 	registry toolcontract.Registry
@@ -91,8 +91,12 @@ func buildNode(tenantID domain.TenantID, event domain.CanonicalEvent, resolved t
 		ID: event.ID, Position: event.Position, ToolName: event.ToolName, ToolVersion: event.ToolVersion,
 		ToolContractVersionID: resolved.Manifest.ID, Opaque: resolved.Opaque,
 		Succeeded:  event.Result != nil && event.Result.State == "TOOL_RESULT_STATE_SUCCESS",
-		SideEffect: resolved.Manifest.SideEffect, CompensationBoundary: resolved.Manifest.Compensation != nil,
+		SideEffect: resolved.Manifest.SideEffect, Risk: resolved.Manifest.Risk, CompensationBoundary: resolved.Manifest.Compensation != nil,
 	}
+	for _, effect := range resolved.Manifest.Effects {
+		node.Effects = append(node.Effects, effect.Name)
+	}
+	sort.Strings(node.Effects)
 	for _, predicate := range resolved.Manifest.SuccessPredicates {
 		node.SuccessPredicates = append(node.SuccessPredicates, predicate.ID)
 	}
@@ -132,7 +136,7 @@ func resourcesFor(tenantID domain.TenantID, specs []toolcontract.ResourceSpec, v
 		}
 		sum := sha256.Sum256([]byte(string(tenantID) + "\x00" + spec.Namespace + "\x00" + spec.Type + "\x00" + value))
 		identityHash := hex.EncodeToString(sum[:])
-		result[index] = Resource{ID: "res_" + identityHash, Name: spec.Name, Type: spec.Type, Namespace: spec.Namespace, IdentityHash: identityHash}
+		result[index] = Resource{ID: "res_" + identityHash, Name: spec.Name, Type: spec.Type, Namespace: spec.Namespace, IdentityHash: identityHash, SchemaVersion: spec.SchemaVersion}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
