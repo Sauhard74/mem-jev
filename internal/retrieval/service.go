@@ -324,14 +324,20 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	}
 	if len(selectedIDs) == 0 {
 		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunAbstained, "below_confidence_threshold", nil, started, collection)
+		if persistErr != nil || response.Replayed {
+			return response, persistErr
+		}
 		response.Candidates = responseCandidates
-		return response, persistErr
+		return response, nil
 	}
 	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunSelected, "", selectedIDs, started, collection)
-	response.Candidates = responseCandidates
 	if err != nil {
 		return response, err
 	}
+	if response.Replayed {
+		return response, nil
+	}
+	response.Candidates = responseCandidates
 	persisted, lookupErr := s.repository.RetrievalRun(ctx, request.TenantID, runID)
 	if lookupErr != nil {
 		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: runID, Err: lookupErr}
@@ -747,6 +753,14 @@ func (s *Service) applySemanticJudgments(ctx context.Context, tenantID domain.Te
 	}
 	if len(persisted) == 0 {
 		return preliminary, nil
+	}
+	if len(persisted) != len(admitted) {
+		return preliminary, persisted
+	}
+	for _, judgment := range persisted {
+		if judgment.ContentHash == "" {
+			return preliminary, persisted
+		}
 	}
 	reranked, err := ranking.Rank(manifest, candidateCopies)
 	if err != nil {

@@ -237,6 +237,7 @@ func (r *MaintenanceRepository) ExpireTransient(ctx context.Context, tenantID do
 		`DELETE (SELECT id FROM selection_plan_node WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
 		`DELETE (SELECT id FROM outcome_credit WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
 		`DELETE (SELECT id FROM selection_record WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
+		`DELETE (SELECT id FROM retrieval_semantic_judgment WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
 		`DELETE (SELECT id FROM retrieval_ranked_candidate WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
 		`DELETE (SELECT id FROM retrieval_gate_decision WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,
 		`DELETE (SELECT id FROM retrieval_channel_hit WHERE tenant_id = $tenant_id AND expires_at <= $cutoff LIMIT $limit)`,

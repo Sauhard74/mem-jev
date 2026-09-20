@@ -32,11 +32,11 @@ func TestMemoryJudgmentRepositoryContract(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	record := validRecordAt(t, "tenant_a", 875_000, now)
 
-	winner, created, err := repository.Commit(context.Background(), record)
+	winner, created, err := repository.Commit(context.Background(), record.BaseKey, record.PredecessorHash, record)
 	if err != nil || !created || winner.ContentHash != record.ContentHash {
 		t.Fatalf("first Commit() = %#v, %v, %v", winner, created, err)
 	}
-	winner, created, err = repository.Commit(context.Background(), record)
+	winner, created, err = repository.Commit(context.Background(), record.BaseKey, record.PredecessorHash, record)
 	if err != nil || created || winner.ContentHash != record.ContentHash {
 		t.Fatalf("idempotent Commit() = %#v, %v, %v", winner, created, err)
 	}
@@ -72,7 +72,7 @@ func TestMemoryJudgmentRepositorySelectsOneConcurrentWinner(t *testing.T) {
 		group.Add(1)
 		go func(value int) {
 			defer group.Done()
-			winner, _, err := repository.Commit(context.Background(), records[value])
+			winner, _, err := repository.Commit(context.Background(), records[value].BaseKey, records[value].PredecessorHash, records[value])
 			if err != nil {
 				errorsFound <- err
 				return

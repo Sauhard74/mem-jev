@@ -95,7 +95,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 }
 
 func (service *Service) Judge(ctx context.Context, request ServiceRequest) (ServiceResult, error) {
-	if service == nil || ctx == nil || request.KeyInput.RubricManifestID != service.rubric.ID || request.KeyInput.Model != service.rubric.Model || request.KeyInput.Provider != ProviderTypeSafe || request.EstimatedTokens <= 0 || request.EstimatedTokens > service.limits.GlobalTokenBurst || request.EstimatedTokens > service.limits.TenantTokenBurst {
+	if service == nil || ctx == nil || request.KeyInput.PredecessorHash != "" || request.KeyInput.RubricManifestID != service.rubric.ID || request.KeyInput.Model != service.rubric.Model || request.KeyInput.Provider != ProviderTypeSafe || request.EstimatedTokens <= 0 || request.EstimatedTokens > service.limits.GlobalTokenBurst || request.EstimatedTokens > service.limits.TenantTokenBurst {
 		return ServiceResult{}, ErrInvalidJudgment
 	}
 	key, err := NewJudgmentKey(request.KeyInput)
@@ -144,6 +144,14 @@ func (service *Service) judgeMiss(ctx context.Context, key string, request Servi
 	} else if !errors.Is(err, ErrJudgmentNotFound) {
 		return ServiceResult{Disposition: DispositionLedgerUnavailable}, nil
 	}
+	keyInput := request.KeyInput
+	expectedPredecessorHash := ""
+	if current, err := service.repository.Current(ctx, request.KeyInput.TenantID, key); err == nil {
+		expectedPredecessorHash = current.ContentHash
+		keyInput.PredecessorHash = current.ContentHash
+	} else if !errors.Is(err, ErrJudgmentNotFound) {
+		return ServiceResult{Disposition: DispositionLedgerUnavailable}, nil
+	}
 	deadline, ok := ctx.Deadline()
 	if !ok || deadline.Sub(now) < service.limits.MinimumRemaining {
 		return ServiceResult{Disposition: DispositionDeadline}, nil
@@ -173,13 +181,14 @@ func (service *Service) judgeMiss(ctx context.Context, key string, request Servi
 		service.circuit.Failure(service.clock().UTC(), false)
 		return ServiceResult{Disposition: FailureInvalidResponse, ProviderCalled: true}, nil
 	}
-	record, err := NewJudgmentRecord(JudgmentRecordInput{KeyInput: request.KeyInput, Judgment: evaluation.Judgment, Usage: evaluation.Usage, CreatedAt: now, ReusableUntil: now.Add(service.limits.ReuseDuration)})
+	record, err := NewJudgmentRecord(JudgmentRecordInput{KeyInput: keyInput, Judgment: evaluation.Judgment, Usage: evaluation.Usage, CreatedAt: now, ReusableUntil: now.Add(service.limits.ReuseDuration)})
 	if err != nil {
 		service.circuit.Failure(service.clock().UTC(), false)
 		return ServiceResult{Disposition: FailureInvalidResponse, ProviderCalled: true}, nil
 	}
-	winner, _, err := service.repository.Commit(ctx, record)
+	winner, _, err := service.repository.Commit(ctx, key, expectedPredecessorHash, record)
 	if err != nil {
+		service.circuit.AbandonProbe()
 		return ServiceResult{Disposition: DispositionLedgerUnavailable, ProviderCalled: true}, nil
 	}
 	service.circuit.Success()
@@ -262,4 +271,10 @@ func (breaker *circuitBreaker) Failure(now time.Time, immediate bool) {
 	if immediate || breaker.failures >= breaker.threshold {
 		breaker.openUntil = now.Add(breaker.openDuration)
 	}
+}
+
+func (breaker *circuitBreaker) AbandonProbe() {
+	breaker.mu.Lock()
+	breaker.probe = false
+	breaker.mu.Unlock()
 }

@@ -80,4 +80,27 @@ func TestDeterministicIssuerCommitsAndReplaysAgentPlan(t *testing.T) {
 	if first.InjectionID == "" || first.TaskExecutionID != selection.TaskExecutionID(first.InjectionID) || first.SelectionHash != second.SelectionHash || first.SelectionHash != replayed.SelectionHash || !first.Complete || first.NoveltyClass != "exact" || len(first.Nodes) != 1 || len(first.ParallelGroups) != 1 {
 		t.Fatalf("first=%#v second=%#v replayed=%#v", first, second, replayed)
 	}
+	lexicalServing, err := retrieval.BuildServingConfig("tenant_a", "policy_1", "ranker_1", []retrieval.SnapshotIndex{{Channel: retrieval.ChannelLexical, ManifestID: "idx_lexical"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lexicalRun, err := retrieval.BuildRun(retrieval.RunInput{
+		ID: "rrun_" + strings.Repeat("d", 64), TenantID: "tenant_a", Query: query, RequestContextHash: strings.Repeat("e", 64), QueryEnvelope: "enc.v1.test",
+		Snapshot:          retrieval.ServingSnapshot{ProjectionEpoch: 1, DocumentSetHash: strings.Repeat("c", 64), ServingConfigID: lexicalServing.ID, PolicyManifestID: "policy_1", RankerManifestID: "ranker_1", Indexes: lexicalServing.Indexes},
+		ChannelExecutions: []retrieval.ChannelExecution{{Channel: retrieval.ChannelLexical, IndexManifestID: "idx_lexical", HitCount: 1, Complete: true}},
+		Hits:              []retrieval.PersistedHit{{Channel: retrieval.ChannelLexical, VersionID: "pv_a", Rank: 1, IndexManifestID: "idx_lexical"}},
+		Gates:             []retrieval.PersistedGate{{VersionID: "pv_a", Eligible: true, CanonicalFacts: "[]"}},
+		Ranked:            []retrieval.PersistedRank{{VersionID: "pv_a", Rank: 1, VerificationStrength: 5, ObservedEndToEnd: true}},
+		Disposition:       retrieval.RunSelected, SelectedVersionIDs: []string{"pv_a"}, CreatedAt: now, CompletedAt: now, ExpiresAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial, err := issuer.Issue(context.Background(), lexicalRun, []retrieval.Document{document})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.Complete || partial.NoveltyClass != "partial" || len(partial.ParallelGroups) != 0 || len(partial.Gaps) == 0 {
+		t.Fatalf("lexical-only retrieval was over-certified: %#v", partial)
+	}
 }

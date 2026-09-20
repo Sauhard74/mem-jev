@@ -37,7 +37,7 @@ The one-shot initializer copies the key to a mode-0400 named volume owned by API
 - For throttling, timeout, capacity, or circuit-open alerts, do not disable core retrieval. Reduce the admitted-candidate cap or token budgets only through reviewed configuration and observe no-Jev availability.
 - Use `ExplainRetrieval` to inspect judgment key, provider/model/rubric IDs, content hash, exact integer features, and degradation code. Raw task state and TypeSafe answers are deliberately absent.
 - Roll back by activating the prior immutable ranker/serving configuration or setting `MEMJEV_JEV_ENABLED=false`. Existing retrieval runs remain replayable and perform zero provider calls.
-- Never delete a judgment to force reevaluation. Change the query/document/environment/policy/rubric/model identity or wait for its bounded reuse window; immutable rows remain audit evidence.
+- Never delete a judgment to force reevaluation. Change the query/document/environment/policy/rubric/model identity or wait for its bounded reuse window. Expiry creates an immutable successor and atomically advances the tenant-scoped head; prior generations remain audit evidence.
 
 ## Required release evidence
 

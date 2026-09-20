@@ -132,6 +132,16 @@ func TestSurrealRetrievalRunPersistsSemanticProvenanceAtomically(t *testing.T) {
 	if err != nil || counts["retrieval_semantic_judgment"] != 1 {
 		t.Fatalf("counts=%#v err=%v", counts, err)
 	}
+	if err = NewMaintenanceRepository(db).ExpireTransient(context.Background(), run.TenantID, run.ExpiresAt, 100); err != nil {
+		t.Fatal(err)
+	}
+	counts, err = repository.ChildCounts(context.Background(), run.ID)
+	if err != nil || counts["retrieval_semantic_judgment"] != 0 {
+		t.Fatalf("semantic provenance survived expiry: counts=%#v err=%v", counts, err)
+	}
+	if _, err = repository.RetrievalRun(context.Background(), run.TenantID, run.ID); !errors.Is(err, store.ErrRetrievalRunNotFound) {
+		t.Fatalf("retrieval run survived expiry: %v", err)
+	}
 }
 
 func TestSurrealRetrievalManifestRepositoryValidatesContentAddressedManifests(t *testing.T) {

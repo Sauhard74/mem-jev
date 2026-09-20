@@ -82,6 +82,38 @@ func TestServiceCachesAndSingleFlightsJudgments(t *testing.T) {
 	}
 }
 
+func TestServiceRenewsExpiredJudgmentAsImmutableSuccessor(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	evaluator := &fakeEvaluator{}
+	repository := NewMemoryRepository()
+	service := newTestService(t, evaluator, repository, ServiceLimits{ReuseDuration: time.Hour})
+	service.clock = func() time.Time { return now }
+	request := testServiceRequest(t, "tenant_a", 77)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	first, err := service.Judge(ctx, request)
+	if err != nil || first.Disposition != DispositionCommitted {
+		t.Fatalf("first judgment = %#v, %v", first, err)
+	}
+	now = now.Add(2 * time.Hour)
+	renewed, err := service.Judge(ctx, request)
+	if err != nil || renewed.Disposition != DispositionCommitted {
+		t.Fatalf("renewed judgment = %#v, %v", renewed, err)
+	}
+	if renewed.Record.Key == first.Record.Key || renewed.Record.BaseKey != first.Record.BaseKey || renewed.Record.PredecessorHash != first.Record.ContentHash {
+		t.Fatalf("renewal did not form a successor chain: first=%#v renewed=%#v", first.Record, renewed.Record)
+	}
+	warm, err := service.Judge(ctx, request)
+	if err != nil || warm.Disposition != DispositionCacheHit || warm.Record.ContentHash != renewed.Record.ContentHash || evaluator.calls.Load() != 2 {
+		t.Fatalf("warm renewed judgment = %#v, %v calls=%d", warm, err, evaluator.calls.Load())
+	}
+	current, err := repository.Current(ctx, request.KeyInput.TenantID, first.Record.BaseKey)
+	if err != nil || current.ContentHash != renewed.Record.ContentHash {
+		t.Fatalf("current judgment = %#v, %v", current, err)
+	}
+}
+
 func TestServiceDegradesAndOpensCircuit(t *testing.T) {
 	evaluator := &fakeEvaluator{err: &ProviderError{Code: FailureProvider, StatusCode: 500}}
 	service := newTestService(t, evaluator, NewMemoryRepository(), ServiceLimits{CircuitFailureThreshold: 2, CircuitOpenDuration: time.Minute})
@@ -162,6 +194,38 @@ func TestServiceAuthenticationFailureOpensCircuitImmediately(t *testing.T) {
 	if err != nil || second.Disposition != DispositionCircuitOpen || evaluator.calls.Load() != 1 {
 		t.Fatalf("second result = %#v, %v calls=%d", second, err, evaluator.calls.Load())
 	}
+}
+
+func TestLedgerFailureReleasesHalfOpenCircuitProbe(t *testing.T) {
+	evaluator := &fakeEvaluator{}
+	repository := &toggleCommitRepository{MemoryRepository: NewMemoryRepository(), fail: true}
+	service := newTestService(t, evaluator, repository, ServiceLimits{CircuitOpenDuration: time.Millisecond})
+	now := time.Now().UTC()
+	service.clock = func() time.Time { return now.Add(2 * time.Millisecond) }
+	service.circuit.Failure(now, true)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	first, err := service.Judge(ctx, testServiceRequest(t, "tenant_a", 91))
+	if err != nil || first.Disposition != DispositionLedgerUnavailable {
+		t.Fatalf("ledger failure = %#v, %v", first, err)
+	}
+	repository.fail = false
+	second, err := service.Judge(ctx, testServiceRequest(t, "tenant_a", 92))
+	if err != nil || second.Disposition != DispositionCommitted {
+		t.Fatalf("probe remained stuck after ledger recovery: %#v, %v", second, err)
+	}
+}
+
+type toggleCommitRepository struct {
+	*MemoryRepository
+	fail bool
+}
+
+func (repository *toggleCommitRepository) Commit(ctx context.Context, baseKey, expectedPredecessorHash string, record JudgmentRecord) (JudgmentRecord, bool, error) {
+	if repository.fail {
+		return JudgmentRecord{}, false, errors.New("ledger unavailable")
+	}
+	return repository.MemoryRepository.Commit(ctx, baseKey, expectedPredecessorHash, record)
 }
 
 func newTestService(t *testing.T, evaluator Evaluator, repository Repository, overrides ServiceLimits) *Service {

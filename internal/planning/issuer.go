@@ -72,6 +72,7 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 	}
 	goalSum := sha256.Sum256([]byte(primary.ProcedureVersionID + "\x00" + run.QueryHash))
 	goalID := "goal_" + hex.EncodeToString(goalSum[:])
+	certifiedReplay := len(run.SelectedVersionIDs) == 1 && primary.ObservedEndToEnd && hasCertifiedExactHit(run, primary.ProcedureVersionID)
 	plannerCandidates := make([]composition.PlannerCandidate, 0, len(run.SelectedVersionIDs))
 	graphCandidates := make([]composition.Candidate, 0, len(run.SelectedVersionIDs))
 	for index, versionID := range run.SelectedVersionIDs {
@@ -80,7 +81,7 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 			return retrieval.PlanArtifact{}, retrieval.ErrPlanUnavailable
 		}
 		goals := []string(nil)
-		if index == 0 {
+		if index == 0 && certifiedReplay {
 			goals = []string{goalID}
 		}
 		candidate := composition.PlannerCandidate{
@@ -149,6 +150,35 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 		return retrieval.PlanArtifact{}, err
 	}
 	return artifact(receipt.Record), nil
+}
+
+func hasCertifiedExactHit(run retrieval.Run, versionID string) bool {
+	channelComplete := false
+	for _, execution := range run.ChannelExecutions {
+		if execution.Channel == retrieval.ChannelExact && execution.Complete {
+			channelComplete = true
+			break
+		}
+	}
+	if !channelComplete {
+		return false
+	}
+	hit := false
+	for _, candidate := range run.Hits {
+		if candidate.Channel == retrieval.ChannelExact && candidate.VersionID == versionID {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		return false
+	}
+	for _, gate := range run.Gates {
+		if gate.VersionID == versionID {
+			return gate.Eligible
+		}
+	}
+	return false
 }
 
 func parallelismFacts(value domain.ProcedureInterface) composition.ParallelismFacts {

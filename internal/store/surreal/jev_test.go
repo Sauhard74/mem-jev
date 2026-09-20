@@ -27,12 +27,12 @@ func TestSurrealJevRepositoryContract(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	first := surrealJevRecord(t, 875_000, now)
-	winner, created, err := repository.Commit(context.Background(), first)
+	winner, created, err := repository.Commit(context.Background(), first.BaseKey, first.PredecessorHash, first)
 	if err != nil || !created || winner.ContentHash != first.ContentHash {
 		t.Fatalf("first commit = %#v, %v, %v", winner, created, err)
 	}
 	competing := surrealJevRecord(t, 700_000, now)
-	winner, created, err = repository.Commit(context.Background(), competing)
+	winner, created, err = repository.Commit(context.Background(), competing.BaseKey, competing.PredecessorHash, competing)
 	if err != nil || created || winner.ContentHash != first.ContentHash {
 		t.Fatalf("competing commit = %#v, %v, %v", winner, created, err)
 	}
@@ -46,6 +46,15 @@ func TestSurrealJevRepositoryContract(t *testing.T) {
 	if _, err = repository.LookupReusable(context.Background(), "tenant_a", first.Key, first.ReusableUntil); !errors.Is(err, jev.ErrJudgmentNotFound) {
 		t.Fatalf("expired lookup error = %v", err)
 	}
+	renewal := surrealJevSuccessor(t, first, 925_000, first.ReusableUntil.Add(time.Minute))
+	winner, created, err = repository.Commit(context.Background(), first.BaseKey, first.ContentHash, renewal)
+	if err != nil || !created || winner.ContentHash != renewal.ContentHash {
+		t.Fatalf("renewal commit = %#v, %v, %v", winner, created, err)
+	}
+	current, err := repository.Current(context.Background(), "tenant_a", first.BaseKey)
+	if err != nil || current.ContentHash != renewal.ContentHash || current.PredecessorHash != first.ContentHash {
+		t.Fatalf("current renewal = %#v, %v", current, err)
+	}
 }
 
 func surrealJevRecord(t *testing.T, intent int32, now time.Time) jev.JudgmentRecord {
@@ -56,6 +65,29 @@ func surrealJevRecord(t *testing.T, intent int32, now time.Time) jev.JudgmentRec
 	}
 	input := jev.JudgmentRecordInput{
 		KeyInput: jev.JudgmentKeyInput{TenantID: "tenant_a", QueryHash: fmt.Sprintf("%064x", 1), ProcedureVersionID: "pver_1", DocumentHash: fmt.Sprintf("%064x", 2), EnvironmentHash: fmt.Sprintf("%064x", 3), PolicyManifestID: "epol_1", RubricManifestID: rubric.ID, Provider: jev.ProviderTypeSafe, Model: rubric.Model},
+		Judgment: jev.Judgment{
+			IntentFit:                    jev.ScoreAnswer{ScoreMicros: intent * 4, ConfidenceMicros: 800_000, ProbabilitiesMicros: []int32{0, 50_000, 100_000, 250_000, 600_000}},
+			PreconditionsLikelySatisfied: jev.NoulAnswer{NoulMicros: 900_000},
+			TaskCoverage:                 jev.ScoreAnswer{ScoreMicros: 2_000_000, ConfidenceMicros: 700_000, ProbabilitiesMicros: []int32{50_000, 100_000, 550_000, 250_000, 50_000}},
+			ContradictsRequest:           jev.NoulAnswer{NoulMicros: 125_000}, UsefulAsPartialPlan: jev.NoulAnswer{NoulMicros: 600_000},
+		},
+		Usage: jev.Usage{InputTokens: 321, OutputTokens: 44}, CreatedAt: now, ReusableUntil: now.Add(time.Hour),
+	}
+	record, err := jev.NewJudgmentRecord(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func surrealJevSuccessor(t *testing.T, predecessor jev.JudgmentRecord, intent int32, now time.Time) jev.JudgmentRecord {
+	t.Helper()
+	rubric, err := jev.DefaultRubricV1("jev-1.13.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := jev.JudgmentRecordInput{
+		KeyInput: jev.JudgmentKeyInput{TenantID: predecessor.TenantID, QueryHash: predecessor.QueryHash, ProcedureVersionID: predecessor.ProcedureVersionID, DocumentHash: predecessor.DocumentHash, EnvironmentHash: predecessor.EnvironmentHash, PolicyManifestID: predecessor.PolicyManifestID, RubricManifestID: rubric.ID, Provider: jev.ProviderTypeSafe, Model: rubric.Model, PredecessorHash: predecessor.ContentHash},
 		Judgment: jev.Judgment{
 			IntentFit:                    jev.ScoreAnswer{ScoreMicros: intent * 4, ConfidenceMicros: 800_000, ProbabilitiesMicros: []int32{0, 50_000, 100_000, 250_000, 600_000}},
 			PreconditionsLikelySatisfied: jev.NoulAnswer{NoulMicros: 900_000},

@@ -71,10 +71,11 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 	if err != nil {
 		return nil, &retrieval.ChannelError{Code: "query_failed", Err: err}
 	}
+	return finalizeRetrievalRows(rows, request, c.manifestID)
+}
+
+func finalizeRetrievalRows(rows []retrievalRow, request retrieval.ChannelRequest, manifestID string) ([]retrieval.Hit, error) {
 	capRows := int(request.Limit)*revisionScanFactor + 1
-	if len(rows) >= capRows {
-		return nil, &retrieval.ChannelError{Code: "candidate_window_exhausted", Err: errors.New("revision scan bound reached")}
-	}
 	latest := make(map[string]retrievalRow)
 	for _, row := range rows {
 		if row.VersionID == "" || row.Epoch == 0 || row.Epoch > request.ProjectionEpoch || math.IsNaN(row.Score) || math.IsInf(row.Score, 0) {
@@ -83,6 +84,13 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 		if prior, exists := latest[row.VersionID]; !exists || row.Epoch > prior.Epoch {
 			latest[row.VersionID] = row
 		}
+	}
+	// Queries order score, stable version identity, then newest revision. Once
+	// the requested number of distinct versions is present, later rows cannot
+	// outrank them. Hitting the scan cap is only an error when revisions have
+	// crowded out enough distinct candidates to establish the requested top-k.
+	if len(rows) >= capRows && len(latest) < int(request.Limit) {
+		return nil, &retrieval.ChannelError{Code: "candidate_window_exhausted", Err: errors.New("revision scan bound reached")}
 	}
 	ordered := make([]retrievalRow, 0, len(latest))
 	for _, row := range latest {
@@ -100,7 +108,7 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 	hits := make([]retrieval.Hit, len(ordered))
 	for index, row := range ordered {
 		score := int64(math.Round(row.Score * 1_000_000))
-		hits[index] = retrieval.Hit{VersionID: row.VersionID, RawScoreQuantized: score, IndexManifestID: c.manifestID}
+		hits[index] = retrieval.Hit{VersionID: row.VersionID, RawScoreQuantized: score, IndexManifestID: manifestID}
 	}
 	return hits, nil
 }

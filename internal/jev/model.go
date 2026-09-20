@@ -34,6 +34,7 @@ type JudgmentKeyInput struct {
 	RubricManifestID   string          `json:"rubric_manifest_id"`
 	Provider           string          `json:"provider"`
 	Model              string          `json:"model"`
+	PredecessorHash    string          `json:"predecessor_hash,omitempty"`
 }
 
 func NewJudgmentKey(source JudgmentKeyInput) (string, error) {
@@ -43,7 +44,7 @@ func NewJudgmentKey(source JudgmentKeyInput) (string, error) {
 	input.RubricManifestID = strings.TrimSpace(input.RubricManifestID)
 	input.Provider = strings.TrimSpace(input.Provider)
 	input.Model = strings.TrimSpace(input.Model)
-	if input.TenantID == "" || !sha256Pattern.MatchString(input.QueryHash) || input.ProcedureVersionID == "" || !sha256Pattern.MatchString(input.DocumentHash) || !sha256Pattern.MatchString(input.EnvironmentHash) || input.PolicyManifestID == "" || input.RubricManifestID == "" || input.Provider != ProviderTypeSafe || !pinnedModel.MatchString(input.Model) {
+	if input.TenantID == "" || !sha256Pattern.MatchString(input.QueryHash) || input.ProcedureVersionID == "" || !sha256Pattern.MatchString(input.DocumentHash) || !sha256Pattern.MatchString(input.EnvironmentHash) || input.PolicyManifestID == "" || input.RubricManifestID == "" || input.Provider != ProviderTypeSafe || !pinnedModel.MatchString(input.Model) || input.PredecessorHash != "" && !sha256Pattern.MatchString(input.PredecessorHash) {
 		return "", ErrInvalidJudgment
 	}
 	_, hash, err := canonical.MarshalAndHash(input)

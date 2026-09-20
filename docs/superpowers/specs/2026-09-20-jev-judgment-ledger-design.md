@@ -64,12 +64,13 @@ The initial production deadline is configurable and capped below the retrieval r
 
 ## 5. Persistence and replay
 
-SurrealDB gains two schema-full records:
+SurrealDB gains three schema-full records:
 
 - `jev_rubric_manifest`: immutable canonical rubric, model pin, quantization contract, admission version, and content hash;
 - `jev_judgment`: immutable tenant-scoped key, input hashes, provider/model/rubric identity, quantized typed answers, usage, timestamps, content hash, and expiry policy.
+- `jev_judgment_head`: tenant-scoped compare-and-swap pointer from a stable base key to the current immutable judgment generation.
 
-The unique judgment key enforces one authoritative record. Raw API keys are never persisted. Raw provider requests and canonical task/procedure text are not placed in logs, metrics, or judgment rows. The encrypted canonical query remains governed by the existing retrieval-run retention contract.
+The base key covers the canonical query, procedure, document, environment, policy, rubric, provider, and model. The first immutable judgment uses that key. A renewal key additionally covers the predecessor content hash, forming an auditable successor chain. A transaction creates the successor and advances the head only when the expected predecessor still matches; concurrent writers therefore observe one authoritative generation without overwriting evidence. Raw API keys are never persisted. Raw provider requests and canonical task/procedure text are not placed in logs, metrics, or judgment rows. The encrypted canonical query remains governed by the existing retrieval-run retention contract.
 
 Each retrieval run records, per eligible candidate, the judgment key, disposition (`hit`, `committed`, or a degradation code), judgment content hash when present, and the exact derived feature values. Replay never calls TypeSafe: it uses the persisted ranked features and committed judgment references captured by the original run.
 

@@ -151,6 +151,22 @@ func TestServiceAppliesSemanticFeaturesOnlyAfterEligibilityAndReplaysWithoutCall
 	}
 }
 
+func TestServiceUsesWholeSetFallbackWhenAnySemanticJudgmentDegrades(t *testing.T) {
+	fixture := newSemanticServiceFixture(t)
+	fixture.request.ExternalInferenceAllowed = true
+	fixture.judge.degradeVersion = "pv_b"
+	result, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].VersionID != "pv_a" {
+		t.Fatalf("partial semantic result changed preliminary order: %#v", result)
+	}
+	if len(fixture.repository.runs) != 1 || len(fixture.repository.runs[0].SemanticJudgments) != 2 || len(result.EnhancementDegraded) != 1 {
+		t.Fatalf("degradation provenance missing: response=%#v runs=%#v", result, fixture.repository.runs)
+	}
+}
+
 func TestServiceCommitsRetrievalBeforePlanAndNeverServesUncommittedPlan(t *testing.T) {
 	fixture := newServiceFixture(t, false)
 	fixture.plans.onIssue = func() {
@@ -491,9 +507,10 @@ type fixedIDs struct{}
 func (fixedIDs) NewRunID() (string, error) { return "rrun_" + strings.Repeat("d", 64), nil }
 
 type countingJudge struct {
-	mu       sync.Mutex
-	calls    int
-	admitted []string
+	mu             sync.Mutex
+	calls          int
+	admitted       []string
+	degradeVersion string
 }
 
 func (j *countingJudge) Admit([]ranking.Result) ([]string, error) {
@@ -504,6 +521,9 @@ func (j *countingJudge) Judge(_ context.Context, request SemanticJudgmentRequest
 	j.mu.Lock()
 	j.calls++
 	j.mu.Unlock()
+	if request.Document.ProcedureVersionID == j.degradeVersion {
+		return SemanticJudgment{VersionID: request.Document.ProcedureVersionID, JudgmentKey: "jevj_" + strings.Repeat("a", 64), Disposition: "timeout", Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_test"}
+	}
 	value := int32(0)
 	if request.Document.ProcedureVersionID == "pv_b" {
 		value = 1_000_000

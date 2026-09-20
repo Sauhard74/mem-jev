@@ -62,38 +62,48 @@ func (repository *JevRepository) LookupReusable(ctx context.Context, tenantID do
 	if repository == nil || repository.db == nil || tenantID == "" || !strings.HasPrefix(key, "jevj_") || now.IsZero() {
 		return jev.JudgmentRecord{}, jev.ErrJudgmentNotFound
 	}
-	record, found, err := readJevJudgment(ctx, repository.db, tenantID, key)
-	if err != nil {
-		return jev.JudgmentRecord{}, databaseFailure("read Jev judgment", err)
-	}
-	if !found || !now.UTC().Before(record.ReusableUntil) {
+	record, err := repository.Current(ctx, tenantID, key)
+	if err != nil || !now.UTC().Before(record.ReusableUntil) {
+		if err != nil && !errors.Is(err, jev.ErrJudgmentNotFound) {
+			return jev.JudgmentRecord{}, err
+		}
 		return jev.JudgmentRecord{}, jev.ErrJudgmentNotFound
 	}
 	return record, nil
 }
 
-func (repository *JevRepository) Commit(ctx context.Context, record jev.JudgmentRecord) (jev.JudgmentRecord, bool, error) {
+func (repository *JevRepository) Current(ctx context.Context, tenantID domain.TenantID, baseKey string) (jev.JudgmentRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return jev.JudgmentRecord{}, err
+	}
+	if repository == nil || repository.db == nil || tenantID == "" || !strings.HasPrefix(baseKey, "jevj_") {
+		return jev.JudgmentRecord{}, jev.ErrJudgmentNotFound
+	}
+	record, found, err := readCurrentJevJudgment(ctx, repository.db, tenantID, baseKey)
+	if err != nil {
+		return jev.JudgmentRecord{}, databaseFailure("read current Jev judgment", err)
+	}
+	if !found {
+		return jev.JudgmentRecord{}, jev.ErrJudgmentNotFound
+	}
+	return record, nil
+}
+
+func (repository *JevRepository) Commit(ctx context.Context, baseKey, expectedPredecessorHash string, record jev.JudgmentRecord) (jev.JudgmentRecord, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return jev.JudgmentRecord{}, false, err
 	}
-	if repository == nil || repository.db == nil || jev.ValidateJudgmentRecord(record) != nil {
+	if repository == nil || repository.db == nil || jev.ValidateJudgmentRecord(record) != nil || record.BaseKey != baseKey || record.PredecessorHash != expectedPredecessorHash {
 		return jev.JudgmentRecord{}, false, jev.ErrInvalidJudgment
 	}
 	const maximumAttempts = 8
 	var lastErr error
 	for attempt := 0; attempt < maximumAttempts; attempt++ {
-		winner, created, err := repository.commitOnce(ctx, record)
+		winner, created, err := repository.commitOnce(ctx, baseKey, expectedPredecessorHash, record)
 		if err == nil {
 			return winner, created, nil
 		}
 		lastErr = err
-		winner, found, lookupErr := readJevJudgment(ctx, repository.db, record.TenantID, record.Key)
-		if lookupErr != nil {
-			return jev.JudgmentRecord{}, false, databaseFailure("resolve Jev judgment winner", lookupErr)
-		}
-		if found {
-			return winner, false, nil
-		}
 		if !surrealdb.IsTransactionConflict(err) {
 			return jev.JudgmentRecord{}, false, databaseFailure("commit Jev judgment", err)
 		}
@@ -104,7 +114,7 @@ func (repository *JevRepository) Commit(ctx context.Context, record jev.Judgment
 	return jev.JudgmentRecord{}, false, databaseFailure("commit Jev judgment after conflicts", lastErr)
 }
 
-func (repository *JevRepository) commitOnce(ctx context.Context, record jev.JudgmentRecord) (_ jev.JudgmentRecord, _ bool, err error) {
+func (repository *JevRepository) commitOnce(ctx context.Context, baseKey, expectedPredecessorHash string, record jev.JudgmentRecord) (_ jev.JudgmentRecord, _ bool, err error) {
 	tx, err := repository.db.Begin(ctx)
 	if err != nil {
 		return jev.JudgmentRecord{}, false, err
@@ -114,30 +124,102 @@ func (repository *JevRepository) commitOnce(ctx context.Context, record jev.Judg
 			_ = tx.Cancel(context.Background())
 		}
 	}()
-	if winner, found, readErr := readJevJudgment(ctx, tx, record.TenantID, record.Key); readErr != nil {
+	current, currentFound, readErr := readCurrentJevJudgment(ctx, tx, record.TenantID, baseKey)
+	if readErr != nil {
 		return jev.JudgmentRecord{}, false, readErr
-	} else if found {
+	}
+	if currentFound && current.ContentHash != expectedPredecessorHash {
 		if cancelErr := tx.Cancel(ctx); cancelErr != nil {
 			return jev.JudgmentRecord{}, false, cancelErr
 		}
-		return winner, false, nil
+		return current, false, nil
 	}
-	row := map[string]any{
-		"tenant_id": string(record.TenantID), "judgment_key": record.Key, "query_hash": record.QueryHash,
-		"procedure_version_id": record.ProcedureVersionID, "document_hash": record.DocumentHash, "environment_hash": record.EnvironmentHash,
-		"policy_manifest_id": record.PolicyManifestID, "rubric_manifest_id": record.RubricManifestID,
-		"provider": record.Provider, "model": record.Model, "canonical_judgment": string(record.CanonicalJSON),
-		"created_at": record.CreatedAt, "reusable_until": record.ReusableUntil,
-		"schema_version": record.SchemaVersion, "content_hash": record.ContentHash,
+	if !currentFound && expectedPredecessorHash != "" {
+		return jev.JudgmentRecord{}, false, jev.ErrInvalidJudgment
 	}
-	id := models.NewRecordID("jev_judgment", strings.TrimPrefix(record.Key, "jevj_"))
-	if err = createRecord(ctx, tx, id, row); err != nil {
-		return jev.JudgmentRecord{}, false, err
+	if existing, found, existingErr := readJevJudgment(ctx, tx, record.TenantID, record.Key); existingErr != nil {
+		return jev.JudgmentRecord{}, false, existingErr
+	} else if found && existing.ContentHash != record.ContentHash {
+		return jev.JudgmentRecord{}, false, jev.ErrInvalidJudgment
+	} else if !found {
+		row := map[string]any{
+			"tenant_id": string(record.TenantID), "judgment_key": record.Key, "base_key": record.BaseKey, "query_hash": record.QueryHash,
+			"procedure_version_id": record.ProcedureVersionID, "document_hash": record.DocumentHash, "environment_hash": record.EnvironmentHash,
+			"policy_manifest_id": record.PolicyManifestID, "rubric_manifest_id": record.RubricManifestID,
+			"provider": record.Provider, "model": record.Model, "canonical_judgment": string(record.CanonicalJSON),
+			"created_at": record.CreatedAt, "reusable_until": record.ReusableUntil,
+			"schema_version": record.SchemaVersion, "content_hash": record.ContentHash,
+		}
+		if record.PredecessorHash != "" {
+			row["predecessor_hash"] = record.PredecessorHash
+		}
+		id := models.NewRecordID("jev_judgment", strings.TrimPrefix(record.Key, "jevj_"))
+		if err = createRecord(ctx, tx, id, row); err != nil {
+			return jev.JudgmentRecord{}, false, err
+		}
+	}
+	headID := models.NewRecordID("jev_judgment_head", strings.TrimPrefix(baseKey, "jevj_"))
+	if _, found, headErr := readJevHead(ctx, tx, record.TenantID, baseKey); headErr != nil {
+		return jev.JudgmentRecord{}, false, headErr
+	} else if !found {
+		head := map[string]any{
+			"tenant_id": string(record.TenantID), "base_key": baseKey, "current_judgment_key": record.Key,
+			"current_content_hash": record.ContentHash, "updated_at": record.CreatedAt, "schema_version": "jev-judgment-head.v1",
+		}
+		if err = createRecord(ctx, tx, headID, head); err != nil {
+			return jev.JudgmentRecord{}, false, err
+		}
+	} else {
+		_, err = surrealdb.Query[any](ctx, tx, `UPDATE ONLY $id SET current_judgment_key = $key, current_content_hash = $hash, updated_at = $updated_at`, map[string]any{"id": headID, "key": record.Key, "hash": record.ContentHash, "updated_at": record.CreatedAt})
+		if err != nil {
+			return jev.JudgmentRecord{}, false, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return jev.JudgmentRecord{}, false, err
 	}
 	return record, true, nil
+}
+
+func readCurrentJevJudgment[T interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender T, tenantID domain.TenantID, baseKey string) (jev.JudgmentRecord, bool, error) {
+	head, found, err := readJevHead(ctx, sender, tenantID, baseKey)
+	if err != nil {
+		return jev.JudgmentRecord{}, false, err
+	}
+	if found {
+		record, recordFound, recordErr := readJevJudgment(ctx, sender, tenantID, head.Key)
+		if recordErr != nil || !recordFound {
+			if recordErr == nil {
+				recordErr = errors.New("jev judgment head references a missing record")
+			}
+			return jev.JudgmentRecord{}, false, recordErr
+		}
+		if record.ContentHash != head.Hash || record.BaseKey != baseKey {
+			return jev.JudgmentRecord{}, false, errors.New("invalid Jev judgment head")
+		}
+		return record, true, nil
+	}
+	return readJevJudgment(ctx, sender, tenantID, baseKey)
+}
+
+type jevHead struct {
+	Key  string `json:"current_judgment_key"`
+	Hash string `json:"current_content_hash"`
+}
+
+func readJevHead[T interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender T, tenantID domain.TenantID, baseKey string) (jevHead, bool, error) {
+	results, err := surrealdb.Query[[]jevHead](ctx, sender, `SELECT current_judgment_key, current_content_hash FROM jev_judgment_head WHERE tenant_id = $tenant_id AND base_key = $base_key LIMIT 1`, map[string]any{"tenant_id": string(tenantID), "base_key": baseKey})
+	if err != nil {
+		return jevHead{}, false, err
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return jevHead{}, false, nil
+	}
+	return (*results)[0].Result[0], true, nil
 }
 
 func readJevJudgment[T interface {

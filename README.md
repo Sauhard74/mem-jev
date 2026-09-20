@@ -25,7 +25,7 @@ agent/harness
                    → atomic retrieval run + explanation provenance
 ```
 
-Jev is never an eligibility or availability dependency. It runs only after hard gates, only for a deterministic ambiguity band, and only when the tenant credential permits external inference. A cold TypeSafe call is probabilistic; once accepted, the typed judgment, quantized features, model, rubric, and content hash are immutable. Replays make zero provider calls.
+Jev is never an eligibility or availability dependency. It runs only after hard gates, only for a deterministic ambiguity band, and only when the tenant credential permits external inference. A cold TypeSafe call is probabilistic; once accepted, the typed judgment, quantized features, model, rubric, and content hash are immutable. Expiry appends a content-linked successor and advances a compare-and-swap head instead of mutating history. Replays make zero provider calls.
 
 ## Production properties
 
