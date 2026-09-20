@@ -42,9 +42,18 @@ type PlanRequest struct {
 }
 
 type PlanNode struct {
-	Ordinal   uint32 `json:"ordinal"`
-	VersionID string `json:"procedure_version_id"`
-	Bridge    bool   `json:"bridge"`
+	Ordinal       uint32 `json:"ordinal"`
+	VersionID     string `json:"procedure_version_id"`
+	InterfaceHash string `json:"interface_hash"`
+	Bridge        bool   `json:"bridge"`
+}
+
+type PlanDependency struct {
+	CompatibilityEdgeID     string   `json:"compatibility_edge_id"`
+	SourceVersionID         string   `json:"source_procedure_version_id"`
+	TargetVersionID         string   `json:"target_procedure_version_id"`
+	SourceProvisionIDs      []string `json:"source_provision_ids"`
+	SatisfiedRequirementIDs []string `json:"satisfied_requirement_ids"`
 }
 
 type PlanGap struct {
@@ -55,33 +64,34 @@ type PlanGap struct {
 }
 
 type Plan struct {
-	SchemaVersion                     string          `json:"schema_version"`
-	ID                                string          `json:"id,omitempty"`
-	TenantID                          domain.TenantID `json:"tenant_id"`
-	ProjectionEpoch                   uint64          `json:"projection_epoch"`
-	PlannerManifestID                 string          `json:"planner_manifest_id"`
-	PolicyManifestID                  string          `json:"policy_manifest_id"`
-	CompatibilityGraphID              string          `json:"compatibility_graph_id"`
-	CompatibilityGraphHash            string          `json:"compatibility_graph_hash"`
-	CompatibilityMatrixHash           string          `json:"compatibility_matrix_hash"`
-	CandidateSetHash                  string          `json:"candidate_set_hash"`
-	Nodes                             []PlanNode      `json:"nodes"`
-	CompatibilityEdgeIDs              []string        `json:"compatibility_edge_ids,omitempty"`
-	ExternallySatisfiedRequirementIDs []string        `json:"externally_satisfied_requirement_ids,omitempty"`
-	SatisfiedRequirementIDs           []string        `json:"satisfied_requirement_ids,omitempty"`
-	ProducedResourceIDs               []string        `json:"produced_resource_ids,omitempty"`
-	CoveredGoalPredicateIDs           []string        `json:"covered_goal_predicate_ids,omitempty"`
-	RequestedGoalPredicateIDs         []string        `json:"requested_goal_predicate_ids"`
-	SeedVersionIDs                    []string        `json:"seed_version_ids"`
-	Gaps                              []PlanGap       `json:"gaps,omitempty"`
-	LimitCodes                        []string        `json:"limit_codes,omitempty"`
-	Complete                          bool            `json:"complete"`
-	EvidenceStrength                  int64           `json:"evidence_strength"`
-	AllObservedEndToEnd               bool            `json:"all_observed_end_to_end"`
-	RiskCost                          uint64          `json:"risk_cost"`
-	ToolCost                          uint64          `json:"tool_cost"`
-	ContentHash                       string          `json:"content_hash,omitempty"`
-	CanonicalJSON                     []byte          `json:"-"`
+	SchemaVersion                     string           `json:"schema_version"`
+	ID                                string           `json:"id,omitempty"`
+	TenantID                          domain.TenantID  `json:"tenant_id"`
+	ProjectionEpoch                   uint64           `json:"projection_epoch"`
+	PlannerManifestID                 string           `json:"planner_manifest_id"`
+	PolicyManifestID                  string           `json:"policy_manifest_id"`
+	CompatibilityGraphID              string           `json:"compatibility_graph_id"`
+	CompatibilityGraphHash            string           `json:"compatibility_graph_hash"`
+	CompatibilityMatrixHash           string           `json:"compatibility_matrix_hash"`
+	CandidateSetHash                  string           `json:"candidate_set_hash"`
+	Nodes                             []PlanNode       `json:"nodes"`
+	Dependencies                      []PlanDependency `json:"dependencies,omitempty"`
+	CompatibilityEdgeIDs              []string         `json:"compatibility_edge_ids,omitempty"`
+	ExternallySatisfiedRequirementIDs []string         `json:"externally_satisfied_requirement_ids,omitempty"`
+	SatisfiedRequirementIDs           []string         `json:"satisfied_requirement_ids,omitempty"`
+	ProducedResourceIDs               []string         `json:"produced_resource_ids,omitempty"`
+	CoveredGoalPredicateIDs           []string         `json:"covered_goal_predicate_ids,omitempty"`
+	RequestedGoalPredicateIDs         []string         `json:"requested_goal_predicate_ids"`
+	SeedVersionIDs                    []string         `json:"seed_version_ids"`
+	Gaps                              []PlanGap        `json:"gaps,omitempty"`
+	LimitCodes                        []string         `json:"limit_codes,omitempty"`
+	Complete                          bool             `json:"complete"`
+	EvidenceStrength                  int64            `json:"evidence_strength"`
+	AllObservedEndToEnd               bool             `json:"all_observed_end_to_end"`
+	RiskCost                          uint64           `json:"risk_cost"`
+	ToolCost                          uint64           `json:"tool_cost"`
+	ContentHash                       string           `json:"content_hash,omitempty"`
+	CanonicalJSON                     []byte           `json:"-"`
 }
 
 type searchState struct {
@@ -394,13 +404,16 @@ func buildSearchState(ctx context.Context, manifest PlannerManifest, request Pla
 		RequestedGoalPredicateIDs: append([]string(nil), goals...), SeedVersionIDs: append([]string(nil), seedVersionIDs...),
 		AllObservedEndToEnd: true, EvidenceStrength: math.MaxInt64,
 	}
+	for _, edge := range edges {
+		plan.Dependencies = append(plan.Dependencies, PlanDependency{CompatibilityEdgeID: edge.ID, SourceVersionID: edge.SourceVersionID, TargetVersionID: edge.TargetVersionID, SourceProvisionIDs: append([]string(nil), edge.SourceProvisionIDs...), SatisfiedRequirementIDs: append([]string(nil), edge.SatisfiedRequirementIDs...)})
+	}
 	bridges := uint32(0)
 	for ordinal, versionID := range ordered {
 		candidate := byVersion[versionID]
 		if !candidate.Seed {
 			bridges++
 		}
-		plan.Nodes = append(plan.Nodes, PlanNode{Ordinal: uint32(ordinal), VersionID: versionID, Bridge: !candidate.Seed})
+		plan.Nodes = append(plan.Nodes, PlanNode{Ordinal: uint32(ordinal), VersionID: versionID, InterfaceHash: candidate.Interface.ContentHash, Bridge: !candidate.Seed})
 		plan.RiskCost += uint64(candidate.RiskCost)
 		plan.ToolCost += uint64(candidate.ToolCost)
 		if candidate.EvidenceStrength < plan.EvidenceStrength {
@@ -551,6 +564,20 @@ func canonicalizePlan(plan *Plan) error {
 	return nil
 }
 
+func HydratePlan(plan Plan) (Plan, error) {
+	expectedID, expectedHash := plan.ID, plan.ContentHash
+	plan.ID, plan.ContentHash, plan.CanonicalJSON = "", "", nil
+	canonicalJSON, hash, err := canonical.MarshalAndHash(plan)
+	if err != nil || expectedID != "plan_"+hash || expectedHash != hash {
+		return Plan{}, ErrInvalidPlanRequest
+	}
+	plan.ID, plan.ContentHash, plan.CanonicalJSON = expectedID, expectedHash, canonicalJSON
+	if ValidatePlan(plan) != nil {
+		return Plan{}, ErrInvalidPlanRequest
+	}
+	return plan, nil
+}
+
 func betterState(left, right searchState) bool {
 	if left.plan.Complete != right.plan.Complete {
 		return left.plan.Complete
@@ -653,15 +680,27 @@ func ValidatePlan(plan Plan) error {
 	requested := sliceSet(plan.RequestedGoalPredicateIDs)
 	seeds := sliceSet(plan.SeedVersionIDs)
 	seenNodes := make(map[string]struct{}, len(plan.Nodes))
+	positions := make(map[string]int, len(plan.Nodes))
 	for ordinal, node := range plan.Nodes {
 		_, isSeed := seeds[node.VersionID]
-		if node.Ordinal != uint32(ordinal) || node.VersionID == "" || node.Bridge == isSeed {
+		if node.Ordinal != uint32(ordinal) || !safeIdentity(node.VersionID) || !sha256Pattern.MatchString(node.InterfaceHash) || node.Bridge == isSeed {
 			return ErrInvalidPlanRequest
 		}
 		if _, duplicate := seenNodes[node.VersionID]; duplicate {
 			return ErrInvalidPlanRequest
 		}
 		seenNodes[node.VersionID] = struct{}{}
+		positions[node.VersionID] = ordinal
+	}
+	if len(plan.Dependencies) != len(plan.CompatibilityEdgeIDs) {
+		return ErrInvalidPlanRequest
+	}
+	for index, dependency := range plan.Dependencies {
+		sourcePosition, sourceOK := positions[dependency.SourceVersionID]
+		targetPosition, targetOK := positions[dependency.TargetVersionID]
+		if dependency.CompatibilityEdgeID != plan.CompatibilityEdgeIDs[index] || !sourceOK || !targetOK || sourcePosition >= targetPosition || !strictPrefixed(dependency.SourceProvisionIDs, "prov_") || !strictPrefixed(dependency.SatisfiedRequirementIDs, "req_") {
+			return ErrInvalidPlanRequest
+		}
 	}
 	for _, goal := range plan.CoveredGoalPredicateIDs {
 		if _, ok := requested[goal]; !ok {

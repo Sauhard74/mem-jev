@@ -285,6 +285,30 @@ func canonicalizeParallelSchedule(schedule *ParallelSchedule) error {
 	return nil
 }
 
+func HydrateParallelSchedule(schedule ParallelSchedule) (ParallelSchedule, error) {
+	for index := range schedule.Groups {
+		group := &schedule.Groups[index]
+		expectedID, expectedHash := group.ID, group.ContentHash
+		group.ID, group.ContentHash, group.CanonicalJSON = "", "", nil
+		encoded, hash, err := canonical.MarshalAndHash(*group)
+		if err != nil || expectedID != "pgroup_"+hash || expectedHash != hash {
+			return ParallelSchedule{}, ErrInvalidParallelRequest
+		}
+		group.ID, group.ContentHash, group.CanonicalJSON = expectedID, expectedHash, encoded
+	}
+	expectedID, expectedHash := schedule.ID, schedule.ContentHash
+	schedule.ID, schedule.ContentHash, schedule.CanonicalJSON = "", "", nil
+	encoded, hash, err := canonical.MarshalAndHash(schedule)
+	if err != nil || expectedID != "psched_"+hash || expectedHash != hash {
+		return ParallelSchedule{}, ErrInvalidParallelRequest
+	}
+	schedule.ID, schedule.ContentHash, schedule.CanonicalJSON = expectedID, expectedHash, encoded
+	if ValidateParallelSchedule(schedule) != nil {
+		return ParallelSchedule{}, ErrInvalidParallelRequest
+	}
+	return schedule, nil
+}
+
 func ValidateParallelSchedule(schedule ParallelSchedule) error {
 	if schedule.SchemaVersion != "parallel-schedule.v1" || schedule.ID != "psched_"+schedule.ContentHash || !sha256Pattern.MatchString(schedule.ContentHash) || !safeIdentity(string(schedule.TenantID)) || schedule.ProjectionEpoch == 0 || schedule.PlanID != "plan_"+schedule.PlanHash || !sha256Pattern.MatchString(schedule.PlanHash) || schedule.CompatibilityGraphID != "cgraph_"+schedule.CompatibilityGraphHash || !sha256Pattern.MatchString(schedule.CompatibilityGraphHash) || !safeIdentity(schedule.PlannerManifestID) || !safeIdentity(schedule.PolicyManifestID) || len(schedule.Groups) == 0 || len(schedule.Groups) > 32 || len(schedule.CanonicalJSON) > 16<<20 {
 		return ErrInvalidParallelRequest
