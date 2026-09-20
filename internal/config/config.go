@@ -23,6 +23,12 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_SURREAL_USER": {}, "MEMJEV_SURREAL_PASSWORD": {}, "MEMJEV_SURREAL_AUTH_SCOPE": {},
 	"MEMJEV_ARCHIVE_BUCKET": {}, "MEMJEV_ARCHIVE_REGION": {}, "MEMJEV_ARCHIVE_ENDPOINT": {},
 	"MEMJEV_ARCHIVE_SSE": {}, "MEMJEV_ARCHIVE_KMS_KEY_ID": {},
+	"MEMJEV_TEMPORAL_ADDRESS": {}, "MEMJEV_TEMPORAL_NAMESPACE": {}, "MEMJEV_TEMPORAL_TASK_QUEUE": {},
+	"MEMJEV_TEMPORAL_API_KEY": {}, "MEMJEV_TEMPORAL_TLS_SERVER_NAME": {}, "MEMJEV_TEMPORAL_TLS_CA_FILE": {},
+	"MEMJEV_TEMPORAL_TLS_CERT_FILE": {}, "MEMJEV_TEMPORAL_TLS_KEY_FILE": {},
+	"MEMJEV_WORKER_ID": {}, "MEMJEV_WORKER_HEALTH_ADDR": {}, "MEMJEV_WORKER_POLL_INTERVAL": {},
+	"MEMJEV_WORKER_LEASE_DURATION": {}, "MEMJEV_WORKER_BATCH_SIZE": {}, "MEMJEV_WORKER_MAX_ATTEMPTS": {},
+	"MEMJEV_WORKER_MAX_BACKOFF": {}, "MEMJEV_STAGE_RETENTION": {}, "MEMJEV_ARCHIVE_MAX_BYTES": {},
 	"MEMJEV_OTLP_ENDPOINT": {}, "MEMJEV_BUILD_VERSION": {}, "MEMJEV_BUILD_COMMIT": {}, "MEMJEV_BUILD_AT": {},
 }
 
@@ -36,6 +42,8 @@ type Config struct {
 	TenantMetrics   bool
 	Surreal         SurrealConfig
 	Archive         ArchiveConfig
+	Temporal        TemporalConfig
+	Worker          WorkerConfig
 	OTLPEndpoint    string
 	Build           BuildConfig
 }
@@ -48,11 +56,48 @@ type ArchiveConfig struct {
 	Bucket, Region, Endpoint, SSE, KMSKeyID string
 }
 
+type TemporalConfig struct {
+	Address, Namespace, TaskQueue, APIKey, TLSServerName, TLSCAFile, TLSCertFile, TLSKeyFile string
+}
+
+type WorkerConfig struct {
+	ID, HealthAddress                       string
+	PollInterval, LeaseDuration, MaxBackoff time.Duration
+	BatchSize, MaximumAttempts              int
+	StageRetention                          time.Duration
+	ArchiveMaximumBytes                     int64
+}
+
 type BuildConfig struct {
 	Version, Commit, BuiltAt string
 }
 
 func Load() (Config, error) {
+	config, err := load()
+	if err != nil {
+		return Config{}, err
+	}
+	if err := validate(config, true); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+func LoadWorker() (Config, error) {
+	config, err := load()
+	if err != nil {
+		return Config{}, err
+	}
+	if err := validate(config, false); err != nil {
+		return Config{}, err
+	}
+	if err := validateWorker(config); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+func load() (Config, error) {
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
 		if strings.HasPrefix(name, "MEMJEV_") {
@@ -78,6 +123,17 @@ func Load() (Config, error) {
 			Bucket: os.Getenv("MEMJEV_ARCHIVE_BUCKET"), Region: os.Getenv("MEMJEV_ARCHIVE_REGION"), Endpoint: os.Getenv("MEMJEV_ARCHIVE_ENDPOINT"),
 			SSE: valueOr("MEMJEV_ARCHIVE_SSE", "AES256"), KMSKeyID: os.Getenv("MEMJEV_ARCHIVE_KMS_KEY_ID"),
 		},
+		Temporal: TemporalConfig{
+			Address: os.Getenv("MEMJEV_TEMPORAL_ADDRESS"), Namespace: os.Getenv("MEMJEV_TEMPORAL_NAMESPACE"),
+			TaskQueue: os.Getenv("MEMJEV_TEMPORAL_TASK_QUEUE"), APIKey: os.Getenv("MEMJEV_TEMPORAL_API_KEY"),
+			TLSServerName: os.Getenv("MEMJEV_TEMPORAL_TLS_SERVER_NAME"), TLSCAFile: os.Getenv("MEMJEV_TEMPORAL_TLS_CA_FILE"),
+			TLSCertFile: os.Getenv("MEMJEV_TEMPORAL_TLS_CERT_FILE"), TLSKeyFile: os.Getenv("MEMJEV_TEMPORAL_TLS_KEY_FILE"),
+		},
+		Worker: WorkerConfig{
+			ID: valueOr("MEMJEV_WORKER_ID", "worker-1"), HealthAddress: valueOr("MEMJEV_WORKER_HEALTH_ADDR", ":8081"),
+			PollInterval: time.Second, LeaseDuration: 30 * time.Second, MaxBackoff: time.Minute,
+			BatchSize: 32, MaximumAttempts: 10, StageRetention: 24 * time.Hour, ArchiveMaximumBytes: 16 << 20,
+		},
 		Build: BuildConfig{Version: valueOr("MEMJEV_BUILD_VERSION", "dev"), Commit: valueOr("MEMJEV_BUILD_COMMIT", "unknown"), BuiltAt: valueOr("MEMJEV_BUILD_AT", "unknown")},
 	}
 	if raw := os.Getenv("MEMJEV_SHUTDOWN_TIMEOUT"); raw != "" {
@@ -101,14 +157,52 @@ func Load() (Config, error) {
 		}
 		config.TenantMetrics = parsed
 	}
-	if err := validate(config); err != nil {
-		return Config{}, err
+	workerDurations := []struct {
+		name   string
+		target *time.Duration
+	}{
+		{"MEMJEV_WORKER_POLL_INTERVAL", &config.Worker.PollInterval},
+		{"MEMJEV_WORKER_LEASE_DURATION", &config.Worker.LeaseDuration},
+		{"MEMJEV_WORKER_MAX_BACKOFF", &config.Worker.MaxBackoff},
+		{"MEMJEV_STAGE_RETENTION", &config.Worker.StageRetention},
+	}
+	for _, item := range workerDurations {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, err := time.ParseDuration(raw)
+			if err != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	workerIntegers := []struct {
+		name   string
+		target *int
+	}{
+		{"MEMJEV_WORKER_BATCH_SIZE", &config.Worker.BatchSize},
+		{"MEMJEV_WORKER_MAX_ATTEMPTS", &config.Worker.MaximumAttempts},
+	}
+	for _, item := range workerIntegers {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	if raw := os.Getenv("MEMJEV_ARCHIVE_MAX_BYTES"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			return Config{}, fieldError("MEMJEV_ARCHIVE_MAX_BYTES")
+		}
+		config.Worker.ArchiveMaximumBytes = parsed
 	}
 	return config, nil
 }
 
-func validate(config Config) error {
-	if config.ListenAddress == "" || config.CredentialsFile == "" {
+func validate(config Config, requireAPICredentials bool) error {
+	if config.ListenAddress == "" || (requireAPICredentials && config.CredentialsFile == "") {
 		return fieldError("MEMJEV_LISTEN_ADDR or MEMJEV_CREDENTIALS_FILE")
 	}
 	if config.Environment != "development" && config.Environment != "staging" && config.Environment != "production" {
@@ -152,6 +246,22 @@ func validate(config Config) error {
 	}
 	if config.Archive.SSE == "aws:kms" && config.Archive.KMSKeyID == "" {
 		return fieldError("MEMJEV_ARCHIVE_KMS_KEY_ID")
+	}
+	return nil
+}
+
+func validateWorker(config Config) error {
+	if config.AdapterMode != "surreal-s3" || config.Worker.ID == "" || config.Worker.HealthAddress == "" ||
+		config.Worker.BatchSize > 100 || config.Worker.LeaseDuration < time.Second || config.Worker.StageRetention < time.Hour ||
+		config.Temporal.Address == "" || config.Temporal.Namespace == "" || config.Temporal.TaskQueue == "" ||
+		(config.Temporal.TLSCertFile == "") != (config.Temporal.TLSKeyFile == "") {
+		return fieldError("worker configuration")
+	}
+	if config.Environment != "development" && config.Temporal.TLSServerName == "" {
+		return fieldError("MEMJEV_TEMPORAL_TLS_SERVER_NAME")
+	}
+	if config.Temporal.APIKey != "" && config.Temporal.TLSServerName == "" {
+		return fieldError("MEMJEV_TEMPORAL_TLS_SERVER_NAME")
 	}
 	return nil
 }

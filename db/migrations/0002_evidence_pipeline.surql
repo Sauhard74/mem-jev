@@ -192,6 +192,22 @@ DEFINE FIELD IF NOT EXISTS schema_version ON TABLE projection_checkpoint TYPE st
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE projection_checkpoint TYPE string;
 DEFINE INDEX IF NOT EXISTS projection_checkpoint_tenant_name_unique ON TABLE projection_checkpoint FIELDS tenant_id, projection_name UNIQUE;
 
+-- Transient, rebuildable workflow-stage artifacts keep large sanitized traces out of Temporal history.
+DEFINE TABLE IF NOT EXISTS pipeline_stage_artifact SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS workflow_id ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS stage ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS input_hash ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS payload ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS status ON TABLE pipeline_stage_artifact TYPE string READONLY ASSERT $value IN ["ready", "terminal"];
+DEFINE FIELD IF NOT EXISTS code ON TABLE pipeline_stage_artifact TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE pipeline_stage_artifact TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE pipeline_stage_artifact TYPE datetime;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE pipeline_stage_artifact TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE pipeline_stage_artifact TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS pipeline_stage_tenant_workflow_stage_unique ON TABLE pipeline_stage_artifact FIELDS tenant_id, workflow_id, stage UNIQUE;
+DEFINE INDEX IF NOT EXISTS pipeline_stage_expiry ON TABLE pipeline_stage_artifact FIELDS expires_at;
+
 DEFINE TABLE IF NOT EXISTS audit_event SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE audit_event TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS audit_event_id ON TABLE audit_event TYPE string READONLY;

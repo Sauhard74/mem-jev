@@ -60,6 +60,38 @@ func TestLoadProductionAcceptsDatabaseScopedSurrealAuthentication(t *testing.T) 
 	}
 }
 
+func TestLoadWorkerParsesDurableLeaseAndTemporalConfiguration(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_TEMPORAL_ADDRESS", "temporal.example.test:7233")
+	t.Setenv("MEMJEV_TEMPORAL_NAMESPACE", "production")
+	t.Setenv("MEMJEV_TEMPORAL_TASK_QUEUE", "synthesis")
+	t.Setenv("MEMJEV_TEMPORAL_TLS_SERVER_NAME", "temporal.example.test")
+	t.Setenv("MEMJEV_WORKER_BATCH_SIZE", "64")
+	t.Setenv("MEMJEV_WORKER_LEASE_DURATION", "45s")
+	t.Setenv("MEMJEV_STAGE_RETENTION", "48h")
+	got, err := LoadWorker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Worker.BatchSize != 64 || got.Worker.LeaseDuration != 45*time.Second || got.Worker.StageRetention != 48*time.Hour || got.Temporal.TaskQueue != "synthesis" {
+		t.Fatalf("config = %#v", got)
+	}
+}
+
+func TestLoadWorkerRejectsIncompleteMTLSConfiguration(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_TEMPORAL_ADDRESS", "temporal.example.test:7233")
+	t.Setenv("MEMJEV_TEMPORAL_NAMESPACE", "production")
+	t.Setenv("MEMJEV_TEMPORAL_TASK_QUEUE", "synthesis")
+	t.Setenv("MEMJEV_TEMPORAL_TLS_SERVER_NAME", "temporal.example.test")
+	t.Setenv("MEMJEV_TEMPORAL_TLS_CERT_FILE", "/run/secrets/client.crt")
+	if _, err := LoadWorker(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func setValidDurableEnvironment(t *testing.T) {
 	t.Helper()
 	clearKnownEnvironment(t)

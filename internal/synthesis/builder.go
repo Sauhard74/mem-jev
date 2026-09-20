@@ -93,6 +93,14 @@ func buildNode(tenantID domain.TenantID, event domain.CanonicalEvent, resolved t
 		Succeeded:  event.Result != nil && event.Result.State == "TOOL_RESULT_STATE_SUCCESS",
 		SideEffect: resolved.Manifest.SideEffect, CompensationBoundary: resolved.Manifest.Compensation != nil,
 	}
+	for _, predicate := range resolved.Manifest.SuccessPredicates {
+		node.SuccessPredicates = append(node.SuccessPredicates, predicate.ID)
+	}
+	for _, method := range resolved.Manifest.VerificationMethods {
+		node.VerificationMethods = append(node.VerificationMethods, method.ID)
+	}
+	sort.Strings(node.SuccessPredicates)
+	sort.Strings(node.VerificationMethods)
 	if resolved.Opaque {
 		return node, nil
 	}

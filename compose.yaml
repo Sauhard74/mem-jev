@@ -44,6 +44,40 @@ services:
     networks: ["private"]
     restart: "no"
 
+  temporal-postgres:
+    image: postgres:16.4-bookworm
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: "${TEMPORAL_POSTGRES_PASSWORD:?}"
+    volumes: ["temporal-postgres-data:/var/lib/postgresql/data"]
+    networks: ["private"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.28.1
+    depends_on:
+      temporal-postgres: {condition: service_healthy}
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: "${TEMPORAL_POSTGRES_PASSWORD:?}"
+      POSTGRES_SEEDS: temporal-postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports: ["127.0.0.1:${TEMPORAL_PORT:-17233}:7233"]
+    networks: ["private", "host-access"]
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "127.0.0.1:7233", "cluster", "health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+
   credential-init:
     image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     user: "0:0"
@@ -103,6 +137,63 @@ services:
       retries: 30
     restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+      args:
+        VERSION: "${MEMJEV_BUILD_VERSION:-dev}"
+        REVISION: "${MEMJEV_BUILD_COMMIT:-local}"
+        BUILT_AT: "${MEMJEV_BUILD_AT:-unknown}"
+    entrypoint: ["/memjev-worker"]
+    depends_on:
+      surreal: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+      temporal: {condition: service_healthy}
+    environment:
+      MEMJEV_ENVIRONMENT: development
+      MEMJEV_ADAPTER_MODE: surreal-s3
+      MEMJEV_SHUTDOWN_TIMEOUT: 20s
+      MEMJEV_SURREAL_ENDPOINT: ws://surreal:8000
+      MEMJEV_SURREAL_NAMESPACE: memjev
+      MEMJEV_SURREAL_DATABASE: memjev
+      MEMJEV_SURREAL_USER: "${SURREAL_USER:?}"
+      MEMJEV_SURREAL_PASSWORD: "${SURREAL_PASS:?}"
+      MEMJEV_SURREAL_AUTH_SCOPE: root
+      MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
+      MEMJEV_ARCHIVE_REGION: us-east-1
+      MEMJEV_ARCHIVE_ENDPOINT: http://minio:9000
+      MEMJEV_ARCHIVE_SSE: AES256
+      MEMJEV_TEMPORAL_ADDRESS: temporal:7233
+      MEMJEV_TEMPORAL_NAMESPACE: default
+      MEMJEV_TEMPORAL_TASK_QUEUE: memjev-synthesis
+      MEMJEV_WORKER_ID: "${MEMJEV_WORKER_ID:-worker-1}"
+      MEMJEV_WORKER_HEALTH_ADDR: ":8081"
+      MEMJEV_WORKER_BATCH_SIZE: 32
+      MEMJEV_WORKER_LEASE_DURATION: 30s
+      MEMJEV_WORKER_POLL_INTERVAL: 1s
+      MEMJEV_WORKER_MAX_ATTEMPTS: 10
+      MEMJEV_WORKER_MAX_BACKOFF: 1m
+      MEMJEV_STAGE_RETENTION: 24h
+      MEMJEV_ARCHIVE_MAX_BYTES: 16777216
+      MEMJEV_BUILD_VERSION: "${MEMJEV_BUILD_VERSION:-dev}"
+      MEMJEV_BUILD_COMMIT: "${MEMJEV_BUILD_COMMIT:-local}"
+      MEMJEV_BUILD_AT: "${MEMJEV_BUILD_AT:-unknown}"
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:?}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?}"
+      AWS_EC2_METADATA_DISABLED: "true"
+    ports: ["127.0.0.1:${MEMJEV_WORKER_HEALTH_PORT:-18081}:8081"]
+    networks: ["private", "host-access"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "/memjev-worker", "healthcheck"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+
 networks:
   private:
     internal: true
@@ -112,3 +203,4 @@ volumes:
   surreal-data:
   minio-data:
   api-credentials:
+  temporal-postgres-data:

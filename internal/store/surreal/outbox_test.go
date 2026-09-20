@@ -6,14 +6,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
+	"github.com/sauhard74/mem-jev/internal/archive"
+	"github.com/sauhard74/mem-jev/internal/canonical"
+	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/evidence"
+	"github.com/sauhard74/mem-jev/internal/rebuild"
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/testinfra"
+	"github.com/sauhard74/mem-jev/internal/toolcontract"
+	memworkflow "github.com/sauhard74/mem-jev/internal/workflow"
 	surrealdb "github.com/surrealdb/surrealdb.go"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestOutboxCompetingClaimersProduceOneLease(t *testing.T) {
@@ -140,6 +150,158 @@ func TestOutboxTransitionIsTenantScoped(t *testing.T) {
 	})
 	if !errors.Is(err, store.ErrOutboxJobNotFound) {
 		t.Fatalf("error = %v, want %v", err, store.ErrOutboxJobNotFound)
+	}
+}
+
+func TestStageArtifactRepositoryIsImmutableAndTenantScoped(t *testing.T) {
+	db := projectionDatabase(t)
+	repository := NewStageArtifactRepository(db)
+	artifact := memworkflow.StageArtifact{
+		TenantID: "tenant-a", WorkflowID: "workflow-a", Stage: memworkflow.StageLoad,
+		InputHash: strings.Repeat("a", 64), Payload: []byte(`{"ok":true}`),
+		Status: memworkflow.StageStatusReady, CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	hash, err := memworkflow.StageArtifactHash(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact.ContentHash = hash
+	if err := repository.PutStageArtifact(context.Background(), artifact); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.PutStageArtifact(context.Background(), artifact); err != nil {
+		t.Fatalf("duplicate write = %v", err)
+	}
+	got, err := repository.GetStageArtifact(context.Background(), artifact.TenantID, artifact.WorkflowID, artifact.Stage)
+	if err != nil || got.ContentHash != artifact.ContentHash || string(got.Payload) != string(artifact.Payload) {
+		t.Fatalf("artifact=%#v error=%v", got, err)
+	}
+	conflict := artifact
+	conflict.ContentHash = strings.Repeat("c", 64)
+	if err := repository.PutStageArtifact(context.Background(), conflict); !errors.Is(err, memworkflow.ErrStageArtifactConflict) {
+		t.Fatalf("conflict error = %v", err)
+	}
+	if _, err := repository.GetStageArtifact(context.Background(), "tenant-b", artifact.WorkflowID, artifact.Stage); !errors.Is(err, memworkflow.ErrStageArtifactNotFound) {
+		t.Fatalf("cross-tenant read error = %v", err)
+	}
+}
+
+func TestTenantToolRegistryResolvesStoredContractAndAlias(t *testing.T) {
+	db := projectionDatabase(t)
+	manifest, err := toolcontract.Canonicalize(toolcontract.Manifest{
+		SchemaVersion: "tool-contract.v1", ToolID: "writer", Version: "1.0.0", Aliases: []string{"write-file"},
+		Inputs:     []toolcontract.FieldSpec{{Name: "path", Type: "string", Required: true, Sanitizer: toolcontract.SanitizerRelativePath}},
+		Writes:     []toolcontract.ResourceSpec{{Name: "file", Type: "file", Namespace: "workspace", Field: "path"}},
+		SideEffect: toolcontract.SideEffectWrite, Risk: toolcontract.RiskLow,
+		Idempotency:         toolcontract.IdempotencySpec{Mode: toolcontract.IdempotencyGuaranteed},
+		Retry:               toolcontract.RetrySpec{Mode: toolcontract.RetryOnDeclaredTransient, MaximumAttempts: 2},
+		SuccessPredicates:   []toolcontract.PredicateSpec{{ID: "goal", Field: "path", Operator: "exists"}},
+		VerificationMethods: []toolcontract.VerificationMethod{{ID: "ci", EvidenceClass: string(domain.EvidenceClassGoalPredicate)}},
+		Compatibility:       []toolcontract.CompatibilityRange{{MinimumInclusive: "1.0.0", MaximumExclusive: "2.0.0"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = surrealdb.Query[any](context.Background(), db, `CREATE ONLY tool_contract CONTENT $contract;
+		CREATE ONLY tool_contract_version CONTENT $version`, map[string]any{
+		"contract": map[string]any{
+			"tenant_id": "tenant-a", "tool_id": manifest.ToolID, "created_at": time.Now().UTC(),
+			"schema_version": "tool-contract.v1", "content_hash": manifest.ContentHash,
+		},
+		"version": map[string]any{
+			"tenant_id": "tenant-a", "contract_version_id": manifest.ID, "tool_id": manifest.ToolID,
+			"tool_version": manifest.Version, "manifest": manifest, "created_at": time.Now().UTC(),
+			"schema_version": "tool-contract.v1", "content_hash": manifest.ContentHash,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewTenantRegistryProvider(db).ForTenant("tenant-a")
+	for _, name := range []string{"writer", "write-file"} {
+		resolved, err := registry.Resolve(context.Background(), toolcontract.Query{Name: name, Version: "1.0.0"})
+		if err != nil || resolved.Opaque || resolved.Manifest.ID != manifest.ID {
+			t.Fatalf("Resolve(%q) = %#v, %v", name, resolved, err)
+		}
+	}
+	versioned, ok := registry.(memworkflow.VersionedRegistry)
+	if !ok {
+		t.Fatal("registry does not expose snapshot provenance")
+	}
+	if !strings.HasPrefix(versioned.SnapshotVersion(), "registry_") {
+		t.Fatalf("registry snapshot version = %q", versioned.SnapshotVersion())
+	}
+	crossTenant := NewTenantRegistryProvider(db).ForTenant("tenant-b")
+	resolved, err := crossTenant.Resolve(context.Background(), toolcontract.Query{Name: "writer", Version: "1.0.0"})
+	if err != nil || !resolved.Opaque {
+		t.Fatalf("cross-tenant resolve = %#v, %v", resolved, err)
+	}
+}
+
+func TestWorkflowSourceLoaderReconstructsTenantScopedTraceAndOutcome(t *testing.T) {
+	db := projectionDatabase(t)
+	archives := archive.NewMemoryStore()
+	exitCode := int32(0)
+	batch, err := canonical.Build("tenant_a", &memjevv1.IngestTraceRequest{
+		ClientTraceId: "source-loader-trace", Harness: "integration", Task: "verify source loading",
+		Events: []*memjevv1.TraceEvent{{
+			ClientEventId: "event-1", OccurredAt: timestamppb.New(time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)),
+			Kind: memjevv1.EventKind_EVENT_KIND_EXECUTE, ToolName: "verify", ToolVersion: "1.0.0",
+			Result: &memjevv1.ToolResult{State: memjevv1.ToolResultState_TOOL_RESULT_STATE_SUCCESS, ExitCode: &exitCode},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := archives.PutCanonical(context.Background(), archive.PutRequest{
+		TenantID: batch.TenantID, SchemaVersion: batch.SchemaVersion, Hash: batch.Hash, Body: batch.CanonicalJSON,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingestRequest := store.CommitIngestRequest{
+		TenantID: batch.TenantID, IdempotencyKeyHash: strings.Repeat("9", 64), Batch: batch, Archive: object,
+	}
+	if _, err := NewIngestRepository(db).Commit(context.Background(), ingestRequest); err != nil {
+		t.Fatal(err)
+	}
+	canonicalOutcome, err := evidence.Canonicalize(batch.TenantID, &memjevv1.RecordOutcomeRequest{
+		TraceId: string(batch.Trace.ID), ExecutionId: "execution-1",
+		Evidence: []*memjevv1.OutcomeEvidence{{
+			ClientEvidenceId: "evidence-1", Class: memjevv1.EvidenceClass_EVIDENCE_CLASS_GOAL_PREDICATE,
+			Verdict: memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_SATISFIED, PredicateId: "goal", VerifierId: "ci",
+			ObservedAt: timestamppb.New(time.Date(2026, 9, 20, 0, 0, 1, 0, time.UTC)),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomeRequest := store.CommitOutcomeRequest{
+		TenantID: batch.TenantID, IdempotencyKeyHash: strings.Repeat("8", 64), Outcome: canonicalOutcome,
+		Evaluation: evidence.Result{State: domain.OutcomeStateVerifiedSuccess, PromotionEligible: true, PolicyVersion: "outcome-policy.v1"},
+	}
+	if _, err := NewOutcomeRepository(db).CommitOutcome(context.Background(), outcomeRequest); err != nil {
+		t.Fatal(err)
+	}
+	loader := NewWorkflowSourceLoader(db, rebuild.NewLoader(archives, rebuild.Config{MaximumBytes: 1 << 20, AcceptedSchemas: []string{"canonical.v1"}}))
+	loaded, err := loader.Load(context.Background(), memworkflow.SynthesisInput{
+		SchemaVersion: "synthesis-input.v1", TenantID: outcomeRequest.TenantID, TraceID: outcomeRequest.Outcome.TraceID,
+		OutcomeID: outcomeRequest.Outcome.ID, JobType: store.OutboxJobSynthesizeOutcome, ContentHash: outcomeRequest.Outcome.Hash,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Batch.Hash != ingestRequest.Batch.Hash || loaded.Outcome == nil || loaded.Outcome.ID != outcomeRequest.Outcome.ID ||
+		loaded.Outcome.ContentHash != outcomeRequest.Outcome.Hash || len(loaded.Outcome.Evidence) != 1 {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+	_, err = loader.Load(context.Background(), memworkflow.SynthesisInput{
+		SchemaVersion: "synthesis-input.v1", TenantID: "tenant-b", TraceID: outcomeRequest.Outcome.TraceID,
+		OutcomeID: outcomeRequest.Outcome.ID, JobType: store.OutboxJobSynthesizeOutcome, ContentHash: outcomeRequest.Outcome.Hash,
+	})
+	var stageErr *memworkflow.StageError
+	if !errors.As(err, &stageErr) || stageErr.Code != "trace_not_found" {
+		t.Fatalf("cross-tenant error = %v", err)
 	}
 }
 

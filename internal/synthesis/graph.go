@@ -40,6 +40,8 @@ type Node struct {
 	Succeeded             bool                         `json:"succeeded"`
 	SideEffect            toolcontract.SideEffectClass `json:"side_effect"`
 	CompensationBoundary  bool                         `json:"compensation_boundary"`
+	SuccessPredicates     []string                     `json:"success_predicates,omitempty"`
+	VerificationMethods   []string                     `json:"verification_methods,omitempty"`
 	Reads                 []Resource                   `json:"reads,omitempty"`
 	Writes                []Resource                   `json:"writes,omitempty"`
 }
