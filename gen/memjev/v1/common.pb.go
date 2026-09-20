@@ -236,6 +236,220 @@ func (IngestDisposition) EnumDescriptor() ([]byte, []int) {
 	return file_memjev_v1_common_proto_rawDescGZIP(), []int{3}
 }
 
+type OutcomeState int32
+
+const (
+	OutcomeState_OUTCOME_STATE_UNSPECIFIED         OutcomeState = 0
+	OutcomeState_OUTCOME_STATE_VERIFIED_SUCCESS    OutcomeState = 1
+	OutcomeState_OUTCOME_STATE_PROVISIONAL_SUCCESS OutcomeState = 2
+	OutcomeState_OUTCOME_STATE_INCONCLUSIVE        OutcomeState = 3
+	OutcomeState_OUTCOME_STATE_VERIFIED_FAILURE    OutcomeState = 4
+)
+
+// Enum value maps for OutcomeState.
+var (
+	OutcomeState_name = map[int32]string{
+		0: "OUTCOME_STATE_UNSPECIFIED",
+		1: "OUTCOME_STATE_VERIFIED_SUCCESS",
+		2: "OUTCOME_STATE_PROVISIONAL_SUCCESS",
+		3: "OUTCOME_STATE_INCONCLUSIVE",
+		4: "OUTCOME_STATE_VERIFIED_FAILURE",
+	}
+	OutcomeState_value = map[string]int32{
+		"OUTCOME_STATE_UNSPECIFIED":         0,
+		"OUTCOME_STATE_VERIFIED_SUCCESS":    1,
+		"OUTCOME_STATE_PROVISIONAL_SUCCESS": 2,
+		"OUTCOME_STATE_INCONCLUSIVE":        3,
+		"OUTCOME_STATE_VERIFIED_FAILURE":    4,
+	}
+)
+
+func (x OutcomeState) Enum() *OutcomeState {
+	p := new(OutcomeState)
+	*p = x
+	return p
+}
+
+func (x OutcomeState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OutcomeState) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[4].Descriptor()
+}
+
+func (OutcomeState) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[4]
+}
+
+func (x OutcomeState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OutcomeState.Descriptor instead.
+func (OutcomeState) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{4}
+}
+
+type EvidenceClass int32
+
+const (
+	EvidenceClass_EVIDENCE_CLASS_UNSPECIFIED                EvidenceClass = 0
+	EvidenceClass_EVIDENCE_CLASS_INDEPENDENT_VERIFIER       EvidenceClass = 1
+	EvidenceClass_EVIDENCE_CLASS_GOAL_PREDICATE             EvidenceClass = 2
+	EvidenceClass_EVIDENCE_CLASS_HARNESS_ASSERTION          EvidenceClass = 3
+	EvidenceClass_EVIDENCE_CLASS_TOOL_POSTCONDITION         EvidenceClass = 4
+	EvidenceClass_EVIDENCE_CLASS_EXIT_STATUS_OR_SELF_REPORT EvidenceClass = 5
+)
+
+// Enum value maps for EvidenceClass.
+var (
+	EvidenceClass_name = map[int32]string{
+		0: "EVIDENCE_CLASS_UNSPECIFIED",
+		1: "EVIDENCE_CLASS_INDEPENDENT_VERIFIER",
+		2: "EVIDENCE_CLASS_GOAL_PREDICATE",
+		3: "EVIDENCE_CLASS_HARNESS_ASSERTION",
+		4: "EVIDENCE_CLASS_TOOL_POSTCONDITION",
+		5: "EVIDENCE_CLASS_EXIT_STATUS_OR_SELF_REPORT",
+	}
+	EvidenceClass_value = map[string]int32{
+		"EVIDENCE_CLASS_UNSPECIFIED":                0,
+		"EVIDENCE_CLASS_INDEPENDENT_VERIFIER":       1,
+		"EVIDENCE_CLASS_GOAL_PREDICATE":             2,
+		"EVIDENCE_CLASS_HARNESS_ASSERTION":          3,
+		"EVIDENCE_CLASS_TOOL_POSTCONDITION":         4,
+		"EVIDENCE_CLASS_EXIT_STATUS_OR_SELF_REPORT": 5,
+	}
+)
+
+func (x EvidenceClass) Enum() *EvidenceClass {
+	p := new(EvidenceClass)
+	*p = x
+	return p
+}
+
+func (x EvidenceClass) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EvidenceClass) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[5].Descriptor()
+}
+
+func (EvidenceClass) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[5]
+}
+
+func (x EvidenceClass) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EvidenceClass.Descriptor instead.
+func (EvidenceClass) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{5}
+}
+
+type EvidenceVerdict int32
+
+const (
+	EvidenceVerdict_EVIDENCE_VERDICT_UNSPECIFIED EvidenceVerdict = 0
+	EvidenceVerdict_EVIDENCE_VERDICT_SATISFIED   EvidenceVerdict = 1
+	EvidenceVerdict_EVIDENCE_VERDICT_FAILED      EvidenceVerdict = 2
+	EvidenceVerdict_EVIDENCE_VERDICT_UNKNOWN     EvidenceVerdict = 3
+)
+
+// Enum value maps for EvidenceVerdict.
+var (
+	EvidenceVerdict_name = map[int32]string{
+		0: "EVIDENCE_VERDICT_UNSPECIFIED",
+		1: "EVIDENCE_VERDICT_SATISFIED",
+		2: "EVIDENCE_VERDICT_FAILED",
+		3: "EVIDENCE_VERDICT_UNKNOWN",
+	}
+	EvidenceVerdict_value = map[string]int32{
+		"EVIDENCE_VERDICT_UNSPECIFIED": 0,
+		"EVIDENCE_VERDICT_SATISFIED":   1,
+		"EVIDENCE_VERDICT_FAILED":      2,
+		"EVIDENCE_VERDICT_UNKNOWN":     3,
+	}
+)
+
+func (x EvidenceVerdict) Enum() *EvidenceVerdict {
+	p := new(EvidenceVerdict)
+	*p = x
+	return p
+}
+
+func (x EvidenceVerdict) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EvidenceVerdict) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[6].Descriptor()
+}
+
+func (EvidenceVerdict) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[6]
+}
+
+func (x EvidenceVerdict) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EvidenceVerdict.Descriptor instead.
+func (EvidenceVerdict) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{6}
+}
+
+type OutcomeDisposition int32
+
+const (
+	OutcomeDisposition_OUTCOME_DISPOSITION_UNSPECIFIED OutcomeDisposition = 0
+	OutcomeDisposition_OUTCOME_DISPOSITION_ACCEPTED    OutcomeDisposition = 1
+	OutcomeDisposition_OUTCOME_DISPOSITION_DUPLICATE   OutcomeDisposition = 2
+)
+
+// Enum value maps for OutcomeDisposition.
+var (
+	OutcomeDisposition_name = map[int32]string{
+		0: "OUTCOME_DISPOSITION_UNSPECIFIED",
+		1: "OUTCOME_DISPOSITION_ACCEPTED",
+		2: "OUTCOME_DISPOSITION_DUPLICATE",
+	}
+	OutcomeDisposition_value = map[string]int32{
+		"OUTCOME_DISPOSITION_UNSPECIFIED": 0,
+		"OUTCOME_DISPOSITION_ACCEPTED":    1,
+		"OUTCOME_DISPOSITION_DUPLICATE":   2,
+	}
+)
+
+func (x OutcomeDisposition) Enum() *OutcomeDisposition {
+	p := new(OutcomeDisposition)
+	*p = x
+	return p
+}
+
+func (x OutcomeDisposition) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OutcomeDisposition) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[7].Descriptor()
+}
+
+func (OutcomeDisposition) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[7]
+}
+
+func (x OutcomeDisposition) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OutcomeDisposition.Descriptor instead.
+func (OutcomeDisposition) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{7}
+}
+
 type Field struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -318,7 +532,29 @@ const file_memjev_v1_common_proto_rawDesc = "" +
 	"\x11IngestDisposition\x12\"\n" +
 	"\x1eINGEST_DISPOSITION_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bINGEST_DISPOSITION_ACCEPTED\x10\x01\x12 \n" +
-	"\x1cINGEST_DISPOSITION_DUPLICATE\x10\x02B\x96\x01\n" +
+	"\x1cINGEST_DISPOSITION_DUPLICATE\x10\x02*\xbc\x01\n" +
+	"\fOutcomeState\x12\x1d\n" +
+	"\x19OUTCOME_STATE_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eOUTCOME_STATE_VERIFIED_SUCCESS\x10\x01\x12%\n" +
+	"!OUTCOME_STATE_PROVISIONAL_SUCCESS\x10\x02\x12\x1e\n" +
+	"\x1aOUTCOME_STATE_INCONCLUSIVE\x10\x03\x12\"\n" +
+	"\x1eOUTCOME_STATE_VERIFIED_FAILURE\x10\x04*\xf7\x01\n" +
+	"\rEvidenceClass\x12\x1e\n" +
+	"\x1aEVIDENCE_CLASS_UNSPECIFIED\x10\x00\x12'\n" +
+	"#EVIDENCE_CLASS_INDEPENDENT_VERIFIER\x10\x01\x12!\n" +
+	"\x1dEVIDENCE_CLASS_GOAL_PREDICATE\x10\x02\x12$\n" +
+	" EVIDENCE_CLASS_HARNESS_ASSERTION\x10\x03\x12%\n" +
+	"!EVIDENCE_CLASS_TOOL_POSTCONDITION\x10\x04\x12-\n" +
+	")EVIDENCE_CLASS_EXIT_STATUS_OR_SELF_REPORT\x10\x05*\x8e\x01\n" +
+	"\x0fEvidenceVerdict\x12 \n" +
+	"\x1cEVIDENCE_VERDICT_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aEVIDENCE_VERDICT_SATISFIED\x10\x01\x12\x1b\n" +
+	"\x17EVIDENCE_VERDICT_FAILED\x10\x02\x12\x1c\n" +
+	"\x18EVIDENCE_VERDICT_UNKNOWN\x10\x03*~\n" +
+	"\x12OutcomeDisposition\x12#\n" +
+	"\x1fOUTCOME_DISPOSITION_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cOUTCOME_DISPOSITION_ACCEPTED\x10\x01\x12!\n" +
+	"\x1dOUTCOME_DISPOSITION_DUPLICATE\x10\x02B\x96\x01\n" +
 	"\rcom.memjev.v1B\vCommonProtoP\x01Z3github.com/sauhard74/mem-jev/gen/memjev/v1;memjevv1\xa2\x02\x03MXX\xaa\x02\tMemjev.V1\xca\x02\tMemjev\\V1\xe2\x02\x15Memjev\\V1\\GPBMetadata\xea\x02\n" +
 	"Memjev::V1b\x06proto3"
 
@@ -334,14 +570,18 @@ func file_memjev_v1_common_proto_rawDescGZIP() []byte {
 	return file_memjev_v1_common_proto_rawDescData
 }
 
-var file_memjev_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_memjev_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
 var file_memjev_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_memjev_v1_common_proto_goTypes = []any{
-	(ConsentMode)(0),       // 0: memjev.v1.ConsentMode
-	(EventKind)(0),         // 1: memjev.v1.EventKind
-	(ToolResultState)(0),   // 2: memjev.v1.ToolResultState
-	(IngestDisposition)(0), // 3: memjev.v1.IngestDisposition
-	(*Field)(nil),          // 4: memjev.v1.Field
+	(ConsentMode)(0),        // 0: memjev.v1.ConsentMode
+	(EventKind)(0),          // 1: memjev.v1.EventKind
+	(ToolResultState)(0),    // 2: memjev.v1.ToolResultState
+	(IngestDisposition)(0),  // 3: memjev.v1.IngestDisposition
+	(OutcomeState)(0),       // 4: memjev.v1.OutcomeState
+	(EvidenceClass)(0),      // 5: memjev.v1.EvidenceClass
+	(EvidenceVerdict)(0),    // 6: memjev.v1.EvidenceVerdict
+	(OutcomeDisposition)(0), // 7: memjev.v1.OutcomeDisposition
+	(*Field)(nil),           // 8: memjev.v1.Field
 }
 var file_memjev_v1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -361,7 +601,7 @@ func file_memjev_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memjev_v1_common_proto_rawDesc), len(file_memjev_v1_common_proto_rawDesc)),
-			NumEnums:      4,
+			NumEnums:      8,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,

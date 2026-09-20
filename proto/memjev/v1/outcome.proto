@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "memjev/v1/common.proto";
+
+message OutcomeEvidence {
+  string client_evidence_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  EvidenceClass class = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  EvidenceVerdict verdict = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string predicate_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string verifier_id = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string verifier_version = 6 [(buf.validate.field).string.max_len = 128];
+  google.protobuf.Timestamp observed_at = 7 [(buf.validate.field).required = true];
+  repeated Field fields = 8 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message RecordOutcomeRequest {
+  string trace_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+  string execution_id = 2 [(buf.validate.field).string.max_len = 256];
+  string selection_id = 3 [(buf.validate.field).string.max_len = 80];
+  string supersedes_outcome_id = 4 [(buf.validate.field).string.max_len = 80];
+  string correction_reason = 5 [(buf.validate.field).string.max_len = 1024];
+  repeated OutcomeEvidence evidence = 6 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 256
+  }];
+}
+
+message RecordOutcomeResponse {
+  string outcome_id = 1;
+  string trace_id = 2;
+  OutcomeState state = 3;
+  OutcomeDisposition disposition = 4;
+  bool promotion_eligible = 5;
+  string policy_version = 6;
+}
+
+service OutcomeService {
+  rpc RecordOutcome(RecordOutcomeRequest) returns (RecordOutcomeResponse) {}
+}

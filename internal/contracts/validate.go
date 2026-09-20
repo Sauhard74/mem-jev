@@ -10,7 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const maxIngestRequestBytes = 1 << 20
+const (
+	maxIngestRequestBytes  = 1 << 20
+	maxOutcomeRequestBytes = 1 << 20
+)
 
 type ViolationError struct {
 	Field string
@@ -56,6 +59,46 @@ func ValidateIngest(request *memjevv1.IngestTraceRequest) error {
 			}
 		}
 		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+func ValidateOutcome(request *memjevv1.RecordOutcomeRequest) error {
+	if request == nil {
+		return &ViolationError{Field: "request", Rule: "required"}
+	}
+	if proto.Size(request) > maxOutcomeRequestBytes {
+		return &ViolationError{Field: "request_size", Rule: "must not exceed 1048576 bytes"}
+	}
+	if err := protovalidate.Validate(request); err != nil {
+		return fmt.Errorf("validate outcome request: %w", err)
+	}
+	if canonicalToken(request.GetTraceId()) == "" {
+		return &ViolationError{Field: "trace_id", Rule: "must not be empty after normalization"}
+	}
+	if request.GetSupersedesOutcomeId() != "" && canonicalToken(request.GetCorrectionReason()) == "" {
+		return &ViolationError{Field: "correction_reason", Rule: "required when superseding an outcome"}
+	}
+	if request.GetSupersedesOutcomeId() == "" && canonicalToken(request.GetCorrectionReason()) != "" {
+		return &ViolationError{Field: "supersedes_outcome_id", Rule: "required when a correction reason is supplied"}
+	}
+
+	seen := make(map[string]struct{}, len(request.GetEvidence()))
+	for index, evidence := range request.GetEvidence() {
+		id := canonicalToken(evidence.GetClientEvidenceId())
+		if id == "" {
+			return &ViolationError{Field: fmt.Sprintf("evidence[%d].client_evidence_id", index), Rule: "must not be empty after normalization"}
+		}
+		if _, ok := seen[id]; ok {
+			return &ViolationError{Field: fmt.Sprintf("evidence[%d].client_evidence_id", index), Rule: "must be unique within the outcome"}
+		}
+		seen[id] = struct{}{}
+		if canonicalToken(evidence.GetPredicateId()) == "" {
+			return &ViolationError{Field: fmt.Sprintf("evidence[%d].predicate_id", index), Rule: "must not be empty after normalization"}
+		}
+		if canonicalToken(evidence.GetVerifierId()) == "" {
+			return &ViolationError{Field: fmt.Sprintf("evidence[%d].verifier_id", index), Rule: "must not be empty after normalization"}
+		}
 	}
 	return nil
 }
