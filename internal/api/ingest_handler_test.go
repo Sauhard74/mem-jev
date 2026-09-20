@@ -206,31 +206,55 @@ func TestIngestHTTPRejectsUnknownJSONAndProtobufFields(t *testing.T) {
 	}
 	_ = response.Body.Close()
 
-	protoBody, err := proto.Marshal(minimalTrace())
-	if err != nil {
-		t.Fatal(err)
+	unknown := []byte{0xfa, 0x7f, 0x01, 'x'} // Field 2047, wire type 2, one-byte payload.
+	protobufCases := []struct {
+		name   string
+		mutate func(*memjevv1.IngestTraceRequest)
+	}{
+		{name: "root", mutate: func(message *memjevv1.IngestTraceRequest) { message.ProtoReflect().SetUnknown(unknown) }},
+		{name: "event", mutate: func(message *memjevv1.IngestTraceRequest) { message.Events[0].ProtoReflect().SetUnknown(unknown) }},
+		{name: "field", mutate: func(message *memjevv1.IngestTraceRequest) {
+			message.Events[0].Fields[0].ProtoReflect().SetUnknown(unknown)
+		}},
+		{name: "result", mutate: func(message *memjevv1.IngestTraceRequest) {
+			message.Events[0].Result.ProtoReflect().SetUnknown(unknown)
+		}},
+		{name: "evidence", mutate: func(message *memjevv1.IngestTraceRequest) {
+			message.Events[0].Result.Evidence = []*memjevv1.Field{{Name: "assertion", StringValue: "passed"}}
+			message.Events[0].Result.Evidence[0].ProtoReflect().SetUnknown(unknown)
+		}},
+		{name: "timestamp", mutate: func(message *memjevv1.IngestTraceRequest) {
+			message.Events[0].OccurredAt.ProtoReflect().SetUnknown(unknown)
+		}},
 	}
-	// Field 2047, wire type 2, one-byte payload. It is unknown to IngestTraceRequest.
-	protoBody = append(protoBody, 0xfa, 0x7f, 0x01, 'x')
-	request, err := http.NewRequest(http.MethodPost, server.URL+memjevv1connect.IngestServiceIngestTraceProcedure, bytes.NewReader(protoBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Content-Type", "application/proto")
-	request.Header.Set("Authorization", "Bearer "+testToken)
-	request.Header.Set("Idempotency-Key", testIdempotency)
-	response, err = server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if response.StatusCode != http.StatusBadRequest {
-		payload, _ := io.ReadAll(response.Body)
-		t.Fatalf("unknown protobuf status=%d body=%s", response.StatusCode, payload)
+	for _, tt := range protobufCases {
+		t.Run("protobuf "+tt.name, func(t *testing.T) {
+			message := proto.Clone(minimalTrace()).(*memjevv1.IngestTraceRequest)
+			tt.mutate(message)
+			protoBody, err := proto.Marshal(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := http.NewRequest(http.MethodPost, server.URL+memjevv1connect.IngestServiceIngestTraceProcedure, bytes.NewReader(protoBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", "application/proto")
+			request.Header.Set("Authorization", "Bearer "+testToken)
+			request.Header.Set("Idempotency-Key", testIdempotency)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, readErr := io.ReadAll(response.Body)
+			closeErr := response.Body.Close()
+			if readErr != nil || closeErr != nil {
+				t.Fatalf("read=%v close=%v", readErr, closeErr)
+			}
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("unknown protobuf status=%d body=%s", response.StatusCode, payload)
+			}
+		})
 	}
 }
 
