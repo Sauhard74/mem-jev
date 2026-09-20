@@ -149,6 +149,10 @@ func Build(request BuildRequest) (Projection, error) {
 		if len(request.Synthesis.Steps) == 0 {
 			return Projection{}, ErrInvalidBuildRequest
 		}
+		servingIntentHash, hashErr := retrieval.CanonicalIntentHash(request.Serving.TaskText, request.Serving.Harness)
+		if hashErr != nil || servingIntentHash != request.IntentHash {
+			return Projection{}, ErrInvalidBuildRequest
+		}
 		family, version, steps, edges, canonicalJSON, err := buildProcedure(request)
 		if err != nil {
 			return Projection{}, err

@@ -14,17 +14,18 @@ import (
 )
 
 type ProjectionRepository struct {
-	mu        sync.RWMutex
-	families  map[string]projection.Family
-	versions  map[string]projection.Version
-	steps     map[string]projection.Step
-	edges     map[string]projection.Edge
-	negative  map[string]struct{}
-	manifests map[string]projection.Manifest
-	evidence  map[string]struct{}
-	canonical map[string][]byte
-	documents map[string]retrieval.Document
-	epochs    map[domain.TenantID]uint64
+	mu            sync.RWMutex
+	families      map[string]projection.Family
+	versions      map[string]projection.Version
+	steps         map[string]projection.Step
+	edges         map[string]projection.Edge
+	negative      map[string]struct{}
+	manifests     map[string]projection.Manifest
+	evidence      map[string]struct{}
+	canonical     map[string][]byte
+	documents     map[string]retrieval.Document
+	documentEpoch map[string]uint64
+	epochs        map[domain.TenantID]uint64
 }
 
 func NewProjectionRepository() *ProjectionRepository {
@@ -32,7 +33,7 @@ func NewProjectionRepository() *ProjectionRepository {
 		families: make(map[string]projection.Family), versions: make(map[string]projection.Version),
 		steps: make(map[string]projection.Step), edges: make(map[string]projection.Edge), negative: make(map[string]struct{}),
 		manifests: make(map[string]projection.Manifest), evidence: make(map[string]struct{}), canonical: make(map[string][]byte),
-		documents: make(map[string]retrieval.Document), epochs: make(map[domain.TenantID]uint64),
+		documents: make(map[string]retrieval.Document), documentEpoch: make(map[string]uint64), epochs: make(map[domain.TenantID]uint64),
 	}
 }
 
@@ -101,7 +102,9 @@ func (r *ProjectionRepository) Publish(ctx context.Context, value projection.Pro
 	r.epochs[value.TenantID]++
 	receipt.ProjectionEpoch = r.epochs[value.TenantID]
 	receipt.RetrievalDocumentID = document.ID
-	r.documents[documentKey(value.TenantID, value.Version.ID, receipt.ProjectionEpoch)] = document
+	key := documentKey(value.TenantID, value.Version.ID, receipt.ProjectionEpoch)
+	r.documents[key] = document
+	r.documentEpoch[key] = receipt.ProjectionEpoch
 	return receipt, nil
 }
 

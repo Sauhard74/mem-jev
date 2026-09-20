@@ -81,6 +81,7 @@ type Query struct {
 	TenantID         domain.TenantID `json:"tenant_id"`
 	PolicyVersion    string          `json:"policy_version"`
 	Task             string          `json:"task"`
+	IntentHash       string          `json:"intent_hash"`
 	Tools            []Tool          `json:"tools"`
 	Harness          Harness         `json:"harness"`
 	Environment      []Fact          `json:"environment,omitempty"`
@@ -170,12 +171,25 @@ func BuildQuery(tenantID domain.TenantID, policyVersion string, aliases AliasSet
 	if err != nil {
 		return Query{}, err
 	}
+	query.IntentHash, err = CanonicalIntentHash(query.Task, query.Harness)
+	if err != nil {
+		return Query{}, err
+	}
 	canonicalJSON, hash, err := canonical.MarshalAndHash(query)
 	if err != nil {
 		return Query{}, fmt.Errorf("canonicalize retrieval query: %w", err)
 	}
 	query.Hash, query.CanonicalJSON = hash, canonicalJSON
 	return query, nil
+}
+
+func CanonicalIntentHash(taskValue string, harnessValue Harness) (string, error) {
+	_, hash, err := canonical.MarshalAndHash(struct {
+		Task           string `json:"task"`
+		Harness        string `json:"harness"`
+		HarnessVersion string `json:"harness_version,omitempty"`
+	}{text(taskValue), token(harnessValue.Name), token(harnessValue.Version)})
+	return hash, err
 }
 
 func normalizeAliases(kind string, source map[string]string) (map[string]string, error) {

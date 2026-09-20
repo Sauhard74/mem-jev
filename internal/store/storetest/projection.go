@@ -263,9 +263,17 @@ func ValidProjectionForTenant(t *testing.T, tenantID domain.TenantID, evidenceNu
 		},
 	}
 	result.Edges = []synthesis.Edge{{From: result.Steps[0].EventID, To: result.Steps[1].EventID, Type: synthesis.EdgeResourceFlow, ResourceName: "workspace", ResourceType: "repository", ResourceNamespace: "repo"}}
+	_, intentHash, err := canonical.MarshalAndHash(struct {
+		Task           string `json:"task"`
+		Harness        string `json:"harness"`
+		HarnessVersion string `json:"harness_version,omitempty"`
+	}{"write and verify", "test-harness", "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	value, err := projection.Build(projection.BuildRequest{
 		TenantID: tenantID, OutcomeID: domain.OutcomeID(fmt.Sprintf("out_%064x", evidenceNumber)),
-		IntentHash: strings.Repeat("a", 64), EffectSignatureHash: strings.Repeat("b", 64), EnvironmentScopeHash: strings.Repeat("c", 64),
+		IntentHash: intentHash, EffectSignatureHash: strings.Repeat("b", 64), EnvironmentScopeHash: strings.Repeat("c", 64),
 		ArchiveHash: strings.Repeat("d", 64), CanonicalEventStart: 0, CanonicalEventEnd: 1,
 		CreatedAt: time.Date(2026, 9, 20, 0, 0, evidenceNumber, 0, time.UTC), Synthesis: result,
 		Serving: projection.ServingMetadata{
