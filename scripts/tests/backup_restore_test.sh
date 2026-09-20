@@ -63,15 +63,26 @@ printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [[ "$1" == sql ]]; t
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'case "$1" in alias) printf '\''{"url":"https://archive.example.com"}'\'' ;; ls) [[ "${FAKE_MC_LS_FAIL:-}" != 1 ]] || exit 23 ;; cp) printf '\''%s\n'\'' "$*" >> "$FAKE_CALL_LOG" ;; *) exit 2 ;; esac' > "$fakebin/mc"
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [[ "$1" == -d ]]; then /bin/cat "$FAKE_RESTORE_TAR"; else exit 2; fi' > "$fakebin/age"
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [[ " $* " == *" --file "* ]]; then : > "$FAKE_POSTGRES_IMPORTED"; else if [[ -f "$FAKE_POSTGRES_IMPORTED" ]]; then printf '\''1\n'\''; else printf '\''0\n'\''; fi; fi' > "$fakebin/psql"
-printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'printf '\''%s\n'\'' "$1" >> "$FAKE_CALL_LOG"; while IFS= read -r _; do :; done' > "$fakebin/memjev-admin"
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'printf '\''%s|%s|%s\n'\'' "$1" "${MEMJEV_ARCHIVE_ENDPOINT:-}" "${MEMJEV_ARCHIVE_BUCKET:-}" >> "$FAKE_CALL_LOG"; while IFS= read -r _; do :; done; [[ "$1" != erase-tenant || "${FAKE_ERASURE_FAIL:-}" != 1 ]] || exit 29' > "$fakebin/memjev-admin"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fakebin/curl"
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'if [[ -n "${FAKE_FIND_FAIL_MATCH:-}" && " $* " == *"$FAKE_FIND_FAIL_MATCH"* ]]; then exit 23; fi' 'exec /usr/bin/find "$@"' > "$fakebin/find"
 chmod 700 "$fakebin"/*
+printf '%s\n' '{"request_id":"erase_01JZZZZZ1234567890","tenant_id":"tenant_replayed","confirmation":"erase:tenant_replayed:erase_01JZZZZZ1234567890"}' > "$tmp/erasure-ledger/tenant-replayed.json"
+chmod 600 "$tmp/erasure-ledger/tenant-replayed.json"
 
 restore_env=(PATH="$fakebin:$PATH" FAKE_RESTORE_TAR="$tmp/fixture.tar" FAKE_SURREAL_IMPORTED="$tmp/surreal-imported" FAKE_POSTGRES_IMPORTED="$tmp/postgres-imported" FAKE_CALL_LOG="$tmp/calls.log" MEMJEV_BACKUP_AGE_IDENTITY_FILE="$tmp/identity" MEMJEV_RESTORE_ARCHIVE_TARGET=fixture/archive MEMJEV_RESTORE_ARCHIVE_ENDPOINT=https://archive.example.com MEMJEV_RESTORE_ARCHIVE_BUCKET=archive MEMJEV_RESTORE_ARCHIVE_REGION=us-east-1 MEMJEV_RESTORE_ARCHIVE_SSE=AES256 MEMJEV_SURREAL_ENDPOINT=wss://database.example.com MEMJEV_SURREAL_NAMESPACE=restore MEMJEV_SURREAL_DATABASE=restore MEMJEV_TEMPORAL_POSTGRES_DATABASE=postgres://restore MEMJEV_RESTORE_HEALTHCHECK_URL=https://restore.example.com/health MEMJEV_ERASURE_LEDGER_DIR="$tmp/erasure-ledger" MEMJEV_ADMIN_BINARY="$fakebin/memjev-admin" MEMJEV_RESTORE_EMPTY_TARGET_ATTESTATION=empty:restore:restore:fixture/archive:postgres://restore)
 env "${restore_env[@]}" "$repo_dir/scripts/restore.sh" "$tmp/restore.tar.age" > "$tmp/restore.out"
 grep -q 'restore completed and verified' "$tmp/restore.out" || { echo "complete restore fixture did not succeed" >&2; exit 1; }
-grep -q 'verify-archive-object' "$tmp/calls.log" || { echo "archive verifier was not executed" >&2; exit 1; }
+grep -q '^verify-archive-object|https://archive.example.com|archive$' "$tmp/calls.log" || { echo "archive verifier did not receive the recovery target" >&2; exit 1; }
+grep -q '^erase-tenant|https://archive.example.com|archive$' "$tmp/calls.log" || { echo "erasure replay did not receive the recovery target" >&2; exit 1; }
+
+rm -f "$tmp/surreal-imported" "$tmp/postgres-imported"
+if env "${restore_env[@]}" FAKE_ERASURE_FAIL=1 "$repo_dir/scripts/restore.sh" "$tmp/restore.tar.age" >"$tmp/replay.out" 2>"$tmp/replay.err"; then
+  echo "restore accepted erasure replay failure" >&2; exit 1
+fi
+if grep -q 'restore completed and verified' "$tmp/replay.out"; then
+  echo "restore reported success after erasure replay failure" >&2; exit 1
+fi
 
 rm -f "$tmp/surreal-imported" "$tmp/postgres-imported"
 if env "${restore_env[@]}" FAKE_FIND_FAIL_MATCH=erasure-ledger "$repo_dir/scripts/restore.sh" "$tmp/restore.tar.age" >"$tmp/enumeration.out" 2>"$tmp/enumeration.err"; then
