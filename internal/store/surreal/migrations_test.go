@@ -26,8 +26,8 @@ func TestMigrationSetIsIdempotent(t *testing.T) {
 	if err := m.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := schemaVersion(t, db); got != 9 {
-		t.Fatalf("schema version = %d, want 9", got)
+	if got, want := schemaVersion(t, db), len(m.migrations); got != want {
+		t.Fatalf("schema version = %d, want %d", got, want)
 	}
 }
 
@@ -224,8 +224,8 @@ func TestConcurrentMigrationsConverge(t *testing.T) {
 			t.Errorf("concurrent migration: %v", err)
 		}
 	}
-	if got := schemaVersion(t, db); got != 9 {
-		t.Fatalf("schema version = %d, want 9", got)
+	if got, want := schemaVersion(t, db), len(NewMigrator(db).migrations); got != want {
+		t.Fatalf("schema version = %d, want %d", got, want)
 	}
 }
 
