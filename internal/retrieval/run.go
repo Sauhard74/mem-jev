@@ -391,6 +391,15 @@ func cloneRanks(values []PersistedRank) []PersistedRank {
 }
 
 func DecodeRun(canonicalJSON []byte, contentHash string) (Run, error) {
+	var header struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(canonicalJSON, &header); err != nil {
+		return Run{}, ErrInvalidRun
+	}
+	if header.SchemaVersion == "retrieval-run.v1" {
+		return decodeLegacyRunV1(canonicalJSON, contentHash)
+	}
 	var run Run
 	if err := json.Unmarshal(canonicalJSON, &run); err != nil {
 		return Run{}, ErrInvalidRun
@@ -400,4 +409,75 @@ func DecodeRun(canonicalJSON []byte, contentHash string) (Run, error) {
 		return Run{}, err
 	}
 	return run, nil
+}
+
+type legacyServingSnapshotV1 struct {
+	ProjectionEpoch  uint64          `json:"projection_epoch"`
+	DocumentSetHash  string          `json:"document_set_hash"`
+	ServingConfigID  string          `json:"serving_config_id"`
+	PolicyManifestID string          `json:"policy_manifest_id"`
+	RankerManifestID string          `json:"ranker_manifest_id"`
+	Indexes          []SnapshotIndex `json:"indexes"`
+}
+
+type legacyRunV1 struct {
+	SchemaVersion       string                  `json:"schema_version"`
+	ID                  string                  `json:"id"`
+	TenantID            domain.TenantID         `json:"tenant_id"`
+	QueryHash           string                  `json:"query_hash"`
+	QueryEnvelope       string                  `json:"query_envelope"`
+	Snapshot            legacyServingSnapshotV1 `json:"snapshot"`
+	ChannelExecutions   []ChannelExecution      `json:"channel_executions,omitempty"`
+	Hits                []PersistedHit          `json:"hits,omitempty"`
+	Gates               []PersistedGate         `json:"gates,omitempty"`
+	Ranked              []PersistedRank         `json:"ranked,omitempty"`
+	CandidateVersionIDs []string                `json:"candidate_version_ids,omitempty"`
+	IndexManifestIDs    []string                `json:"index_manifest_ids"`
+	Disposition         RunDisposition          `json:"disposition"`
+	DecisionCode        string                  `json:"decision_code,omitempty"`
+	SelectedVersionIDs  []string                `json:"selected_version_ids,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+	CompletedAt         time.Time               `json:"completed_at"`
+	ExpiresAt           time.Time               `json:"expires_at"`
+}
+
+func decodeLegacyRunV1(canonicalJSON []byte, contentHash string) (Run, error) {
+	var legacy legacyRunV1
+	if err := json.Unmarshal(canonicalJSON, &legacy); err != nil || legacy.SchemaVersion != "retrieval-run.v1" || !sha256Pattern.MatchString(contentHash) {
+		return Run{}, ErrInvalidRun
+	}
+	run := runFromLegacyV1(legacy)
+	validated := run
+	validated.SchemaVersion = runSchemaVersion
+	validated.RequestContextHash = strings.Repeat("0", 64)
+	if err := canonicalizeRun(&validated); err != nil {
+		return Run{}, err
+	}
+	normalized := legacyFromRunV2(validated)
+	canonicalLegacy, hash, err := canonical.MarshalAndHash(normalized)
+	if err != nil || hash != contentHash || !bytes.Equal(canonicalLegacy, canonicalJSON) {
+		return Run{}, ErrInvalidRun
+	}
+	run.CanonicalJSON, run.ContentHash = append([]byte(nil), canonicalJSON...), contentHash
+	return run, nil
+}
+
+func runFromLegacyV1(value legacyRunV1) Run {
+	return Run{
+		SchemaVersion: value.SchemaVersion, ID: value.ID, TenantID: value.TenantID, QueryHash: value.QueryHash, QueryEnvelope: value.QueryEnvelope,
+		Snapshot:          ServingSnapshot{ProjectionEpoch: value.Snapshot.ProjectionEpoch, DocumentSetHash: value.Snapshot.DocumentSetHash, ServingConfigID: value.Snapshot.ServingConfigID, PolicyManifestID: value.Snapshot.PolicyManifestID, RankerManifestID: value.Snapshot.RankerManifestID, Indexes: append([]SnapshotIndex(nil), value.Snapshot.Indexes...)},
+		ChannelExecutions: append([]ChannelExecution(nil), value.ChannelExecutions...), Hits: append([]PersistedHit(nil), value.Hits...), Gates: cloneGates(value.Gates), Ranked: cloneRanks(value.Ranked),
+		CandidateVersionIDs: append([]string(nil), value.CandidateVersionIDs...), IndexManifestIDs: append([]string(nil), value.IndexManifestIDs...), Disposition: value.Disposition, DecisionCode: value.DecisionCode,
+		SelectedVersionIDs: append([]string(nil), value.SelectedVersionIDs...), CreatedAt: value.CreatedAt, CompletedAt: value.CompletedAt, ExpiresAt: value.ExpiresAt,
+	}
+}
+
+func legacyFromRunV2(value Run) legacyRunV1 {
+	return legacyRunV1{
+		SchemaVersion: "retrieval-run.v1", ID: value.ID, TenantID: value.TenantID, QueryHash: value.QueryHash, QueryEnvelope: value.QueryEnvelope,
+		Snapshot:          legacyServingSnapshotV1{ProjectionEpoch: value.Snapshot.ProjectionEpoch, DocumentSetHash: value.Snapshot.DocumentSetHash, ServingConfigID: value.Snapshot.ServingConfigID, PolicyManifestID: value.Snapshot.PolicyManifestID, RankerManifestID: value.Snapshot.RankerManifestID, Indexes: append([]SnapshotIndex(nil), value.Snapshot.Indexes...)},
+		ChannelExecutions: append([]ChannelExecution(nil), value.ChannelExecutions...), Hits: append([]PersistedHit(nil), value.Hits...), Gates: cloneGates(value.Gates), Ranked: cloneRanks(value.Ranked),
+		CandidateVersionIDs: append([]string(nil), value.CandidateVersionIDs...), IndexManifestIDs: append([]string(nil), value.IndexManifestIDs...), Disposition: value.Disposition, DecisionCode: value.DecisionCode,
+		SelectedVersionIDs: append([]string(nil), value.SelectedVersionIDs...), CreatedAt: value.CreatedAt, CompletedAt: value.CompletedAt, ExpiresAt: value.ExpiresAt,
+	}
 }

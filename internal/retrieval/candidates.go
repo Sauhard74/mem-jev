@@ -113,7 +113,8 @@ func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCo
 		}
 		result, err := validateHits(name, response.manifestID, response.approximate, response.hits, request.Request.Limit)
 		if err != nil {
-			return CandidateCollection{}, err
+			collection.Degraded = append(collection.Degraded, DegradedChannel{Channel: name, Code: "malformed_result", IndexManifestID: response.manifestID, Approximate: response.approximate, LatencyMicros: response.latencyMicros})
+			continue
 		}
 		collection.Results = append(collection.Results, result)
 		collection.Results[len(collection.Results)-1].LatencyMicros = response.latencyMicros

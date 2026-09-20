@@ -11,14 +11,18 @@ import (
 )
 
 type fakeChannel struct {
-	name retrieval.ChannelName
-	hits []retrieval.Hit
-	err  error
-	wait bool
+	name     retrieval.ChannelName
+	manifest string
+	hits     []retrieval.Hit
+	err      error
+	wait     bool
 }
 
 func (f fakeChannel) Name() retrieval.ChannelName { return f.name }
 func (f fakeChannel) ManifestID() string {
+	if f.manifest != "" {
+		return f.manifest
+	}
 	if len(f.hits) > 0 {
 		return f.hits[0].IndexManifestID
 	}
@@ -103,14 +107,28 @@ func TestCollectCandidatesRejectsMalformedChannelsAndHits(t *testing.T) {
 	tests := []retrieval.CollectRequest{
 		{Request: validChannelRequest(), Timeout: time.Second, Channels: []retrieval.Channel{fakeChannel{name: retrieval.ChannelExact}, fakeChannel{name: retrieval.ChannelExact}}},
 		{Request: validChannelRequest(), Timeout: time.Second, Channels: []retrieval.Channel{fakeChannel{name: "made_up"}}},
-		{Request: validChannelRequest(), Timeout: time.Second, Channels: []retrieval.Channel{fakeChannel{name: retrieval.ChannelExact, hits: []retrieval.Hit{{IndexManifestID: "idx"}}}}},
-		{Request: validChannelRequest(), Timeout: time.Second, Channels: []retrieval.Channel{fakeChannel{name: retrieval.ChannelExact, hits: []retrieval.Hit{{VersionID: "pv", IndexManifestID: "idx"}, {VersionID: "pv", IndexManifestID: "idx"}}}}},
 		{Request: retrieval.ChannelRequest{}, Timeout: time.Second, Channels: []retrieval.Channel{fakeChannel{name: retrieval.ChannelExact}}},
 	}
 	for index, request := range tests {
 		if _, err := retrieval.CollectCandidates(context.Background(), request); err == nil {
 			t.Fatalf("case %d: error = nil", index)
 		}
+	}
+}
+
+func TestCollectCandidatesQuarantinesMalformedChannelResult(t *testing.T) {
+	result, err := retrieval.CollectCandidates(context.Background(), retrieval.CollectRequest{
+		Request: validChannelRequest(), Timeout: time.Second,
+		Channels: []retrieval.Channel{
+			fakeChannel{name: retrieval.ChannelExact, hits: []retrieval.Hit{{VersionID: "pv", IndexManifestID: "idx"}}},
+			fakeChannel{name: retrieval.ChannelVector, manifest: "idx_vector", hits: []retrieval.Hit{{VersionID: "pv", IndexManifestID: "wrong", Approximate: true}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || len(result.Degraded) != 1 || result.Degraded[0].Channel != retrieval.ChannelVector || result.Degraded[0].Code != "malformed_result" || result.Approximate {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

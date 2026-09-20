@@ -15,6 +15,7 @@ import (
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/gen/memjev/v1/memjevv1connect"
 	"github.com/sauhard74/mem-jev/internal/canonical"
+	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/eligibility"
 	"github.com/sauhard74/mem-jev/internal/ranking"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
@@ -200,6 +201,12 @@ func retrievalRequest(task string, forbidden []string) *connect.Request[memjevv1
 
 func seedRetrievalServingState(t *testing.T, ctx context.Context, db *surrealdb.DB) {
 	t.Helper()
+	seedTenantRetrievalServingState(t, ctx, db, "tenant_e2e", "pv_retrieval_e2e", "proc_retrieval_e2e")
+	seedTenantRetrievalServingState(t, ctx, db, "tenant_other", "pv_retrieval_other", "proc_retrieval_other")
+}
+
+func seedTenantRetrievalServingState(t *testing.T, ctx context.Context, db *surrealdb.DB, tenantID domain.TenantID, versionID, procedureID string) {
+	t.Helper()
 	now := time.Now().UTC().Add(-time.Minute)
 	intentHash, err := retrieval.CanonicalIntentHash("write output", retrieval.Harness{Name: "e2e", Version: "1"})
 	if err != nil {
@@ -210,7 +217,7 @@ func seedRetrievalServingState(t *testing.T, ctx context.Context, db *surrealdb.
 		t.Fatal(err)
 	}
 	document, err := retrieval.BuildDocument(retrieval.DocumentInput{
-		TenantID: "tenant_e2e", ProcedureVersionID: "pv_retrieval_e2e", ProcedureID: "proc_retrieval_e2e", TaskText: "write output",
+		TenantID: tenantID, ProcedureVersionID: versionID, ProcedureID: procedureID, TaskText: "write output",
 		IntentHash: intentHash, EffectSignatureHash: strings.Repeat("e", 64), Tools: []retrieval.ToolRequirement{{Name: "writer", ContractVersionID: "tcv_retrieval_e2e"}},
 		OrderedStepContractIDs: []string{"tcv_retrieval_e2e"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash,
 		Harness: retrieval.Harness{Name: "e2e", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5,
@@ -228,8 +235,8 @@ func seedRetrievalServingState(t *testing.T, ctx context.Context, db *surrealdb.
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedRetrievalManifests(t, ctx, db, policyManifest, rankerManifest, now)
-	config, err := retrieval.BuildServingConfig("tenant_e2e", policyManifest.ID, rankerManifest.ID, []retrieval.SnapshotIndex{{Channel: retrieval.ChannelExact, ManifestID: "idx_exact.v1"}, {Channel: retrieval.ChannelLexical, ManifestID: "idx_lexical.v1"}, {Channel: retrieval.ChannelFacet, ManifestID: "idx_facet.v1"}, {Channel: retrieval.ChannelGraph, ManifestID: "idx_graph.v1"}})
+	seedRetrievalManifests(t, ctx, db, tenantID, policyManifest, rankerManifest, now)
+	config, err := retrieval.BuildServingConfig(tenantID, policyManifest.ID, rankerManifest.ID, []retrieval.SnapshotIndex{{Channel: retrieval.ChannelExact, ManifestID: "idx_exact.v1"}, {Channel: retrieval.ChannelLexical, ManifestID: "idx_lexical.v1"}, {Channel: retrieval.ChannelFacet, ManifestID: "idx_facet.v1"}, {Channel: retrieval.ChannelGraph, ManifestID: "idx_graph.v1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,9 +247,10 @@ func seedRetrievalServingState(t *testing.T, ctx context.Context, db *surrealdb.
 
 func seedRetrievalDocument(t *testing.T, ctx context.Context, db *surrealdb.DB, document retrieval.Document, now time.Time) {
 	t.Helper()
+	tenantID := string(document.TenantID)
 	row, err := surrealdb.Query[[]struct {
 		Epoch uint64 `json:"current_epoch"`
-	}](ctx, db, `SELECT current_epoch FROM projection_epoch_head WHERE tenant_id = "tenant_e2e" LIMIT 1`, nil)
+	}](ctx, db, `SELECT current_epoch FROM projection_epoch_head WHERE tenant_id = $tenant_id LIMIT 1`, map[string]any{"tenant_id": tenantID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,33 +263,33 @@ func seedRetrievalDocument(t *testing.T, ctx context.Context, db *surrealdb.DB, 
 		toolNames, toolIDs = append(toolNames, tool.Name), append(toolIDs, tool.ContractVersionID)
 	}
 	environmentJSON, _, _ := canonical.MarshalAndHash(document.Environment)
-	record := map[string]any{"tenant_id": "tenant_e2e", "retrieval_document_id": document.ID, "procedure_version_id": document.ProcedureVersionID, "procedure_id": document.ProcedureID, "projection_epoch": epoch, "task_text": document.TaskText, "intent_hash": document.IntentHash, "effect_signature_hash": document.EffectSignatureHash, "tool_names": toolNames, "tool_contract_version_ids": toolIDs, "resource_types": []string{}, "resource_namespaces": []string{}, "resource_identity_hashes": []string{}, "resource_schema_versions": []string{}, "effects": document.Effects, "environment_scope_hash": document.EnvironmentScopeHash, "harness_name": document.Harness.Name, "harness_version": document.Harness.Version, "environment_facts": string(environmentJSON), "prefix_hashes": document.PrefixHashes, "lifecycle_state": document.Lifecycle, "observed_end_to_end": document.ObservedEndToEnd, "verification_strength": document.VerificationStrength, "verified_success_count": document.VerifiedSuccessCount, "unsafe_outcome_count": document.UnsafeOutcomeCount, "validated_at": now, "validation_policy_version": document.ValidationPolicyVersion, "learned_with_recall_consent": true, "residency_region": document.ResidencyRegion, "risk_class": document.RiskClass, "canonical_document": string(document.CanonicalJSON), "created_at": now, "schema_version": document.SchemaVersion, "content_hash": document.ContentHash}
+	record := map[string]any{"tenant_id": tenantID, "retrieval_document_id": document.ID, "procedure_version_id": document.ProcedureVersionID, "procedure_id": document.ProcedureID, "projection_epoch": epoch, "task_text": document.TaskText, "intent_hash": document.IntentHash, "effect_signature_hash": document.EffectSignatureHash, "tool_names": toolNames, "tool_contract_version_ids": toolIDs, "resource_types": []string{}, "resource_namespaces": []string{}, "resource_identity_hashes": []string{}, "resource_schema_versions": []string{}, "effects": document.Effects, "environment_scope_hash": document.EnvironmentScopeHash, "harness_name": document.Harness.Name, "harness_version": document.Harness.Version, "environment_facts": string(environmentJSON), "prefix_hashes": document.PrefixHashes, "lifecycle_state": document.Lifecycle, "observed_end_to_end": document.ObservedEndToEnd, "verification_strength": document.VerificationStrength, "verified_success_count": document.VerifiedSuccessCount, "unsafe_outcome_count": document.UnsafeOutcomeCount, "validated_at": now, "validation_policy_version": document.ValidationPolicyVersion, "learned_with_recall_consent": true, "residency_region": document.ResidencyRegion, "risk_class": document.RiskClass, "canonical_document": string(document.CanonicalJSON), "created_at": now, "schema_version": document.SchemaVersion, "content_hash": document.ContentHash}
 	if _, err = surrealdb.Query[any](ctx, db, `CREATE ONLY type::record("retrieval_document", $id) CONTENT $record`, map[string]any{"id": document.ID, "record": record}); err != nil {
 		t.Fatal(err)
 	}
 	setHash := strings.Repeat("a", 63) + "b"
-	if _, err = surrealdb.Query[any](ctx, db, `CREATE ONLY projection_epoch CONTENT {tenant_id: "tenant_e2e", epoch: $epoch, document_set_hash: $hash, created_at: $at, schema_version: "projection-epoch.v1", content_hash: $hash}`, map[string]any{"epoch": epoch, "hash": setHash, "at": now}); err != nil {
+	if _, err = surrealdb.Query[any](ctx, db, `CREATE ONLY projection_epoch CONTENT {tenant_id: $tenant_id, epoch: $epoch, document_set_hash: $hash, created_at: $at, schema_version: "projection-epoch.v1", content_hash: $hash}`, map[string]any{"tenant_id": tenantID, "epoch": epoch, "hash": setHash, "at": now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = surrealdb.Query[any](ctx, db, `UPSERT projection_epoch_head SET tenant_id = "tenant_e2e", current_epoch = $epoch, document_set_hash = $hash, updated_at = $at, schema_version = "projection-epoch-head.v1", content_hash = $hash WHERE tenant_id = "tenant_e2e"`, map[string]any{"epoch": epoch, "hash": setHash, "at": now}); err != nil {
+	if _, err = surrealdb.Query[any](ctx, db, `UPSERT projection_epoch_head SET tenant_id = $tenant_id, current_epoch = $epoch, document_set_hash = $hash, updated_at = $at, schema_version = "projection-epoch-head.v1", content_hash = $hash WHERE tenant_id = $tenant_id`, map[string]any{"tenant_id": tenantID, "epoch": epoch, "hash": setHash, "at": now}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func seedRetrievalManifests(t *testing.T, ctx context.Context, db *surrealdb.DB, policyManifest eligibility.Policy, rankerManifest ranking.Manifest, now time.Time) {
+func seedRetrievalManifests(t *testing.T, ctx context.Context, db *surrealdb.DB, tenantID domain.TenantID, policyManifest eligibility.Policy, rankerManifest ranking.Manifest, now time.Time) {
 	t.Helper()
 	records := []struct {
 		statement string
 		record    map[string]any
 	}{
-		{`CREATE ONLY eligibility_policy_manifest CONTENT $record`, map[string]any{"tenant_id": "tenant_e2e", "policy_manifest_id": policyManifest.ID, "version": policyManifest.Version, "manifest": string(policyManifest.CanonicalJSON), "created_at": now, "schema_version": "eligibility-policy.v1", "content_hash": strings.TrimPrefix(policyManifest.ID, "egp_")}},
-		{`CREATE ONLY ranker_manifest CONTENT $record`, map[string]any{"tenant_id": "tenant_e2e", "ranker_manifest_id": rankerManifest.ID, "version": rankerManifest.Version, "manifest": string(rankerManifest.CanonicalJSON), "created_at": now, "schema_version": "ranker.v1", "content_hash": strings.TrimPrefix(rankerManifest.ID, "rnk_")}},
+		{`CREATE ONLY eligibility_policy_manifest CONTENT $record`, map[string]any{"tenant_id": string(tenantID), "policy_manifest_id": policyManifest.ID, "version": policyManifest.Version, "manifest": string(policyManifest.CanonicalJSON), "created_at": now, "schema_version": "eligibility-policy.v1", "content_hash": strings.TrimPrefix(policyManifest.ID, "egp_")}},
+		{`CREATE ONLY ranker_manifest CONTENT $record`, map[string]any{"tenant_id": string(tenantID), "ranker_manifest_id": rankerManifest.ID, "version": rankerManifest.Version, "manifest": string(rankerManifest.CanonicalJSON), "created_at": now, "schema_version": "ranker.v1", "content_hash": strings.TrimPrefix(rankerManifest.ID, "rnk_")}},
 	}
 	for _, channel := range []string{"exact", "lexical", "facet", "graph"} {
 		records = append(records, struct {
 			statement string
 			record    map[string]any
-		}{`CREATE ONLY retrieval_index_manifest CONTENT $record`, map[string]any{"tenant_id": "tenant_e2e", "index_manifest_id": "idx_" + channel + ".v1", "channel": channel, "generation": 1, "index_name": "retrieval_document_" + channel, "approximate": false, "configuration": map[string]any{}, "created_at": now, "schema_version": "retrieval-index.v1", "content_hash": strings.Repeat(string(channel[0]), 64)}})
+		}{`CREATE ONLY retrieval_index_manifest CONTENT $record`, map[string]any{"tenant_id": string(tenantID), "index_manifest_id": "idx_" + channel + ".v1", "channel": channel, "generation": 1, "index_name": "retrieval_document_" + channel, "approximate": false, "configuration": map[string]any{}, "created_at": now, "schema_version": "retrieval-index.v1", "content_hash": strings.Repeat(string(channel[0]), 64)}})
 	}
 	for _, item := range records {
 		if _, err := surrealdb.Query[any](ctx, db, item.statement, map[string]any{"record": item.record}); err != nil {

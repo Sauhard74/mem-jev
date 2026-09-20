@@ -1,12 +1,14 @@
 package retrieval_test
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 )
 
@@ -27,6 +29,32 @@ func TestBuildRunCanonicalizesAllDecisionRecords(t *testing.T) {
 	}
 	if first.CandidateVersionIDs[0] != "pv_a" || first.IndexManifestIDs[0] != "idx_exact" || first.IndexManifestIDs[1] != "idx_vector" {
 		t.Fatalf("derived run fields are unstable: %#v", first)
+	}
+}
+
+func TestDecodeRunPreservesLegacyV1ForExplanationButNotContextReplay(t *testing.T) {
+	run, err := retrieval.BuildRun(validRunInput(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := bytes.Replace(run.CanonicalJSON, []byte(`"schema_version":"retrieval-run.v2"`), []byte(`"schema_version":"retrieval-run.v1"`), 1)
+	legacy = bytes.Replace(legacy, []byte(`,"request_context_hash":"`+strings.Repeat("d", 64)+`"`), nil, 1)
+	legacy = bytes.Replace(legacy, []byte(`,"projection_created_at":"0001-01-01T00:00:00Z"`), nil, 1)
+	legacy = bytes.Replace(legacy, []byte(`,"vector_index_created_at":"0001-01-01T00:00:00Z"`), nil, 1)
+	canonicalLegacy, hash, err := canonical.MarshalAndHashRaw(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := retrieval.DecodeRun(canonicalLegacy, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SchemaVersion != "retrieval-run.v1" || decoded.RequestContextHash != "" || decoded.QueryHash != run.QueryHash || decoded.ID != run.ID {
+		t.Fatalf("legacy decode = %#v", decoded)
+	}
+	tampered := bytes.Replace(canonicalLegacy, []byte(`"final_score":20`), []byte(`"final_score":21`), 1)
+	if _, err = retrieval.DecodeRun(tampered, hash); !errors.Is(err, retrieval.ErrInvalidRun) {
+		t.Fatalf("tampered legacy decode = %v", err)
 	}
 }
 

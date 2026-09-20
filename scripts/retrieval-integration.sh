@@ -12,6 +12,6 @@ set -a
 source .env.local
 set +a
 
-go test -race -tags=e2e ./tests/e2e -run TestDeterministicHostedRetrieval -count=1 -v
-go run ./tests/load -endpoint "$MEMJEV_E2E_API_URL" -token "$MEMJEV_E2E_TOKEN" -rps 100 -duration 10s -concurrency 64
+go test -race -tags=e2e ./tests/e2e -run 'Test(DeterministicHostedRetrieval|HostedFiveChannelRetrievalAndVectorQuarantine)' -count=1 -v
+go run ./tests/load -endpoint "$MEMJEV_E2E_API_URL" -token "$MEMJEV_E2E_TOKEN" -other-token "$MEMJEV_E2E_OTHER_TOKEN" -rps 100 -duration 10s -concurrency 64
 printf '%s\n' 'retrieval integration gate: PASS'
