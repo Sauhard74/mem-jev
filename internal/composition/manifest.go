@@ -17,6 +17,8 @@ type PlannerManifestSpec struct {
 	MaximumCandidates            uint32 `json:"maximum_candidates"`
 	MaximumGoalPredicates        uint32 `json:"maximum_goal_predicates"`
 	MaximumTotalCandidateGoals   uint32 `json:"maximum_total_candidate_goals"`
+	MaximumParallelEntries       uint32 `json:"maximum_parallel_entries_per_candidate"`
+	MaximumTotalParallelEntries  uint32 `json:"maximum_total_parallel_entries"`
 	MaximumSatisfiedRequirements uint32 `json:"maximum_satisfied_requirements"`
 	MaximumDepth                 uint32 `json:"maximum_depth"`
 	MaximumProcedures            uint32 `json:"maximum_procedures"`
@@ -62,7 +64,8 @@ func validPlannerSpec(spec PlannerManifestSpec) bool {
 	return spec.Version != "" && !strings.ContainsRune(spec.Version, '\x00') &&
 		spec.BeamWidth > 0 && spec.BeamWidth <= 1_024 && spec.MaximumDepth > 0 && spec.MaximumDepth <= 32 &&
 		spec.MaximumCandidates > 0 && spec.MaximumCandidates <= 10_000 &&
-		spec.MaximumGoalPredicates > 0 && spec.MaximumGoalPredicates <= 1_024 && spec.MaximumTotalCandidateGoals >= spec.MaximumGoalPredicates && spec.MaximumTotalCandidateGoals <= 1_000_000 && spec.MaximumSatisfiedRequirements > 0 && spec.MaximumSatisfiedRequirements <= 100_000 &&
+		spec.MaximumGoalPredicates > 0 && spec.MaximumGoalPredicates <= 1_024 && spec.MaximumTotalCandidateGoals >= spec.MaximumGoalPredicates && spec.MaximumTotalCandidateGoals <= 1_000_000 &&
+		spec.MaximumParallelEntries > 0 && spec.MaximumParallelEntries <= 16_384 && spec.MaximumTotalParallelEntries >= spec.MaximumParallelEntries && spec.MaximumTotalParallelEntries <= 1_000_000 && spec.MaximumSatisfiedRequirements > 0 && spec.MaximumSatisfiedRequirements <= 100_000 &&
 		spec.MaximumProcedures > 0 && spec.MaximumProcedures <= 32 && spec.MaximumBridges < spec.MaximumProcedures &&
 		spec.MaximumTotalToolCost > 0 && spec.MaximumTotalToolCost <= 1_000_000 &&
 		spec.MaximumExpansions >= spec.BeamWidth && spec.MaximumExpansions <= 100_000 && spec.MaximumWorkUnits >= uint64(spec.MaximumExpansions) && spec.MaximumWorkUnits <= 10_000_000 &&

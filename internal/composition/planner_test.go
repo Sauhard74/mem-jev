@@ -257,7 +257,7 @@ func TestPlannerIsPermutationInvariantAndUsesCanonicalTieBreak(t *testing.T) {
 
 func plannerManifest(t *testing.T, mutate func(*composition.PlannerManifestSpec)) composition.PlannerManifest {
 	t.Helper()
-	spec := composition.PlannerManifestSpec{Version: "planner_1", BeamWidth: 16, MaximumCandidates: 100, MaximumGoalPredicates: 100, MaximumTotalCandidateGoals: 1_000, MaximumSatisfiedRequirements: 1_000, MaximumDepth: 4, MaximumProcedures: 4, MaximumBridges: 2, MaximumTotalToolCost: 100, MaximumExpansions: 1000, MaximumWorkUnits: 100_000, NoveltyPenalty: 20, UnobservedEdgePenalty: 10}
+	spec := composition.PlannerManifestSpec{Version: "planner_1", BeamWidth: 16, MaximumCandidates: 100, MaximumGoalPredicates: 100, MaximumTotalCandidateGoals: 1_000, MaximumParallelEntries: 1_000, MaximumTotalParallelEntries: 10_000, MaximumSatisfiedRequirements: 1_000, MaximumDepth: 4, MaximumProcedures: 4, MaximumBridges: 2, MaximumTotalToolCost: 100, MaximumExpansions: 1000, MaximumWorkUnits: 100_000, NoveltyPenalty: 20, UnobservedEdgePenalty: 10}
 	if mutate != nil {
 		mutate(&spec)
 	}

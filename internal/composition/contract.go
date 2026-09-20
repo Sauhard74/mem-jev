@@ -55,18 +55,31 @@ type Candidate struct {
 }
 
 type PlanningFacts struct {
-	ProcedureVersionID string   `json:"procedure_version_id"`
-	InterfaceHash      string   `json:"interface_hash"`
-	Lifecycle          string   `json:"lifecycle"`
-	PolicyManifestID   string   `json:"policy_manifest_id"`
-	GoalPredicateIDs   []string `json:"goal_predicate_ids,omitempty"`
-	EvidenceStrength   int64    `json:"evidence_strength"`
-	ObservedEndToEnd   bool     `json:"observed_end_to_end"`
-	RiskCost           uint32   `json:"risk_cost"`
-	ToolCost           uint32   `json:"tool_cost"`
+	ProcedureVersionID string           `json:"procedure_version_id"`
+	InterfaceHash      string           `json:"interface_hash"`
+	Lifecycle          string           `json:"lifecycle"`
+	PolicyManifestID   string           `json:"policy_manifest_id"`
+	GoalPredicateIDs   []string         `json:"goal_predicate_ids,omitempty"`
+	Parallelism        ParallelismFacts `json:"parallelism"`
+	EvidenceStrength   int64            `json:"evidence_strength"`
+	ObservedEndToEnd   bool             `json:"observed_end_to_end"`
+	RiskCost           uint32           `json:"risk_cost"`
+	ToolCost           uint32           `json:"tool_cost"`
+}
+
+type ParallelismFacts struct {
+	ReadResourceIDs      []string `json:"read_resource_ids,omitempty"`
+	WriteResourceIDs     []string `json:"write_resource_ids,omitempty"`
+	ExclusiveResourceIDs []string `json:"exclusive_resource_ids,omitempty"`
+	PolicyMutexKeys      []string `json:"policy_mutex_keys,omitempty"`
+	CompensationBoundary bool     `json:"compensation_boundary"`
+	PolicySerial         bool     `json:"policy_serial"`
 }
 
 func BuildPlanningFactsHash(facts PlanningFacts) (string, error) {
+	if len(facts.GoalPredicateIDs) > 1_024 || parallelEntryCount(facts.Parallelism) > 16_384 {
+		return "", ErrInvalidCompatibilityInput
+	}
 	facts.ProcedureVersionID = strings.TrimSpace(facts.ProcedureVersionID)
 	facts.Lifecycle = strings.TrimSpace(facts.Lifecycle)
 	facts.PolicyManifestID = strings.TrimSpace(facts.PolicyManifestID)
@@ -75,11 +88,41 @@ func BuildPlanningFactsHash(facts PlanningFacts) (string, error) {
 		facts.GoalPredicateIDs[index] = strings.TrimSpace(facts.GoalPredicateIDs[index])
 	}
 	sort.Strings(facts.GoalPredicateIDs)
+	parallelism, ok := normalizedParallelism(facts.Parallelism)
+	if !ok {
+		return "", ErrInvalidCompatibilityInput
+	}
+	facts.Parallelism = parallelism
 	if !safeIdentity(facts.ProcedureVersionID) || !sha256Pattern.MatchString(facts.InterfaceHash) || !safeIdentity(facts.Lifecycle) || !safeIdentity(facts.PolicyManifestID) || facts.EvidenceStrength < 0 || facts.ToolCost == 0 || !strictSorted(facts.GoalPredicateIDs) {
 		return "", ErrInvalidCompatibilityInput
 	}
 	_, hash, err := canonical.MarshalAndHash(facts)
 	return hash, err
+}
+
+func parallelEntryCount(facts ParallelismFacts) uint64 {
+	return uint64(len(facts.ReadResourceIDs)) + uint64(len(facts.WriteResourceIDs)) + uint64(len(facts.ExclusiveResourceIDs)) + uint64(len(facts.PolicyMutexKeys))
+}
+
+func normalizedParallelism(source ParallelismFacts) (ParallelismFacts, bool) {
+	var ok bool
+	source.ReadResourceIDs, ok = normalizedIDs(source.ReadResourceIDs, true)
+	if !ok {
+		return ParallelismFacts{}, false
+	}
+	source.WriteResourceIDs, ok = normalizedIDs(source.WriteResourceIDs, true)
+	if !ok {
+		return ParallelismFacts{}, false
+	}
+	source.ExclusiveResourceIDs, ok = normalizedIDs(source.ExclusiveResourceIDs, true)
+	if !ok {
+		return ParallelismFacts{}, false
+	}
+	source.PolicyMutexKeys, ok = normalizedIDs(source.PolicyMutexKeys, true)
+	if !ok || !strictPrefixed(source.ReadResourceIDs, "res_") || !strictPrefixed(source.WriteResourceIDs, "res_") || !strictPrefixed(source.ExclusiveResourceIDs, "res_") {
+		return ParallelismFacts{}, false
+	}
+	return source, true
 }
 
 type CompatibilityEdge struct {
@@ -261,7 +304,7 @@ func validCandidate(candidate Candidate, tenantID domain.TenantID) bool {
 }
 
 func safeIdentity(value string) bool {
-	return value != "" && !strings.ContainsRune(value, '\x00')
+	return value != "" && len(value) <= 1_024 && !strings.ContainsRune(value, '\x00')
 }
 
 func validCompatibilityLimits(value CompatibilityLimits) bool {

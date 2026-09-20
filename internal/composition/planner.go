@@ -24,6 +24,7 @@ type PlannerCandidate struct {
 	Eligible          bool
 	PolicyManifestID  string
 	GoalPredicateIDs  []string
+	Parallelism       ParallelismFacts
 	EvidenceStrength  int64
 	ObservedEndToEnd  bool
 	RiskCost          uint32
@@ -291,6 +292,7 @@ func validatePlanInputs(ctx context.Context, manifest PlannerManifest, request P
 	graphCandidates := make([]Candidate, 0, len(candidates))
 	hasSeed := false
 	totalCandidateGoals := uint64(0)
+	totalParallelEntries := uint64(0)
 	for index := range candidates {
 		candidate := &candidates[index]
 		if index%256 == 0 {
@@ -303,13 +305,20 @@ func validatePlanInputs(ctx context.Context, manifest PlannerManifest, request P
 			return nil, nil, nil, ErrInvalidPlanRequest
 		}
 		totalCandidateGoals += goalCount
+		parallelEntries := parallelEntryCount(candidate.Parallelism)
+		if parallelEntries > uint64(manifest.MaximumParallelEntries) || totalParallelEntries+parallelEntries > uint64(manifest.MaximumTotalParallelEntries) {
+			return nil, nil, nil, ErrInvalidPlanRequest
+		}
+		totalParallelEntries += parallelEntries
 		// Normalization and planning-facts hashing each traverse candidate goals.
-		if !budget.consume(goalCount*2 + 1) {
+		if !budget.consume((goalCount+parallelEntries)*2 + 1) {
 			return nil, nil, nil, errWorkLimit
 		}
-		candidate.GoalPredicateIDs, ok = normalizedIDs(candidate.GoalPredicateIDs, true)
-		factsHash, factsErr := BuildPlanningFactsHash(PlanningFacts{ProcedureVersionID: candidate.VersionID, InterfaceHash: candidate.Interface.ContentHash, Lifecycle: candidate.Lifecycle, PolicyManifestID: candidate.PolicyManifestID, GoalPredicateIDs: candidate.GoalPredicateIDs, EvidenceStrength: candidate.EvidenceStrength, ObservedEndToEnd: candidate.ObservedEndToEnd, RiskCost: candidate.RiskCost, ToolCost: candidate.ToolCost})
-		if !ok || candidate.VersionID == "" || strings.ContainsRune(candidate.VersionID, '\x00') || !candidate.Eligible || candidate.PolicyManifestID != request.PolicyManifestID || retrieval.ValidateProcedureInterface(candidate.Interface) != nil || candidate.EvidenceStrength < 0 || candidate.ToolCost == 0 || factsErr != nil || factsHash != candidate.PlanningFactsHash {
+		var goalsOK, parallelOK bool
+		candidate.GoalPredicateIDs, goalsOK = normalizedIDs(candidate.GoalPredicateIDs, true)
+		candidate.Parallelism, parallelOK = normalizedParallelism(candidate.Parallelism)
+		factsHash, factsErr := BuildPlanningFactsHash(PlanningFacts{ProcedureVersionID: candidate.VersionID, InterfaceHash: candidate.Interface.ContentHash, Lifecycle: candidate.Lifecycle, PolicyManifestID: candidate.PolicyManifestID, GoalPredicateIDs: candidate.GoalPredicateIDs, Parallelism: candidate.Parallelism, EvidenceStrength: candidate.EvidenceStrength, ObservedEndToEnd: candidate.ObservedEndToEnd, RiskCost: candidate.RiskCost, ToolCost: candidate.ToolCost})
+		if !goalsOK || !parallelOK || candidate.VersionID == "" || strings.ContainsRune(candidate.VersionID, '\x00') || !candidate.Eligible || candidate.PolicyManifestID != request.PolicyManifestID || retrieval.ValidateProcedureInterface(candidate.Interface) != nil || candidate.EvidenceStrength < 0 || candidate.ToolCost == 0 || factsErr != nil || factsHash != candidate.PlanningFactsHash {
 			return nil, nil, nil, ErrInvalidPlanRequest
 		}
 		if _, duplicate := byVersion[candidate.VersionID]; duplicate {
@@ -578,7 +587,7 @@ func normalizedIDs(source []string, allowEmpty bool) ([]string, bool) {
 	result := append([]string(nil), source...)
 	for index := range result {
 		result[index] = strings.TrimSpace(result[index])
-		if result[index] == "" || strings.ContainsRune(result[index], '\x00') {
+		if len(result[index]) > 1_024 || !safeIdentity(result[index]) {
 			return nil, false
 		}
 	}
