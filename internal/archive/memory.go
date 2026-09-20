@@ -35,6 +35,10 @@ func (s *MemoryStore) PutCanonical(ctx context.Context, req PutRequest) (Object,
 }
 
 func (s *MemoryStore) Get(ctx context.Context, key Key) ([]byte, error) {
+	return s.GetBounded(ctx, key, 64<<20)
+}
+
+func (s *MemoryStore) GetBounded(ctx context.Context, key Key, maximumBytes int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -46,6 +50,9 @@ func (s *MemoryStore) Get(ctx context.Context, key Key) ([]byte, error) {
 	body, ok := s.objects[key]
 	if !ok {
 		return nil, ErrNotFound
+	}
+	if maximumBytes <= 0 || int64(len(body)) > maximumBytes {
+		return nil, ErrTooLarge
 	}
 	return append([]byte(nil), body...), nil
 }

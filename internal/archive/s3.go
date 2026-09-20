@@ -103,7 +103,14 @@ func (s *S3Store) verifyExisting(ctx context.Context, key Key, req PutRequest) (
 }
 
 func (s *S3Store) Get(ctx context.Context, key Key) ([]byte, error) {
-	wantHash, err := hashFromKey(key)
+	return s.GetBounded(ctx, key, 64<<20)
+}
+
+func (s *S3Store) GetBounded(ctx context.Context, key Key, maximumBytes int64) ([]byte, error) {
+	if maximumBytes <= 0 {
+		return nil, ErrInvalidRequest
+	}
+	wantSchema, wantHash, err := metadataFromKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -120,13 +127,26 @@ func (s *S3Store) Get(ctx context.Context, key Key) ([]byte, error) {
 	if output == nil || output.Body == nil {
 		return nil, &OpError{Op: "get", Err: errors.New("empty S3 response")}
 	}
-	body, err := io.ReadAll(output.Body)
+	if output.Metadata["content-sha256"] != wantHash || output.Metadata["schema-version"] != wantSchema ||
+		output.ServerSideEncryption != s.config.ServerSideEncryption ||
+		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) == "") {
+		_ = output.Body.Close()
+		return nil, fmt.Errorf("%w: key %q failed metadata or encryption verification", ErrArchiveConflict, key)
+	}
+	if output.ContentLength != nil && aws.ToInt64(output.ContentLength) > maximumBytes {
+		_ = output.Body.Close()
+		return nil, ErrTooLarge
+	}
+	body, err := io.ReadAll(io.LimitReader(output.Body, maximumBytes+1))
 	closeErr := output.Body.Close()
 	if err != nil {
 		return nil, classifyError("read", err)
 	}
 	if closeErr != nil {
 		return nil, classifyError("close", closeErr)
+	}
+	if int64(len(body)) > maximumBytes {
+		return nil, ErrTooLarge
 	}
 	sum := sha256.Sum256(body)
 	if hex.EncodeToString(sum[:]) != wantHash {

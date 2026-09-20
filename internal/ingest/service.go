@@ -23,14 +23,14 @@ type Command struct {
 }
 
 type Service struct {
-	archives   archive.Store
+	archives   archive.Writer
 	repository store.IngestRepository
 	policy     SanitizerPolicy
 }
 
 var idempotencyHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-func NewService(archives archive.Store, repository store.IngestRepository, sanitizerPolicy SanitizerPolicy) *Service {
+func NewService(archives archive.Writer, repository store.IngestRepository, sanitizerPolicy SanitizerPolicy) *Service {
 	return &Service{
 		archives:   archives,
 		repository: repository,

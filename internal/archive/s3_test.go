@@ -233,7 +233,10 @@ func TestS3StoreGetVerifiesDownloadedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &fakeS3{getOutput: &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(req.Body))}}
+	fake := &fakeS3{getOutput: &s3.GetObjectOutput{
+		Body: io.NopCloser(bytes.NewReader(req.Body)), Metadata: map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+		ServerSideEncryption: types.ServerSideEncryptionAes256,
+	}}
 	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAes256})
 	if err != nil {
 		t.Fatal(err)
@@ -250,10 +253,32 @@ func TestS3StoreGetVerifiesDownloadedContent(t *testing.T) {
 		t.Fatalf("get key = %q, want %q", aws.ToString(fake.getInput.Key), key)
 	}
 
-	fake.getOutput = &s3.GetObjectOutput{Body: io.NopCloser(strings.NewReader("tampered"))}
+	fake.getOutput = &s3.GetObjectOutput{
+		Body: io.NopCloser(strings.NewReader("tampered")), Metadata: map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+		ServerSideEncryption: types.ServerSideEncryptionAes256,
+	}
 	_, err = store.Get(context.Background(), key)
 	if !errors.Is(err, ErrHashMismatch) {
 		t.Fatalf("error = %v, want %v", err, ErrHashMismatch)
+	}
+}
+
+func TestS3StoreGetRejectsWrongEncryptionEnvelope(t *testing.T) {
+	t.Parallel()
+	req := canonicalRequest()
+	key, err := KeyFor(req.TenantID, req.SchemaVersion, req.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeS3{getOutput: &s3.GetObjectOutput{
+		Body: io.NopCloser(bytes.NewReader(req.Body)), Metadata: map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+	}}
+	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAes256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetBounded(context.Background(), key, 1<<20); !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("GetBounded() error = %v; want archive conflict", err)
 	}
 }
 

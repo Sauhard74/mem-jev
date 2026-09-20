@@ -17,6 +17,7 @@ var (
 	ErrHashMismatch    = errors.New("archive content hash mismatch")
 	ErrNotFound        = errors.New("archive object not found")
 	ErrArchiveConflict = errors.New("archive object conflicts with canonical content")
+	ErrTooLarge        = errors.New("archive object exceeds the configured limit")
 )
 
 var (
@@ -26,8 +27,17 @@ var (
 
 type Key = domain.ArchiveKey
 
-type Store interface {
+type Writer interface {
 	PutCanonical(context.Context, PutRequest) (Object, error)
+}
+
+type Reader interface {
+	GetBounded(context.Context, Key, int64) ([]byte, error)
+}
+
+type Store interface {
+	Writer
+	Reader
 	Get(context.Context, Key) ([]byte, error)
 }
 
@@ -81,17 +91,22 @@ func validatePutRequest(req PutRequest) (Key, error) {
 }
 
 func hashFromKey(key Key) (string, error) {
+	_, hash, err := metadataFromKey(key)
+	return hash, err
+}
+
+func metadataFromKey(key Key) (string, string, error) {
 	value := string(key)
 	if !strings.HasPrefix(value, "canonical/") || !strings.HasSuffix(value, ".json") {
-		return "", ErrInvalidRequest
+		return "", "", ErrInvalidRequest
 	}
 	parts := strings.Split(value, "/")
-	if len(parts) != 4 {
-		return "", ErrInvalidRequest
+	if len(parts) != 4 || !schemaVersionPattern.MatchString(parts[2]) {
+		return "", "", ErrInvalidRequest
 	}
 	hash := strings.TrimSuffix(parts[3], ".json")
 	if !sha256Pattern.MatchString(hash) {
-		return "", ErrInvalidRequest
+		return "", "", ErrInvalidRequest
 	}
-	return hash, nil
+	return parts[2], hash, nil
 }
