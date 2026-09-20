@@ -55,3 +55,27 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: More than two immutable ranker manifests are serving traffic concurrently
+      - alert: MemjevJevAuthenticationFailure
+        expr: increase(memjev_jev_judgments_total{disposition="authentication"}[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: TypeSafe rejected the mounted Jev credential and the circuit has opened
+      - alert: MemjevJevCircuitOpen
+        expr: sum(rate(memjev_jev_judgments_total{disposition="circuit_open"}[10m])) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Jev is persistently circuit-open; deterministic no-Jev ranking remains active
+      - alert: MemjevJevProviderFailureSurge
+        expr: sum(rate(memjev_jev_judgments_total{disposition=~"(timeout|throttled|overloaded|provider_error|transport|invalid_response|oversized_response)"}[10m])) / clamp_min(sum(rate(memjev_jev_judgments_total[10m])), 0.001) > 0.10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: More than ten percent of Jev decisions are degrading on provider failures
+      - alert: MemjevJevCapacityExhausted
+        expr: sum(rate(memjev_jev_judgments_total{disposition=~"(capacity_exhausted|global_token_budget_exhausted|tenant_token_budget_exhausted)"}[10m])) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Jev admission is persistently exhausting bounded local capacity

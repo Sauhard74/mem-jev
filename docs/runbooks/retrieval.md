@@ -20,4 +20,4 @@ Move the tenant serving head to the last known-good immutable serving configurat
 
 ## Jev boundary
 
-Jev is not required for the core path. If it is disabled or unavailable, the exact-effect route is omitted and deterministic lexical, facet, and graph retrieval continues. A future Jev judgment may add a recorded pointwise feature only after eligibility; it cannot change a rejection or select a procedure by itself.
+Jev is not required for the core path. It evaluates only eligible candidates in a deterministic ambiguity band, and its quantized features feed the same immutable integer ranker used by the preliminary pass. It cannot change an eligibility rejection. If TypeSafe is disabled or unavailable, explicit zero missing-values reproduce the no-Jev ordering. See [Jev ranking enhancement operations](jev.md) for secret mounting, consent, manifests, alerts, and rollback.

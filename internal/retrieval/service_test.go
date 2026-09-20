@@ -508,7 +508,7 @@ func (j *countingJudge) Judge(_ context.Context, request SemanticJudgmentRequest
 	if request.Document.ProcedureVersionID == "pv_b" {
 		value = 1_000_000
 	}
-	return SemanticJudgment{VersionID: request.Document.ProcedureVersionID, JudgmentKey: "jevj_" + strings.Repeat("a", 64), Disposition: "committed", ContentHash: strings.Repeat("b", 64), Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_test", Features: []ranking.FeatureValue{{Name: "jev_intent_fit_micros", Value: value}, {Name: "jev_non_contradiction_micros", Value: 1_000_000}, {Name: "jev_partial_plan_micros", Value: 500_000}, {Name: "jev_preconditions_micros", Value: 1_000_000}, {Name: "jev_task_coverage_micros", Value: value}}}
+	return SemanticJudgment{VersionID: request.Document.ProcedureVersionID, JudgmentKey: "jevj_" + strings.Repeat("a", 64), Disposition: "committed", ContentHash: strings.Repeat("b", 64), Provider: "typesafe", Model: "jev-1.13.0", RubricManifestID: "jevr_test", Features: []ranking.FeatureValue{{Name: "jev_task_coverage_micros", Value: value}, {Name: "jev_preconditions_micros", Value: 1_000_000}, {Name: "jev_partial_plan_micros", Value: 500_000}, {Name: "jev_non_contradiction_micros", Value: 1_000_000}, {Name: "jev_intent_fit_micros", Value: value}}}
 }
 
 type fakePlanIssuer struct {

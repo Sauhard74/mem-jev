@@ -1,0 +1,45 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum by (disposition, provider_called) (rate(memjev_jev_judgments_total[5m]))", "legendFormat": "{{disposition}} provider={{provider_called}}", "refId": "A"}],
+      "title": "Jev judgments and deterministic fallbacks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(memjev_jev_duration_milliseconds_bucket[10m])))", "legendFormat": "p95", "refId": "A"}],
+      "title": "Jev decision latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [
+        {"expr": "sum(rate(memjev_jev_input_tokens_total{provider_called=\"true\"}[5m]))", "legendFormat": "input", "refId": "A"},
+        {"expr": "sum(rate(memjev_jev_output_tokens_total{provider_called=\"true\"}[5m]))", "legendFormat": "output", "refId": "B"}
+      ],
+      "title": "TypeSafe token rate",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["memjev", "jev", "retrieval"],
+  "templating": {"list": [{"name": "prometheus", "type": "datasource", "query": "prometheus", "current": {}}]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "utc",
+  "title": "MemJev TypeSafe Jev",
+  "uid": "memjev-jev",
+  "version": 1
+}

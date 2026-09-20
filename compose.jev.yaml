@@ -1,0 +1,29 @@
+name: memjev
+
+# Opt-in overlay for direct TypeSafe Jev access. The host file must contain only
+# the API key and must be mode 0600. It is copied into an internal named volume
+# so the API container never receives a host filesystem path.
+services:
+  jev-key-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["cp /source/api-key /target/api-key && chown 65532:65532 /target/api-key && chmod 0400 /target/api-key"]
+    volumes:
+      - "${MEMJEV_JEV_API_KEY_HOST_FILE:?}:/source/api-key:ro"
+      - "api-jev-secret:/target"
+    networks: ["private"]
+    restart: "no"
+
+  api:
+    depends_on:
+      jev-key-init: {condition: service_completed_successfully}
+    environment:
+      MEMJEV_JEV_ENABLED: "true"
+      MEMJEV_JEV_MODEL: "${MEMJEV_JEV_MODEL:?}"
+      MEMJEV_JEV_API_KEY_FILE: /run/jev/api-key
+    volumes:
+      - "api-jev-secret:/run/jev:ro"
+
+volumes:
+  api-jev-secret:
