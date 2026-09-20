@@ -118,10 +118,13 @@ func (s *S3Store) Get(ctx context.Context, key Key) ([]byte, error) {
 	if output == nil || output.Body == nil {
 		return nil, &OpError{Op: "get", Err: errors.New("empty S3 response")}
 	}
-	defer output.Body.Close()
 	body, err := io.ReadAll(output.Body)
+	closeErr := output.Body.Close()
 	if err != nil {
 		return nil, classifyError("read", err)
+	}
+	if closeErr != nil {
+		return nil, classifyError("close", closeErr)
 	}
 	sum := sha256.Sum256(body)
 	if hex.EncodeToString(sum[:]) != wantHash {

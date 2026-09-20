@@ -7,6 +7,13 @@ linters:
     - errorlint
     - nilerr
     - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
 
 formatters:
   enable:
@@ -16,4 +23,3 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-
