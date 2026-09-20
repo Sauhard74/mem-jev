@@ -227,7 +227,11 @@ func newServiceFixture(t *testing.T, degradedVector bool) serviceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := BuildDocument(DocumentInput{TenantID: "tenant_a", ProcedureVersionID: "pv_a", ProcedureID: "proc_a", TaskText: "release", IntentHash: intentHash, EffectSignatureHash: strings.Repeat("b", 64), Tools: []ToolRequirement{{Name: "shell", ContractVersionID: "tcv_shell"}}, OrderedStepContractIDs: []string{"tcv_shell"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash, Harness: Harness{Name: "ci", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5, VerifiedSuccessCount: 3, ValidatedAt: now.Add(-time.Minute), ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "medium"})
+	procedureInterface, err := NewProcedureInterface(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := BuildDocument(DocumentInput{TenantID: "tenant_a", ProcedureVersionID: "pv_a", ProcedureID: "proc_a", TaskText: "release", IntentHash: intentHash, EffectSignatureHash: strings.Repeat("b", 64), Tools: []ToolRequirement{{Name: "shell", ContractVersionID: "tcv_shell"}}, OrderedStepContractIDs: []string{"tcv_shell"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash, Harness: Harness{Name: "ci", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5, VerifiedSuccessCount: 3, ValidatedAt: now.Add(-time.Minute), ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "medium", Interface: &procedureInterface})
 	if err != nil {
 		t.Fatal(err)
 	}

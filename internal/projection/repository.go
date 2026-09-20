@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
+	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 )
 
@@ -129,6 +130,9 @@ func validateProcedureProjection(value Projection) error {
 			Ordinal: step.Ordinal, ToolName: step.ToolName, ToolVersion: step.ToolVersion,
 			ToolContractVersionID: step.ToolContractVersionID, UncertainNecessity: step.UncertainNecessity,
 			CompensationBoundary: step.CompensationBoundary,
+			SideEffect:           step.SideEffect, Risk: step.Risk, Effects: append([]string(nil), step.Effects...),
+			Preconditions: append([]domain.ProcedurePredicate(nil), step.Preconditions...), SuccessPredicates: append([]string(nil), step.SuccessPredicates...),
+			VerificationMethods: append([]string(nil), step.VerificationMethods...), Reads: append([]domain.ProcedureResource(nil), step.Reads...), Writes: append([]domain.ProcedureResource(nil), step.Writes...),
 		}
 		_, hash, hashErr := canonical.MarshalAndHash(struct {
 			VersionID string      `json:"version_id"`
@@ -142,12 +146,13 @@ func validateProcedureProjection(value Projection) error {
 	for index, edge := range value.Edges {
 		logicalEdges[index] = logicalEdge{
 			FromOrdinal: edge.FromOrdinal, ToOrdinal: edge.ToOrdinal, Type: edge.Type,
+			ResourceID:   edge.ResourceID,
 			ResourceName: edge.ResourceName, ResourceType: edge.ResourceType, ResourceNamespace: edge.ResourceNamespace,
 		}
 	}
 	sort.Slice(logicalEdges, func(i, j int) bool {
-		left := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s", logicalEdges[i].FromOrdinal, logicalEdges[i].ToOrdinal, logicalEdges[i].Type, logicalEdges[i].ResourceNamespace, logicalEdges[i].ResourceType, logicalEdges[i].ResourceName)
-		right := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s", logicalEdges[j].FromOrdinal, logicalEdges[j].ToOrdinal, logicalEdges[j].Type, logicalEdges[j].ResourceNamespace, logicalEdges[j].ResourceType, logicalEdges[j].ResourceName)
+		left := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s\x00%s", logicalEdges[i].FromOrdinal, logicalEdges[i].ToOrdinal, logicalEdges[i].Type, logicalEdges[i].ResourceID, logicalEdges[i].ResourceNamespace, logicalEdges[i].ResourceType, logicalEdges[i].ResourceName)
+		right := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s\x00%s", logicalEdges[j].FromOrdinal, logicalEdges[j].ToOrdinal, logicalEdges[j].Type, logicalEdges[j].ResourceID, logicalEdges[j].ResourceNamespace, logicalEdges[j].ResourceType, logicalEdges[j].ResourceName)
 		return left < right
 	})
 	for index, logical := range logicalEdges {
@@ -172,17 +177,19 @@ func validateProcedureProjection(value Projection) error {
 		GraphHash        string `json:"graph_hash"`
 		PolicyVersion    string `json:"policy_version"`
 		ObservedEndToEnd bool   `json:"observed_end_to_end"`
-	}{string(value.TenantID), value.Family.ID, graphHash, value.Version.PolicyVersion, value.Version.ObservedEndToEnd}
+		InterfaceHash    string `json:"interface_hash"`
+	}{string(value.TenantID), value.Family.ID, graphHash, value.Version.PolicyVersion, value.Version.ObservedEndToEnd, value.Version.InterfaceHash}
 	_, versionHash, err := canonical.MarshalAndHash(versionIdentity)
-	if err != nil || value.Version.ID != "pv_"+versionHash || value.Version.ContentHash != versionHash {
+	if err != nil || value.Version.ID != "pv_"+versionHash || value.Version.ContentHash != versionHash || value.Version.InterfaceHash != value.Interface.ContentHash || retrieval.ValidateProcedureInterface(value.Interface) != nil {
 		return ErrInvalidProjection
 	}
 	canonicalProjection := struct {
-		Family  Family  `json:"family"`
-		Version Version `json:"version"`
-		Steps   []Step  `json:"steps"`
-		Edges   []Edge  `json:"edges,omitempty"`
-	}{value.Family, value.Version, value.Steps, value.Edges}
+		Family    Family                    `json:"family"`
+		Version   Version                   `json:"version"`
+		Steps     []Step                    `json:"steps"`
+		Edges     []Edge                    `json:"edges,omitempty"`
+		Interface domain.ProcedureInterface `json:"interface"`
+	}{value.Family, value.Version, value.Steps, value.Edges, value.Interface}
 	encoded, _, err := canonical.MarshalAndHash(canonicalProjection)
 	if err != nil || !bytes.Equal(encoded, value.CanonicalProjectionJSON) {
 		return ErrInvalidProjection

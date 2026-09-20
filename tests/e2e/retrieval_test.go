@@ -172,6 +172,7 @@ func seedTieRetrievalDocument(t *testing.T, ctx context.Context, db *surrealdb.D
 		OrderedStepContractIDs: []string{"tcv_retrieval_e2e"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash,
 		Harness: retrieval.Harness{Name: "e2e", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5,
 		VerifiedSuccessCount: 3, ValidatedAt: now, ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "low",
+		Interface: e2eProcedureInterface(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +223,7 @@ func seedTenantRetrievalServingState(t *testing.T, ctx context.Context, db *surr
 		OrderedStepContractIDs: []string{"tcv_retrieval_e2e"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash,
 		Harness: retrieval.Harness{Name: "e2e", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5,
 		VerifiedSuccessCount: 3, ValidatedAt: now, ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "low",
+		Interface: e2eProcedureInterface(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +245,15 @@ func seedTenantRetrievalServingState(t *testing.T, ctx context.Context, db *surr
 	if err = storesurreal.NewRetrievalRunRepository(db).ActivateServingConfig(ctx, config); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func e2eProcedureInterface(t *testing.T) *domain.ProcedureInterface {
+	t.Helper()
+	value, err := retrieval.NewProcedureInterface(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &value
 }
 
 func seedRetrievalDocument(t *testing.T, ctx context.Context, db *surrealdb.DB, document retrieval.Document, now time.Time) {

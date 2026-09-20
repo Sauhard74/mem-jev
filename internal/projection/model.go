@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
@@ -57,18 +58,27 @@ type Version struct {
 	EnvironmentScopeHash string `json:"environment_scope_hash"`
 	PolicyVersion        string `json:"policy_version"`
 	ObservedEndToEnd     bool   `json:"observed_end_to_end"`
+	InterfaceHash        string `json:"interface_hash"`
 	ContentHash          string `json:"content_hash"`
 }
 
 type Step struct {
-	ID                    string `json:"id"`
-	Ordinal               uint32 `json:"ordinal"`
-	ToolName              string `json:"tool_name"`
-	ToolVersion           string `json:"tool_version,omitempty"`
-	ToolContractVersionID string `json:"tool_contract_version_id"`
-	UncertainNecessity    bool   `json:"uncertain_necessity"`
-	CompensationBoundary  bool   `json:"compensation_boundary"`
-	ContentHash           string `json:"content_hash"`
+	ID                    string                      `json:"id"`
+	Ordinal               uint32                      `json:"ordinal"`
+	ToolName              string                      `json:"tool_name"`
+	ToolVersion           string                      `json:"tool_version,omitempty"`
+	ToolContractVersionID string                      `json:"tool_contract_version_id"`
+	UncertainNecessity    bool                        `json:"uncertain_necessity"`
+	CompensationBoundary  bool                        `json:"compensation_boundary"`
+	SideEffect            string                      `json:"side_effect"`
+	Risk                  string                      `json:"risk"`
+	Effects               []string                    `json:"effects,omitempty"`
+	Preconditions         []domain.ProcedurePredicate `json:"preconditions,omitempty"`
+	SuccessPredicates     []string                    `json:"success_predicates,omitempty"`
+	VerificationMethods   []string                    `json:"verification_methods,omitempty"`
+	Reads                 []domain.ProcedureResource  `json:"reads,omitempty"`
+	Writes                []domain.ProcedureResource  `json:"writes,omitempty"`
+	ContentHash           string                      `json:"content_hash"`
 }
 
 type Edge struct {
@@ -76,6 +86,7 @@ type Edge struct {
 	FromOrdinal       uint32             `json:"from_ordinal"`
 	ToOrdinal         uint32             `json:"to_ordinal"`
 	Type              synthesis.EdgeType `json:"type"`
+	ResourceID        string             `json:"resource_id,omitempty"`
 	ResourceName      string             `json:"resource_name,omitempty"`
 	ResourceType      string             `json:"resource_type,omitempty"`
 	ResourceNamespace string             `json:"resource_namespace,omitempty"`
@@ -99,32 +110,42 @@ type Manifest struct {
 }
 
 type Projection struct {
-	TenantID                domain.TenantID       `json:"tenant_id"`
-	Family                  Family                `json:"family"`
-	Version                 Version               `json:"version"`
-	Steps                   []Step                `json:"steps,omitempty"`
-	Edges                   []Edge                `json:"edges,omitempty"`
-	NegativePaths           []domain.NegativePath `json:"negative_paths,omitempty"`
-	GoalPredicates          []string              `json:"goal_predicates,omitempty"`
-	Manifest                Manifest              `json:"manifest"`
-	CreatedAt               time.Time             `json:"-"`
-	CanonicalProjectionJSON []byte                `json:"-"`
-	RetrievalDocument       retrieval.Document    `json:"-"`
+	TenantID                domain.TenantID           `json:"tenant_id"`
+	Family                  Family                    `json:"family"`
+	Version                 Version                   `json:"version"`
+	Steps                   []Step                    `json:"steps,omitempty"`
+	Edges                   []Edge                    `json:"edges,omitempty"`
+	NegativePaths           []domain.NegativePath     `json:"negative_paths,omitempty"`
+	GoalPredicates          []string                  `json:"goal_predicates,omitempty"`
+	Interface               domain.ProcedureInterface `json:"interface"`
+	Manifest                Manifest                  `json:"manifest"`
+	CreatedAt               time.Time                 `json:"-"`
+	CanonicalProjectionJSON []byte                    `json:"-"`
+	RetrievalDocument       retrieval.Document        `json:"-"`
 }
 
 type logicalStep struct {
-	Ordinal               uint32 `json:"ordinal"`
-	ToolName              string `json:"tool_name"`
-	ToolVersion           string `json:"tool_version,omitempty"`
-	ToolContractVersionID string `json:"tool_contract_version_id"`
-	UncertainNecessity    bool   `json:"uncertain_necessity"`
-	CompensationBoundary  bool   `json:"compensation_boundary"`
+	Ordinal               uint32                      `json:"ordinal"`
+	ToolName              string                      `json:"tool_name"`
+	ToolVersion           string                      `json:"tool_version,omitempty"`
+	ToolContractVersionID string                      `json:"tool_contract_version_id"`
+	UncertainNecessity    bool                        `json:"uncertain_necessity"`
+	CompensationBoundary  bool                        `json:"compensation_boundary"`
+	SideEffect            string                      `json:"side_effect"`
+	Risk                  string                      `json:"risk"`
+	Effects               []string                    `json:"effects,omitempty"`
+	Preconditions         []domain.ProcedurePredicate `json:"preconditions,omitempty"`
+	SuccessPredicates     []string                    `json:"success_predicates,omitempty"`
+	VerificationMethods   []string                    `json:"verification_methods,omitempty"`
+	Reads                 []domain.ProcedureResource  `json:"reads,omitempty"`
+	Writes                []domain.ProcedureResource  `json:"writes,omitempty"`
 }
 
 type logicalEdge struct {
 	FromOrdinal       uint32             `json:"from_ordinal"`
 	ToOrdinal         uint32             `json:"to_ordinal"`
 	Type              synthesis.EdgeType `json:"type"`
+	ResourceID        string             `json:"resource_id,omitempty"`
 	ResourceName      string             `json:"resource_name,omitempty"`
 	ResourceType      string             `json:"resource_type,omitempty"`
 	ResourceNamespace string             `json:"resource_namespace,omitempty"`
@@ -153,11 +174,11 @@ func Build(request BuildRequest) (Projection, error) {
 		if hashErr != nil || servingIntentHash != request.IntentHash {
 			return Projection{}, ErrInvalidBuildRequest
 		}
-		family, version, steps, edges, canonicalJSON, err := buildProcedure(request)
+		family, version, steps, edges, procedureInterface, canonicalJSON, err := buildProcedure(request)
 		if err != nil {
 			return Projection{}, err
 		}
-		projection.Family, projection.Version, projection.Steps, projection.Edges = family, version, steps, edges
+		projection.Family, projection.Version, projection.Steps, projection.Edges, projection.Interface = family, version, steps, edges, procedureInterface
 		projection.GoalPredicates = append([]string(nil), request.Synthesis.GoalPredicates...)
 		sort.Strings(projection.GoalPredicates)
 		projection.CanonicalProjectionJSON = canonicalJSON
@@ -178,6 +199,7 @@ func Build(request BuildRequest) (Projection, error) {
 			ValidatedAt: request.CreatedAt, ValidationPolicyVersion: version.PolicyVersion,
 			LearnedWithRecallConsent: request.Serving.LearnedWithRecallConsent,
 			ResidencyRegion:          request.Serving.ResidencyRegion, RiskClass: request.Serving.RiskClass,
+			Interface: &procedureInterface,
 		})
 		if err != nil {
 			return Projection{}, err
@@ -201,7 +223,7 @@ func Build(request BuildRequest) (Projection, error) {
 	return projection, nil
 }
 
-func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []byte, error) {
+func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, domain.ProcedureInterface, []byte, error) {
 	familyIdentity := struct {
 		TenantID            domain.TenantID `json:"tenant_id"`
 		IntentHash          string          `json:"intent_hash"`
@@ -209,7 +231,7 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 	}{request.TenantID, request.IntentHash, request.EffectSignatureHash}
 	_, familyHash, err := canonical.MarshalAndHash(familyIdentity)
 	if err != nil {
-		return Family{}, Version{}, nil, nil, nil, err
+		return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, err
 	}
 	family := Family{ID: "proc_" + familyHash, IntentHash: request.IntentHash, EffectSignatureHash: request.EffectSignatureHash, ContentHash: familyHash}
 
@@ -217,13 +239,16 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 	logicalSteps := make([]logicalStep, len(request.Synthesis.Steps))
 	for index, source := range request.Synthesis.Steps {
 		if source.Ordinal != uint32(index) || source.EventID == "" || source.ToolContractVersionID == "" {
-			return Family{}, Version{}, nil, nil, nil, ErrInvalidBuildRequest
+			return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, ErrInvalidBuildRequest
 		}
 		ordinals[source.EventID] = source.Ordinal
 		logicalSteps[index] = logicalStep{
 			Ordinal: source.Ordinal, ToolName: source.ToolName, ToolVersion: source.ToolVersion,
 			ToolContractVersionID: source.ToolContractVersionID, UncertainNecessity: source.UncertainNecessity,
 			CompensationBoundary: source.CompensationBoundary,
+			SideEffect:           source.SideEffect, Risk: source.Risk, Effects: append([]string(nil), source.Effects...),
+			Preconditions: append([]domain.ProcedurePredicate(nil), source.Preconditions...), SuccessPredicates: append([]string(nil), source.SuccessPredicates...),
+			VerificationMethods: append([]string(nil), source.VerificationMethods...), Reads: append([]domain.ProcedureResource(nil), source.Reads...), Writes: append([]domain.ProcedureResource(nil), source.Writes...),
 		}
 	}
 	logicalEdges := make([]logicalEdge, len(request.Synthesis.Edges))
@@ -231,24 +256,28 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 		from, fromOK := ordinals[source.From]
 		to, toOK := ordinals[source.To]
 		if !fromOK || !toOK || from >= to {
-			return Family{}, Version{}, nil, nil, nil, ErrInvalidBuildRequest
+			return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, ErrInvalidBuildRequest
 		}
 		logicalEdges[index] = logicalEdge{
-			FromOrdinal: from, ToOrdinal: to, Type: source.Type, ResourceName: source.ResourceName,
+			FromOrdinal: from, ToOrdinal: to, Type: source.Type, ResourceID: source.ResourceID, ResourceName: source.ResourceName,
 			ResourceType: source.ResourceType, ResourceNamespace: source.ResourceNamespace,
 		}
 	}
 	sort.Slice(logicalEdges, func(i, j int) bool {
-		left := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s", logicalEdges[i].FromOrdinal, logicalEdges[i].ToOrdinal, logicalEdges[i].Type, logicalEdges[i].ResourceNamespace, logicalEdges[i].ResourceType, logicalEdges[i].ResourceName)
-		right := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s", logicalEdges[j].FromOrdinal, logicalEdges[j].ToOrdinal, logicalEdges[j].Type, logicalEdges[j].ResourceNamespace, logicalEdges[j].ResourceType, logicalEdges[j].ResourceName)
+		left := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s\x00%s", logicalEdges[i].FromOrdinal, logicalEdges[i].ToOrdinal, logicalEdges[i].Type, logicalEdges[i].ResourceID, logicalEdges[i].ResourceNamespace, logicalEdges[i].ResourceType, logicalEdges[i].ResourceName)
+		right := fmt.Sprintf("%010d\x00%010d\x00%s\x00%s\x00%s\x00%s\x00%s", logicalEdges[j].FromOrdinal, logicalEdges[j].ToOrdinal, logicalEdges[j].Type, logicalEdges[j].ResourceID, logicalEdges[j].ResourceNamespace, logicalEdges[j].ResourceType, logicalEdges[j].ResourceName)
 		return left < right
 	})
+	procedureInterface, err := buildProcedureInterface(request.Synthesis.Steps, request.Synthesis.Edges)
+	if err != nil {
+		return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, err
+	}
 	goals := append([]string(nil), request.Synthesis.GoalPredicates...)
 	sort.Strings(goals)
 	graph := logicalGraph{Steps: logicalSteps, Edges: logicalEdges, GoalPredicates: goals, EnvironmentScopeHash: request.EnvironmentScopeHash}
 	_, graphHash, err := canonical.MarshalAndHash(graph)
 	if err != nil {
-		return Family{}, Version{}, nil, nil, nil, err
+		return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, err
 	}
 	versionIdentity := struct {
 		TenantID         domain.TenantID `json:"tenant_id"`
@@ -256,15 +285,17 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 		GraphHash        string          `json:"graph_hash"`
 		PolicyVersion    string          `json:"policy_version"`
 		ObservedEndToEnd bool            `json:"observed_end_to_end"`
-	}{request.TenantID, family.ID, graphHash, request.Synthesis.Versions.Policy, request.Synthesis.ObservedEndToEnd}
+		InterfaceHash    string          `json:"interface_hash"`
+	}{request.TenantID, family.ID, graphHash, request.Synthesis.Versions.Policy, request.Synthesis.ObservedEndToEnd, procedureInterface.ContentHash}
 	_, versionHash, err := canonical.MarshalAndHash(versionIdentity)
 	if err != nil {
-		return Family{}, Version{}, nil, nil, nil, err
+		return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, err
 	}
 	version := Version{
 		ID: "pv_" + versionHash, ProcedureID: family.ID, GraphHash: graphHash,
 		EnvironmentScopeHash: request.EnvironmentScopeHash, PolicyVersion: request.Synthesis.Versions.Policy,
 		ObservedEndToEnd: request.Synthesis.ObservedEndToEnd, ContentHash: versionHash,
+		InterfaceHash: procedureInterface.ContentHash,
 	}
 	steps := make([]Step, len(logicalSteps))
 	for index, logical := range logicalSteps {
@@ -273,12 +304,15 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 			Step      logicalStep `json:"step"`
 		}{version.ID, logical})
 		if hashErr != nil {
-			return Family{}, Version{}, nil, nil, nil, hashErr
+			return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, hashErr
 		}
 		steps[index] = Step{
 			ID: "step_" + hash, Ordinal: logical.Ordinal, ToolName: logical.ToolName, ToolVersion: logical.ToolVersion,
 			ToolContractVersionID: logical.ToolContractVersionID, UncertainNecessity: logical.UncertainNecessity,
 			CompensationBoundary: logical.CompensationBoundary, ContentHash: hash,
+			SideEffect: logical.SideEffect, Risk: logical.Risk, Effects: append([]string(nil), logical.Effects...),
+			Preconditions: append([]domain.ProcedurePredicate(nil), logical.Preconditions...), SuccessPredicates: append([]string(nil), logical.SuccessPredicates...),
+			VerificationMethods: append([]string(nil), logical.VerificationMethods...), Reads: append([]domain.ProcedureResource(nil), logical.Reads...), Writes: append([]domain.ProcedureResource(nil), logical.Writes...),
 		}
 	}
 	edges := make([]Edge, len(logicalEdges))
@@ -288,22 +322,115 @@ func buildProcedure(request BuildRequest) (Family, Version, []Step, []Edge, []by
 			Edge      logicalEdge `json:"edge"`
 		}{version.ID, logical})
 		if hashErr != nil {
-			return Family{}, Version{}, nil, nil, nil, hashErr
+			return Family{}, Version{}, nil, nil, domain.ProcedureInterface{}, nil, hashErr
 		}
 		edges[index] = Edge{
-			ID: "edge_" + hash, FromOrdinal: logical.FromOrdinal, ToOrdinal: logical.ToOrdinal, Type: logical.Type,
+			ID: "edge_" + hash, FromOrdinal: logical.FromOrdinal, ToOrdinal: logical.ToOrdinal, Type: logical.Type, ResourceID: logical.ResourceID,
 			ResourceName: logical.ResourceName, ResourceType: logical.ResourceType,
 			ResourceNamespace: logical.ResourceNamespace, ContentHash: hash,
 		}
 	}
 	canonicalProjection := struct {
-		Family  Family  `json:"family"`
-		Version Version `json:"version"`
-		Steps   []Step  `json:"steps"`
-		Edges   []Edge  `json:"edges,omitempty"`
-	}{family, version, steps, edges}
+		Family    Family                    `json:"family"`
+		Version   Version                   `json:"version"`
+		Steps     []Step                    `json:"steps"`
+		Edges     []Edge                    `json:"edges,omitempty"`
+		Interface domain.ProcedureInterface `json:"interface"`
+	}{family, version, steps, edges, procedureInterface}
 	encoded, _, err := canonical.MarshalAndHash(canonicalProjection)
-	return family, version, steps, edges, encoded, err
+	return family, version, steps, edges, procedureInterface, encoded, err
+}
+
+func buildProcedureInterface(steps []domain.ProcedureStep, edges []synthesis.Edge) (domain.ProcedureInterface, error) {
+	byEvent := make(map[domain.EventID]domain.ProcedureStep, len(steps))
+	for _, step := range steps {
+		byEvent[step.EventID] = step
+	}
+	internalRead := make(map[string]struct{})
+	consumedWrite := make(map[string]struct{})
+	for _, edge := range edges {
+		if edge.Type != synthesis.EdgeResourceFlow || edge.ResourceID == "" {
+			continue
+		}
+		from, fromOK := byEvent[edge.From]
+		to, toOK := byEvent[edge.To]
+		if !fromOK || !toOK || !stepHasResource(from.Writes, edge.ResourceID) || !stepHasResource(to.Reads, edge.ResourceID) {
+			return domain.ProcedureInterface{}, ErrInvalidBuildRequest
+		}
+		internalRead[string(edge.To)+"\x00"+edge.ResourceID] = struct{}{}
+		consumedWrite[string(edge.From)+"\x00"+edge.ResourceID] = struct{}{}
+	}
+	requirements := make(map[string]domain.ProcedureRequirement)
+	provisions := make(map[string]domain.ProcedureProvision)
+	provisionOwner := make(map[string]domain.EventID)
+	for _, step := range steps {
+		for _, resource := range step.Reads {
+			if _, ok := internalRead[string(step.EventID)+"\x00"+resource.ID]; ok {
+				continue
+			}
+			key := procedureResourceKey(resource)
+			value := requirements[key]
+			value.ResourceType, value.Namespace, value.IdentityHash, value.SchemaVersion, value.AccessMode = resource.Type, resource.Namespace, resource.IdentityHash, resource.SchemaVersion, "read"
+			for _, predicate := range step.Preconditions {
+				if predicate.ResourceName == "" || predicate.ResourceName == resource.Name {
+					value.PredicateIDs = append(value.PredicateIDs, predicate.ID)
+				}
+			}
+			value.PredicateIDs = canonicalProjectionStrings(value.PredicateIDs)
+			requirements[key] = value
+		}
+		for _, resource := range step.Writes {
+			if _, ok := consumedWrite[string(step.EventID)+"\x00"+resource.ID]; ok {
+				continue
+			}
+			key := procedureResourceKey(resource)
+			if owner, exists := provisionOwner[key]; exists && owner != step.EventID {
+				return domain.ProcedureInterface{}, ErrInvalidBuildRequest
+			}
+			provisionOwner[key] = step.EventID
+			provisions[key] = domain.ProcedureProvision{
+				ResourceType: resource.Type, Namespace: resource.Namespace, IdentityHash: resource.IdentityHash, SchemaVersion: resource.SchemaVersion,
+				ProducedEffects: canonicalProjectionStrings(step.Effects), SuccessPredicateIDs: canonicalProjectionStrings(step.SuccessPredicates),
+			}
+		}
+	}
+	requirementList := make([]domain.ProcedureRequirement, 0, len(requirements))
+	for _, value := range requirements {
+		requirementList = append(requirementList, value)
+	}
+	provisionList := make([]domain.ProcedureProvision, 0, len(provisions))
+	for _, value := range provisions {
+		provisionList = append(provisionList, value)
+	}
+	return retrieval.NewProcedureInterface(requirementList, provisionList)
+}
+
+func stepHasResource(resources []domain.ProcedureResource, id string) bool {
+	for _, resource := range resources {
+		if resource.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func procedureResourceKey(resource domain.ProcedureResource) string {
+	return strings.Join([]string{resource.Type, resource.Namespace, resource.IdentityHash, resource.SchemaVersion}, "\x00")
+}
+
+func canonicalProjectionStrings(source []string) []string {
+	seen := make(map[string]struct{}, len(source))
+	for _, item := range source {
+		if item != "" {
+			seen[item] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for item := range seen {
+		result = append(result, item)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func cloneNegativePaths(source []domain.NegativePath) []domain.NegativePath {

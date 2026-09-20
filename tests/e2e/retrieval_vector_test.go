@@ -41,6 +41,7 @@ func TestHostedFiveChannelRetrievalAndVectorQuarantine(t *testing.T) {
 		OrderedStepContractIDs: []string{"tcv_vector"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash,
 		Harness: retrieval.Harness{Name: "e2e", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5,
 		VerifiedSuccessCount: 3, ValidatedAt: now.Add(-time.Minute), ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "low",
+		Interface: e2eProcedureInterface(t),
 	})
 	if err != nil {
 		t.Fatal(err)

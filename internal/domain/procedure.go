@@ -14,6 +14,34 @@ type ProcedurePredicate struct {
 	ResourceName string `json:"resource_name,omitempty"`
 }
 
+type ProcedureRequirement struct {
+	ID            string   `json:"id,omitempty"`
+	ResourceType  string   `json:"resource_type"`
+	Namespace     string   `json:"namespace"`
+	IdentityHash  string   `json:"identity_hash"`
+	SchemaVersion string   `json:"schema_version,omitempty"`
+	AccessMode    string   `json:"access_mode"`
+	PredicateIDs  []string `json:"predicate_ids,omitempty"`
+}
+
+type ProcedureProvision struct {
+	ID                  string   `json:"id,omitempty"`
+	ResourceType        string   `json:"resource_type"`
+	Namespace           string   `json:"namespace"`
+	IdentityHash        string   `json:"identity_hash"`
+	SchemaVersion       string   `json:"schema_version,omitempty"`
+	ProducedEffects     []string `json:"produced_effects,omitempty"`
+	SuccessPredicateIDs []string `json:"success_predicate_ids,omitempty"`
+}
+
+type ProcedureInterface struct {
+	SchemaVersion string                 `json:"schema_version"`
+	ID            string                 `json:"id,omitempty"`
+	Requirements  []ProcedureRequirement `json:"requirements,omitempty"`
+	Provisions    []ProcedureProvision   `json:"provisions,omitempty"`
+	ContentHash   string                 `json:"content_hash,omitempty"`
+}
+
 type ProcedureStep struct {
 	EventID               EventID              `json:"event_id"`
 	Ordinal               uint32               `json:"ordinal"`
