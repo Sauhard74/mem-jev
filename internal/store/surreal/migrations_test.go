@@ -17,7 +17,7 @@ import (
 
 const surrealImage = "surrealdb/surrealdb:v3.2.4"
 
-func TestCoreRetrievalMigrationIsIdempotent(t *testing.T) {
+func TestMigrationSetIsIdempotent(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	m := NewMigrator(db)
 	if err := m.Apply(context.Background()); err != nil {
@@ -26,8 +26,8 @@ func TestCoreRetrievalMigrationIsIdempotent(t *testing.T) {
 	if err := m.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := schemaVersion(t, db); got != 3 {
-		t.Fatalf("schema version = %d, want 3", got)
+	if got := schemaVersion(t, db); got != 4 {
+		t.Fatalf("schema version = %d, want 4", got)
 	}
 }
 
@@ -224,8 +224,8 @@ func TestConcurrentMigrationsConverge(t *testing.T) {
 			t.Errorf("concurrent migration: %v", err)
 		}
 	}
-	if got := schemaVersion(t, db); got != 3 {
-		t.Fatalf("schema version = %d, want 3", got)
+	if got := schemaVersion(t, db); got != 4 {
+		t.Fatalf("schema version = %d, want 4", got)
 	}
 }
 
@@ -271,6 +271,64 @@ func TestRetrievalSchemaEnforcesTenantEpochAndImmutableRun(t *testing.T) {
 	}
 	if rendered := strings.ToLower(fmt.Sprintf("%#v", plan)); !strings.Contains(rendered, "retrieval_document_task_text") {
 		t.Fatalf("full-text query did not use its index: %s", rendered)
+	}
+}
+
+func TestCompositionSchemaEnforcesTenantIdempotencyAndImmutableEvidence(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := surrealdb.Query[any](context.Background(), db, `
+		CREATE planner_manifest CONTENT {
+			planner_manifest_id: "planner_1", version: "1", compatibility_matrix: {}, limits: {}, coefficients: {},
+			canonical_manifest: "{}", created_at: time::now(), schema_version: "planner-manifest.v1",
+			content_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		}`, nil)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "tenant_id") {
+		t.Fatalf("missing planner tenant accepted: %v", err)
+	}
+
+	selection := func(injectionID string) string {
+		return fmt.Sprintf(`CREATE selection_record CONTENT {
+			tenant_id: "tenant-a", injection_id: %q,
+			idempotency_identity_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			query_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			request_context_hash: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			retrieval_run_id: %q, projection_epoch: 1,
+			document_set_hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			serving_config_id: "serving_1", policy_manifest_id: "policy_1", ranker_manifest_id: "ranker_1",
+			planner_manifest_id: "planner_1", lifecycle_policy_manifest_id: "lifecycle_1",
+			novelty_class: "exact", plan_hash: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			canonical_selection: "{}", created_at: time::now(), expires_at: time::now() + 1d,
+			schema_version: "selection.v1", content_hash: "1111111111111111111111111111111111111111111111111111111111111111"
+		}`, injectionID, "run_"+injectionID)
+	}
+	if _, err = surrealdb.Query[any](context.Background(), db, selection("inject_1"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = surrealdb.Query[any](context.Background(), db, selection("inject_2"), nil); err == nil {
+		t.Fatal("conflicting idempotency identity was accepted")
+	}
+
+	_, err = surrealdb.Query[any](context.Background(), db, `CREATE lifecycle_decision:decision_1 CONTENT {
+		tenant_id: "tenant-a", lifecycle_decision_id: "decision_1", procedure_id: "proc_1", procedure_version_id: "pv_1",
+		lifecycle_policy_manifest_id: "lifecycle_1", prior_state: "candidate", next_state: "trial",
+		causal_success_count: 10, causal_failure_count: 1, associated_success_count: 2, associated_failure_count: 0,
+		unsafe_outcome_count: 0, wilson_lower_bound_ppm: 600000, reason_codes: ["threshold_met"],
+		evidence_cutoff_at: time::now(), canonical_decision: "{}", created_at: time::now(),
+		schema_version: "lifecycle-decision.v1", content_hash: "2222222222222222222222222222222222222222222222222222222222222222"
+	}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = surrealdb.Query[any](context.Background(), db, `UPDATE lifecycle_decision:decision_1 SET causal_success_count = 11`, nil)
+	type countRow struct {
+		Count int `json:"causal_success_count"`
+	}
+	rows, err := surrealdb.Query[[]countRow](context.Background(), db, `SELECT causal_success_count FROM lifecycle_decision:decision_1`, nil)
+	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) != 1 || (*rows)[0].Result[0].Count != 10 {
+		t.Fatalf("immutable lifecycle evidence changed: rows=%#v err=%v", rows, err)
 	}
 }
 
