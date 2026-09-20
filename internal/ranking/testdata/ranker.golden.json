@@ -1,0 +1,1 @@
+{"channels":[{"channel":"exact","weight_micros":2000000},{"channel":"lexical","weight_micros":1000000}],"features":[{"coefficient":2,"maximum":10,"minimum":-10,"missing":-10,"name":"freshness"},{"coefficient":3,"maximum":1000,"minimum":0,"missing":0,"name":"success"}],"intercept":0,"max_candidates":100,"rrf_coefficient":1,"rrf_k":60,"version":"ranker.v1"}
