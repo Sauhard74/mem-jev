@@ -21,6 +21,7 @@ type failurePoint uint8
 const (
 	failureNone failurePoint = iota
 	failureAfterEvents
+	failureAfterRetrievalChildren
 )
 
 type IngestRepository struct {

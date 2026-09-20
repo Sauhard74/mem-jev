@@ -241,9 +241,12 @@ func TestRetrievalSchemaEnforcesTenantEpochAndImmutableRun(t *testing.T) {
 		};
 		CREATE retrieval_run:run_a CONTENT {
 			tenant_id: "tenant-a", retrieval_run_id: "run_a", query_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-			projection_epoch: 1, policy_manifest_id: "policy_1", ranker_manifest_id: "ranker_1", index_manifest_ids: [],
+			canonical_query_envelope: "enc.v1.test", projection_epoch: 1,
+			document_set_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", serving_config_id: "config_1",
+			policy_manifest_id: "policy_1", ranker_manifest_id: "ranker_1", index_manifest_ids: [],
 			candidate_version_ids: [], approximate_channels: [], degraded_channels: [], disposition: "abstained",
-			abstention_code: "no_candidates", created_at: time::now(), completed_at: time::now(), expires_at: time::now() + 1d,
+			abstention_code: "no_candidates", decision_code: "no_candidates", canonical_run: "{}",
+			created_at: time::now(), completed_at: time::now(), expires_at: time::now() + 1d,
 			schema_version: "retrieval-run.v1", content_hash: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 		};`, nil)
 	if err != nil {

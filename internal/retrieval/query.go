@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"path"
@@ -186,6 +187,16 @@ func BuildQuery(tenantID domain.TenantID, policyVersion string, aliases AliasSet
 	}
 	query.Hash, query.CanonicalJSON = hash, canonicalJSON
 	return query, nil
+}
+
+func ValidateQuery(query Query) error {
+	copyOfQuery := query
+	copyOfQuery.Hash, copyOfQuery.CanonicalJSON = "", nil
+	canonicalJSON, hash, err := canonical.MarshalAndHash(copyOfQuery)
+	if err != nil || query.Hash != hash || !bytes.Equal(query.CanonicalJSON, canonicalJSON) {
+		return ErrInvalidQuery
+	}
+	return nil
 }
 
 func CanonicalIntentHash(taskValue string, harnessValue Harness) (string, error) {

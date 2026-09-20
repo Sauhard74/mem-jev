@@ -26,6 +26,8 @@ type ProjectionRepository struct {
 	documents     map[string]retrieval.Document
 	documentEpoch map[string]uint64
 	epochs        map[domain.TenantID]uint64
+	epochHashes   map[domain.TenantID]string
+	epochHistory  map[string]string
 }
 
 func NewProjectionRepository() *ProjectionRepository {
@@ -33,7 +35,7 @@ func NewProjectionRepository() *ProjectionRepository {
 		families: make(map[string]projection.Family), versions: make(map[string]projection.Version),
 		steps: make(map[string]projection.Step), edges: make(map[string]projection.Edge), negative: make(map[string]struct{}),
 		manifests: make(map[string]projection.Manifest), evidence: make(map[string]struct{}), canonical: make(map[string][]byte),
-		documents: make(map[string]retrieval.Document), documentEpoch: make(map[string]uint64), epochs: make(map[domain.TenantID]uint64),
+		documents: make(map[string]retrieval.Document), documentEpoch: make(map[string]uint64), epochs: make(map[domain.TenantID]uint64), epochHashes: make(map[domain.TenantID]string), epochHistory: make(map[string]string),
 	}
 }
 
@@ -101,6 +103,22 @@ func (r *ProjectionRepository) Publish(ctx context.Context, value projection.Pro
 	}
 	r.epochs[value.TenantID]++
 	receipt.ProjectionEpoch = r.epochs[value.TenantID]
+	previousHash := r.epochHashes[value.TenantID]
+	if previousHash == "" {
+		previousHash = strings.Repeat("0", 64)
+	}
+	_, documentSetHash, err := canonical.MarshalAndHash(struct {
+		TenantID           domain.TenantID `json:"tenant_id"`
+		Epoch              uint64          `json:"epoch"`
+		PreviousHash       string          `json:"previous_hash"`
+		ProcedureVersionID string          `json:"procedure_version_id"`
+		DocumentHash       string          `json:"document_hash"`
+	}{value.TenantID, receipt.ProjectionEpoch, previousHash, value.Version.ID, document.ContentHash})
+	if err != nil {
+		return projection.PublishReceipt{}, err
+	}
+	r.epochHashes[value.TenantID] = documentSetHash
+	r.epochHistory[epochKey(value.TenantID, receipt.ProjectionEpoch)] = documentSetHash
 	receipt.RetrievalDocumentID = document.ID
 	key := documentKey(value.TenantID, value.Version.ID, receipt.ProjectionEpoch)
 	r.documents[key] = document
@@ -132,6 +150,10 @@ func (r *ProjectionRepository) RetrievalDocument(ctx context.Context, tenantID d
 
 func documentKey(tenantID domain.TenantID, versionID string, epoch uint64) string {
 	return fmt.Sprintf("%s\x00%s\x00%020d", tenantID, versionID, epoch)
+}
+
+func epochKey(tenantID domain.TenantID, epoch uint64) string {
+	return fmt.Sprintf("%s\x00%020d", tenantID, epoch)
 }
 
 func epochCount(epochs map[domain.TenantID]uint64) int {

@@ -149,6 +149,28 @@ DEFINE FIELD IF NOT EXISTS schema_version ON TABLE eligibility_policy_manifest T
 DEFINE FIELD IF NOT EXISTS content_hash ON TABLE eligibility_policy_manifest TYPE string READONLY ASSERT string::len($value) = 64;
 DEFINE INDEX IF NOT EXISTS eligibility_policy_manifest_tenant_id_unique ON TABLE eligibility_policy_manifest FIELDS tenant_id, policy_manifest_id UNIQUE;
 
+-- Immutable serving bundles are activated through one tenant-scoped pointer.
+-- Snapshot acquisition reads this pointer and the projection epoch in one transaction.
+DEFINE TABLE IF NOT EXISTS retrieval_serving_config SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS serving_config_id ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS policy_manifest_id ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS ranker_manifest_id ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS index_manifest_ids ON TABLE retrieval_serving_config TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_config ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_serving_config TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_serving_config TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_serving_config TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_serving_config_tenant_id_unique ON TABLE retrieval_serving_config FIELDS tenant_id, serving_config_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_serving_head SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_serving_head TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS serving_config_id ON TABLE retrieval_serving_head TYPE string;
+DEFINE FIELD IF NOT EXISTS updated_at ON TABLE retrieval_serving_head TYPE datetime;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_serving_head TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_serving_head TYPE string;
+DEFINE INDEX IF NOT EXISTS retrieval_serving_head_tenant_unique ON TABLE retrieval_serving_head FIELDS tenant_id UNIQUE;
+
 -- Completed decision records are immutable and transient. canonical_query_envelope is encrypted by the application.
 DEFINE TABLE IF NOT EXISTS retrieval_run SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_run TYPE string READONLY;
@@ -156,6 +178,8 @@ DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_run TYPE string R
 DEFINE FIELD IF NOT EXISTS query_hash ON TABLE retrieval_run TYPE string READONLY ASSERT string::len($value) = 64;
 DEFINE FIELD IF NOT EXISTS canonical_query_envelope ON TABLE retrieval_run TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS projection_epoch ON TABLE retrieval_run TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS document_set_hash ON TABLE retrieval_run TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS serving_config_id ON TABLE retrieval_run TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS policy_manifest_id ON TABLE retrieval_run TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS ranker_manifest_id ON TABLE retrieval_run TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS index_manifest_ids ON TABLE retrieval_run TYPE array<string> READONLY;
@@ -164,7 +188,9 @@ DEFINE FIELD IF NOT EXISTS approximate_channels ON TABLE retrieval_run TYPE arra
 DEFINE FIELD IF NOT EXISTS degraded_channels ON TABLE retrieval_run TYPE array<string> READONLY;
 DEFINE FIELD IF NOT EXISTS disposition ON TABLE retrieval_run TYPE string READONLY ASSERT $value IN ["selected", "abstained", "failed"];
 DEFINE FIELD IF NOT EXISTS abstention_code ON TABLE retrieval_run TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS decision_code ON TABLE retrieval_run TYPE option<string> READONLY;
 DEFINE FIELD IF NOT EXISTS selected_version_ids ON TABLE retrieval_run TYPE option<array<string>> READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_run ON TABLE retrieval_run TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_run TYPE datetime READONLY;
 DEFINE FIELD IF NOT EXISTS completed_at ON TABLE retrieval_run TYPE datetime READONLY;
 DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_run TYPE datetime READONLY;
@@ -173,6 +199,23 @@ DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_run TYPE string READO
 DEFINE INDEX IF NOT EXISTS retrieval_run_tenant_id_unique ON TABLE retrieval_run FIELDS tenant_id, retrieval_run_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS retrieval_run_query_epoch ON TABLE retrieval_run FIELDS tenant_id, query_hash, projection_epoch, created_at;
 DEFINE INDEX IF NOT EXISTS retrieval_run_expiry ON TABLE retrieval_run FIELDS expires_at;
+
+DEFINE TABLE IF NOT EXISTS retrieval_channel_result SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_channel_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_channel_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS channel ON TABLE retrieval_channel_result TYPE string READONLY ASSERT $value IN ["exact", "lexical", "facet", "graph", "vector"];
+DEFINE FIELD IF NOT EXISTS index_manifest_id ON TABLE retrieval_channel_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS hit_count ON TABLE retrieval_channel_result TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS approximate ON TABLE retrieval_channel_result TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS complete ON TABLE retrieval_channel_result TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS degradation_code ON TABLE retrieval_channel_result TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS latency_micros ON TABLE retrieval_channel_result TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_channel_result TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_channel_result TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_channel_result TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_channel_result TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_channel_result_unique ON TABLE retrieval_channel_result FIELDS tenant_id, retrieval_run_id, channel UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_channel_result_expiry ON TABLE retrieval_channel_result FIELDS expires_at;
 
 DEFINE TABLE IF NOT EXISTS retrieval_channel_hit SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_channel_hit TYPE string READONLY;
