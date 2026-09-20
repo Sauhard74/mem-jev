@@ -5,6 +5,7 @@ package surreal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,7 @@ import (
 
 const surrealImage = "surrealdb/surrealdb:v3.2.4"
 
-func TestEvidencePipelineMigrationIsIdempotent(t *testing.T) {
+func TestCoreRetrievalMigrationIsIdempotent(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	m := NewMigrator(db)
 	if err := m.Apply(context.Background()); err != nil {
@@ -25,8 +26,8 @@ func TestEvidencePipelineMigrationIsIdempotent(t *testing.T) {
 	if err := m.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := schemaVersion(t, db); got != 2 {
-		t.Fatalf("schema version = %d, want 2", got)
+	if got := schemaVersion(t, db); got != 3 {
+		t.Fatalf("schema version = %d, want 3", got)
 	}
 }
 
@@ -223,8 +224,50 @@ func TestConcurrentMigrationsConverge(t *testing.T) {
 			t.Errorf("concurrent migration: %v", err)
 		}
 	}
-	if got := schemaVersion(t, db); got != 2 {
-		t.Fatalf("schema version = %d, want 2", got)
+	if got := schemaVersion(t, db); got != 3 {
+		t.Fatalf("schema version = %d, want 3", got)
+	}
+}
+
+func TestRetrievalSchemaEnforcesTenantEpochAndImmutableRun(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := surrealdb.Query[any](context.Background(), db, `
+		CREATE projection_epoch:tenant_a CONTENT {
+			tenant_id: "tenant-a", epoch: 1, document_set_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			created_at: time::now(), schema_version: "projection-epoch.v1", content_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		};
+		CREATE retrieval_run:run_a CONTENT {
+			tenant_id: "tenant-a", retrieval_run_id: "run_a", query_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			projection_epoch: 1, policy_manifest_id: "policy_1", ranker_manifest_id: "ranker_1", index_manifest_ids: [],
+			candidate_version_ids: [], approximate_channels: [], degraded_channels: [], disposition: "abstained",
+			abstention_code: "no_candidates", created_at: time::now(), completed_at: time::now(), expires_at: time::now() + 1d,
+			schema_version: "retrieval-run.v1", content_hash: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+		};`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = surrealdb.Query[any](context.Background(), db, `UPDATE retrieval_run:run_a SET query_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"`, nil)
+	type row struct {
+		QueryHash string `json:"query_hash"`
+	}
+	rows, err := surrealdb.Query[[]row](context.Background(), db, `SELECT query_hash FROM retrieval_run:run_a`, nil)
+	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) != 1 || (*rows)[0].Result[0].QueryHash != "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("immutable retrieval run changed: rows=%#v err=%v", rows, err)
+	}
+	_, err = surrealdb.Query[any](context.Background(), db, `CREATE projection_epoch CONTENT { epoch: 2, document_set_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", created_at: time::now(), schema_version: "v1", content_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }`, nil)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "tenant_id") {
+		t.Fatalf("missing tenant accepted: %v", err)
+	}
+	plan, err := surrealdb.Query[any](context.Background(), db,
+		`SELECT id FROM retrieval_document WHERE task_text @0@ "release" EXPLAIN FULL`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered := strings.ToLower(fmt.Sprintf("%#v", plan)); !strings.Contains(rendered, "retrieval_document_task_text") {
+		t.Fatalf("full-text query did not use its index: %s", rendered)
 	}
 }
 

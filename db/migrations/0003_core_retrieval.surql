@@ -1,0 +1,252 @@
+-- Logical immutable corpus epochs. The exact candidate set is still captured on every retrieval run.
+DEFINE TABLE IF NOT EXISTS projection_epoch SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE projection_epoch TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS epoch ON TABLE projection_epoch TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS document_set_hash ON TABLE projection_epoch TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS previous_epoch ON TABLE projection_epoch TYPE option<int> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE projection_epoch TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE projection_epoch TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE projection_epoch TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS projection_epoch_tenant_epoch_unique ON TABLE projection_epoch FIELDS tenant_id, epoch UNIQUE;
+DEFINE INDEX IF NOT EXISTS projection_epoch_latest ON TABLE projection_epoch FIELDS tenant_id, epoch;
+
+-- One tenant-scoped allocation record is locked FOR UPDATE while a writer publishes the next epoch.
+DEFINE TABLE IF NOT EXISTS projection_epoch_head SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE projection_epoch_head TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS current_epoch ON TABLE projection_epoch_head TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS document_set_hash ON TABLE projection_epoch_head TYPE string ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS updated_at ON TABLE projection_epoch_head TYPE datetime;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE projection_epoch_head TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE projection_epoch_head TYPE string;
+DEFINE INDEX IF NOT EXISTS projection_epoch_head_tenant_unique ON TABLE projection_epoch_head FIELDS tenant_id UNIQUE;
+
+-- Immutable denormalized serving documents. Mutable lifecycle changes publish a new serving revision/epoch.
+DEFINE TABLE IF NOT EXISTS retrieval_document SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_id ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS projection_epoch ON TABLE retrieval_document TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS task_text ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS intent_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS effect_signature_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS tool_names ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS tool_contract_version_ids ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_types ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_namespaces ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS resource_identity_hashes ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS effects ON TABLE retrieval_document TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS environment_scope_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS harness_name ON TABLE retrieval_document TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS harness_version ON TABLE retrieval_document TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS lifecycle_state ON TABLE retrieval_document TYPE string READONLY ASSERT $value IN ["candidate", "trial", "active", "stale", "superseded", "quarantined", "retired"];
+DEFINE FIELD IF NOT EXISTS superseded_by ON TABLE retrieval_document TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS observed_end_to_end ON TABLE retrieval_document TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS verification_strength ON TABLE retrieval_document TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS verified_success_count ON TABLE retrieval_document TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS unsafe_outcome_count ON TABLE retrieval_document TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS validated_at ON TABLE retrieval_document TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS validation_policy_version ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS recall_allowed ON TABLE retrieval_document TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS residency_region ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS risk_class ON TABLE retrieval_document TYPE string READONLY ASSERT $value IN ["low", "medium", "high", "critical"];
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_document TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_document TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_document TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_document_tenant_version_epoch_unique ON TABLE retrieval_document FIELDS tenant_id, procedure_version_id, projection_epoch UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_document_exact ON TABLE retrieval_document FIELDS tenant_id, intent_hash, effect_signature_hash, projection_epoch;
+DEFINE INDEX IF NOT EXISTS retrieval_document_serving ON TABLE retrieval_document FIELDS tenant_id, lifecycle_state, projection_epoch, validated_at;
+DEFINE INDEX IF NOT EXISTS retrieval_document_environment ON TABLE retrieval_document FIELDS tenant_id, environment_scope_hash, projection_epoch;
+DEFINE ANALYZER IF NOT EXISTS retrieval_text_analyzer TOKENIZERS class, camel, punct FILTERS lowercase, ascii;
+DEFINE INDEX IF NOT EXISTS retrieval_document_task_text ON TABLE retrieval_document FIELDS task_text FULLTEXT ANALYZER retrieval_text_analyzer BM25;
+
+-- Immutable manifests. A model, dimension, algorithm, or tuning change creates a new namespace.
+DEFINE TABLE IF NOT EXISTS embedding_manifest SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS embedding_manifest_id ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS provider ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS model ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS model_revision ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS dimension ON TABLE embedding_manifest TYPE int READONLY ASSERT $value > 0 AND $value <= 65536;
+DEFINE FIELD IF NOT EXISTS distance ON TABLE embedding_manifest TYPE string READONLY ASSERT $value IN ["cosine", "cosine_normalized", "euclidean", "inner_product"];
+DEFINE FIELD IF NOT EXISTS normalization ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE embedding_manifest TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE embedding_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE embedding_manifest TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS embedding_manifest_tenant_id_unique ON TABLE embedding_manifest FIELDS tenant_id, embedding_manifest_id UNIQUE;
+
+-- Physical vector tables and DISKANN indexes are provisioned per immutable manifest after dimension validation.
+DEFINE TABLE IF NOT EXISTS embedding_index_generation SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS index_manifest_id ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS embedding_manifest_id ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS table_name ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS index_name ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS dimension ON TABLE embedding_index_generation TYPE int READONLY ASSERT $value > 0 AND $value <= 65536;
+DEFINE FIELD IF NOT EXISTS algorithm ON TABLE embedding_index_generation TYPE string READONLY ASSERT $value = "diskann";
+DEFINE FIELD IF NOT EXISTS distance ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tuning ON TABLE embedding_index_generation TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS state ON TABLE embedding_index_generation TYPE string READONLY ASSERT $value IN ["building", "ready", "retired", "quarantined"];
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE embedding_index_generation TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE embedding_index_generation TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE embedding_index_generation TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS embedding_index_generation_tenant_id_unique ON TABLE embedding_index_generation FIELDS tenant_id, index_manifest_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS embedding_index_generation_physical_unique ON TABLE embedding_index_generation FIELDS tenant_id, table_name, index_name UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_index_manifest SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_index_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS index_manifest_id ON TABLE retrieval_index_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS channel ON TABLE retrieval_index_manifest TYPE string READONLY ASSERT $value IN ["exact", "lexical", "facet", "graph", "vector"];
+DEFINE FIELD IF NOT EXISTS generation ON TABLE retrieval_index_manifest TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS index_name ON TABLE retrieval_index_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS embedding_manifest_id ON TABLE retrieval_index_manifest TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS approximate ON TABLE retrieval_index_manifest TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS configuration ON TABLE retrieval_index_manifest TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_index_manifest TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_index_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_index_manifest TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_index_manifest_tenant_id_unique ON TABLE retrieval_index_manifest FIELDS tenant_id, index_manifest_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_index_manifest_generation_unique ON TABLE retrieval_index_manifest FIELDS tenant_id, channel, generation UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS ranker_manifest SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE ranker_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS ranker_manifest_id ON TABLE ranker_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS version ON TABLE ranker_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS manifest ON TABLE ranker_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE ranker_manifest TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE ranker_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE ranker_manifest TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS ranker_manifest_tenant_id_unique ON TABLE ranker_manifest FIELDS tenant_id, ranker_manifest_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS eligibility_policy_manifest SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE eligibility_policy_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS policy_manifest_id ON TABLE eligibility_policy_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS version ON TABLE eligibility_policy_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS manifest ON TABLE eligibility_policy_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE eligibility_policy_manifest TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE eligibility_policy_manifest TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE eligibility_policy_manifest TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS eligibility_policy_manifest_tenant_id_unique ON TABLE eligibility_policy_manifest FIELDS tenant_id, policy_manifest_id UNIQUE;
+
+-- Completed decision records are immutable and transient. canonical_query_envelope is encrypted by the application.
+DEFINE TABLE IF NOT EXISTS retrieval_run SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS query_hash ON TABLE retrieval_run TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS canonical_query_envelope ON TABLE retrieval_run TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS projection_epoch ON TABLE retrieval_run TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS policy_manifest_id ON TABLE retrieval_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS ranker_manifest_id ON TABLE retrieval_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS index_manifest_ids ON TABLE retrieval_run TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS candidate_version_ids ON TABLE retrieval_run TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS approximate_channels ON TABLE retrieval_run TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS degraded_channels ON TABLE retrieval_run TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS disposition ON TABLE retrieval_run TYPE string READONLY ASSERT $value IN ["selected", "abstained", "failed"];
+DEFINE FIELD IF NOT EXISTS abstention_code ON TABLE retrieval_run TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS selected_version_ids ON TABLE retrieval_run TYPE option<array<string>> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_run TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS completed_at ON TABLE retrieval_run TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_run TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_run TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_run_tenant_id_unique ON TABLE retrieval_run FIELDS tenant_id, retrieval_run_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_run_query_epoch ON TABLE retrieval_run FIELDS tenant_id, query_hash, projection_epoch, created_at;
+DEFINE INDEX IF NOT EXISTS retrieval_run_expiry ON TABLE retrieval_run FIELDS expires_at;
+
+DEFINE TABLE IF NOT EXISTS retrieval_channel_hit SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_channel_hit TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_channel_hit TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS channel ON TABLE retrieval_channel_hit TYPE string READONLY ASSERT $value IN ["exact", "lexical", "facet", "graph", "vector"];
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE retrieval_channel_hit TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS channel_rank ON TABLE retrieval_channel_hit TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS raw_score_quantized ON TABLE retrieval_channel_hit TYPE option<int> READONLY;
+DEFINE FIELD IF NOT EXISTS index_manifest_id ON TABLE retrieval_channel_hit TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS approximate ON TABLE retrieval_channel_hit TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_channel_hit TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_channel_hit TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_channel_hit TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_channel_hit TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_channel_hit_unique ON TABLE retrieval_channel_hit FIELDS tenant_id, retrieval_run_id, channel, procedure_version_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_channel_hit_order ON TABLE retrieval_channel_hit FIELDS tenant_id, retrieval_run_id, channel, channel_rank;
+DEFINE INDEX IF NOT EXISTS retrieval_channel_hit_expiry ON TABLE retrieval_channel_hit FIELDS expires_at;
+
+DEFINE TABLE IF NOT EXISTS retrieval_gate_decision SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_gate_decision TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_gate_decision TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE retrieval_gate_decision TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS eligible ON TABLE retrieval_gate_decision TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS advisory_only ON TABLE retrieval_gate_decision TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS rejection_codes ON TABLE retrieval_gate_decision TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS canonical_facts ON TABLE retrieval_gate_decision TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_gate_decision TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_gate_decision TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_gate_decision TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_gate_decision TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_gate_decision_unique ON TABLE retrieval_gate_decision FIELDS tenant_id, retrieval_run_id, procedure_version_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_gate_decision_expiry ON TABLE retrieval_gate_decision FIELDS expires_at;
+
+DEFINE TABLE IF NOT EXISTS retrieval_ranked_candidate SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_ranked_candidate TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS retrieval_run_id ON TABLE retrieval_ranked_candidate TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS procedure_version_id ON TABLE retrieval_ranked_candidate TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS fused_rank_score ON TABLE retrieval_ranked_candidate TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS final_score ON TABLE retrieval_ranked_candidate TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS final_rank ON TABLE retrieval_ranked_candidate TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS verification_strength ON TABLE retrieval_ranked_candidate TYPE int READONLY ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS observed_end_to_end ON TABLE retrieval_ranked_candidate TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS feature_values ON TABLE retrieval_ranked_candidate TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS missing_features ON TABLE retrieval_ranked_candidate TYPE array<string> READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_ranked_candidate TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS expires_at ON TABLE retrieval_ranked_candidate TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_ranked_candidate TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_ranked_candidate TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS retrieval_ranked_candidate_unique ON TABLE retrieval_ranked_candidate FIELDS tenant_id, retrieval_run_id, procedure_version_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS retrieval_ranked_candidate_order ON TABLE retrieval_ranked_candidate FIELDS tenant_id, retrieval_run_id, final_rank;
+DEFINE INDEX IF NOT EXISTS retrieval_ranked_candidate_expiry ON TABLE retrieval_ranked_candidate FIELDS expires_at;
+
+-- Typed graph nodes and relations. Similarity alone never creates these edges.
+DEFINE TABLE IF NOT EXISTS procedure_prefix SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE procedure_prefix TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS prefix_hash ON TABLE procedure_prefix TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE FIELD IF NOT EXISTS length ON TABLE procedure_prefix TYPE int READONLY ASSERT $value > 0;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE procedure_prefix TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE procedure_prefix TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE procedure_prefix TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS procedure_prefix_tenant_hash_unique ON TABLE procedure_prefix FIELDS tenant_id, prefix_hash UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS effect_ref SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE effect_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS effect_id ON TABLE effect_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS effect_name ON TABLE effect_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS risk_class ON TABLE effect_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE effect_ref TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE effect_ref TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE effect_ref TYPE string READONLY ASSERT string::len($value) = 64;
+DEFINE INDEX IF NOT EXISTS effect_ref_tenant_id_unique ON TABLE effect_ref FIELDS tenant_id, effect_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_uses_tool SCHEMAFULL TYPE RELATION IN retrieval_document OUT tool_contract_version ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_uses_tool TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_uses_tool TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_uses_tool TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_uses_tool TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS retrieval_uses_tool_unique ON TABLE retrieval_uses_tool FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_requires_resource SCHEMAFULL TYPE RELATION IN retrieval_document OUT resource_ref ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_requires_resource TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_requires_resource TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_requires_resource TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_requires_resource TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS retrieval_requires_resource_unique ON TABLE retrieval_requires_resource FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_has_effect SCHEMAFULL TYPE RELATION IN retrieval_document OUT effect_ref ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_has_effect TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_has_effect TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_has_effect TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_has_effect TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS retrieval_has_effect_unique ON TABLE retrieval_has_effect FIELDS tenant_id, in, out UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS retrieval_has_prefix SCHEMAFULL TYPE RELATION IN retrieval_document OUT procedure_prefix ENFORCED PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE retrieval_has_prefix TYPE string READONLY ASSERT $value = in.tenant_id AND $value = out.tenant_id;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE retrieval_has_prefix TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE retrieval_has_prefix TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE retrieval_has_prefix TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS retrieval_has_prefix_unique ON TABLE retrieval_has_prefix FIELDS tenant_id, in, out UNIQUE;
