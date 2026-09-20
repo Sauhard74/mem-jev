@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/security"
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
@@ -92,7 +94,7 @@ func run() int {
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
 
-	archives, ingestRepository, outcomeRepository, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
+	archives, ingestRepository, outcomeRepository, retrievalService, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
 	if err != nil {
 		logger.Error("dependency startup failed", "error", err)
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
@@ -105,7 +107,7 @@ func run() int {
 	info := buildinfo.Info{Version: configuration.Build.Version, Commit: configuration.Build.Commit, BuiltAt: configuration.Build.BuiltAt}
 	server := &http.Server{
 		Addr:              configuration.ListenAddress,
-		Handler:           api.NewHandler(api.Dependencies{Ingest: ingestService, Outcome: outcomeService, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
+		Handler:           api.NewHandler(api.Dependencies{Ingest: ingestService, Outcome: outcomeService, Retrieval: retrievalService, RetrievalPolicyVersion: configuration.Retrieval.PolicyVersion, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
 		ReadHeaderTimeout: configuration.RequestTimeout,
 		ReadTimeout:       configuration.RequestTimeout,
 		WriteTimeout:      configuration.RequestTimeout + time.Second,
@@ -135,27 +137,27 @@ func run() int {
 	return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, exitCode)
 }
 
-func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, func(context.Context) error, func(), error) {
+func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, *retrieval.Service, func(context.Context) error, func(), error) {
 	if configuration.AdapterMode == "memory" {
 		repository := storememory.NewIngestRepository()
-		return archive.NewMemoryStore(), repository, repository, func(context.Context) error { return nil }, nil, nil
+		return archive.NewMemoryStore(), repository, repository, nil, func(context.Context) error { return nil }, nil, nil
 	}
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: configuration.Surreal.Endpoint, Namespace: configuration.Surreal.Namespace, Database: configuration.Surreal.Database,
 		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password, AuthScope: storesurreal.AuthScope(configuration.Surreal.AuthScope),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	closeDB := func() { _ = db.Close(context.Background()) }
 	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(configuration.Archive.Region))
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		if configuration.Archive.Endpoint != "" {
@@ -172,7 +174,12 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	retrievalService, err := buildRetrievalService(db, configuration.Retrieval)
+	if err != nil {
+		closeDB()
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	readiness := func(ctx context.Context) error {
 		if _, err := surrealdb.Query[any](ctx, db, "INFO FOR DB", nil); err != nil {
@@ -181,7 +188,41 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		_, err := s3Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(configuration.Archive.Bucket)})
 		return err
 	}
-	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), readiness, closeDB, nil
+	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), retrievalService, readiness, closeDB, nil
+}
+
+func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfig) (*retrieval.Service, error) {
+	key, err := base64.StdEncoding.DecodeString(configuration.QueryKeyBase64)
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("retrieval encryption configuration is invalid")
+	}
+	cipher, err := retrieval.NewAESGCMEnvelopeCipher(configuration.QueryKeyID, key)
+	if err != nil {
+		return nil, err
+	}
+	manifestRepository, err := storesurreal.NewRetrievalManifestRepository(db)
+	if err != nil {
+		return nil, err
+	}
+	channelSpecs := []struct {
+		name       retrieval.ChannelName
+		manifestID string
+	}{{retrieval.ChannelExact, configuration.ExactManifestID}, {retrieval.ChannelLexical, configuration.LexicalManifestID}, {retrieval.ChannelFacet, configuration.FacetManifestID}, {retrieval.ChannelGraph, configuration.GraphManifestID}}
+	channels := make([]retrieval.Channel, 0, len(channelSpecs))
+	required := make([]retrieval.ChannelName, 0, len(channelSpecs))
+	for _, spec := range channelSpecs {
+		channel, channelErr := storesurreal.NewRetrievalChannel(db, spec.name, spec.manifestID)
+		if channelErr != nil {
+			return nil, channelErr
+		}
+		channels = append(channels, channel)
+		required = append(required, spec.name)
+	}
+	projectionRepository := storesurreal.NewProjectionRepository(db)
+	return retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
+		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
+		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections,
+	})
 }
 
 func shutdownAndCode(logger *slog.Logger, shutdown observability.Shutdown, timeout time.Duration, code int) int {

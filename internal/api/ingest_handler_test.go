@@ -402,7 +402,7 @@ func testPrincipal(consent policy.ConsentMode) security.Principal {
 	return security.Principal{
 		TenantID: domain.TenantID("tenant_a"),
 		Region:   "local",
-		Scopes:   map[string]struct{}{security.ScopeIngestWrite: {}, security.ScopeOutcomeWrite: {}},
+		Scopes:   map[string]struct{}{security.ScopeIngestWrite: {}, security.ScopeOutcomeWrite: {}, security.ScopeRetrievalRead: {}},
 		Consent:  consent,
 	}
 }

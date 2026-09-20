@@ -18,6 +18,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/policy"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
 
@@ -145,7 +146,25 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason = connect.CodeNotFound, "selection_not_found"
 	case errors.Is(err, store.ErrOutcomeSupersessionInvalid):
 		code, reason = connect.CodeFailedPrecondition, "invalid_supersession"
+	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidRun):
+		code, reason = connect.CodeInvalidArgument, "invalid_retrieval"
+	case errors.Is(err, retrieval.ErrRunNotFound):
+		code, reason = connect.CodeNotFound, "retrieval_not_found"
+	case errors.Is(err, retrieval.ErrRecallDenied):
+		code, reason = connect.CodePermissionDenied, "recall_not_permitted"
 	default:
+		var retrievalErr *retrieval.ServiceError
+		if errors.As(err, &retrievalErr) {
+			switch retrievalErr.Code {
+			case "idempotency_conflict":
+				code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
+			case "required_channel_unavailable", "snapshot_unavailable", "serving_config_mismatch", "policy_manifest_unavailable", "ranker_manifest_unavailable", "run_lookup_failed", "run_persistence_failed", "candidate_snapshot_missing", "effect_inference_failed":
+				code, reason, retryable = connect.CodeUnavailable, retrievalErr.Code, true
+			default:
+				code, reason = connect.CodeInternal, "retrieval_failed"
+			}
+			break
+		}
 		var archiveErr *archive.OpError
 		if errors.As(err, &archiveErr) && archiveErr.Retryable {
 			code, reason, retryable = connect.CodeUnavailable, "archive_unavailable", true

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -30,6 +31,9 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_WORKER_LEASE_DURATION": {}, "MEMJEV_WORKER_BATCH_SIZE": {}, "MEMJEV_WORKER_MAX_ATTEMPTS": {},
 	"MEMJEV_WORKER_MAX_BACKOFF": {}, "MEMJEV_STAGE_RETENTION": {}, "MEMJEV_ARCHIVE_MAX_BYTES": {},
 	"MEMJEV_OTLP_ENDPOINT": {}, "MEMJEV_BUILD_VERSION": {}, "MEMJEV_BUILD_COMMIT": {}, "MEMJEV_BUILD_AT": {},
+	"MEMJEV_RETRIEVAL_POLICY_VERSION": {}, "MEMJEV_RETRIEVAL_QUERY_KEY_ID": {}, "MEMJEV_RETRIEVAL_QUERY_KEY_BASE64": {},
+	"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT": {}, "MEMJEV_RETRIEVAL_RETENTION": {}, "MEMJEV_RETRIEVAL_MINIMUM_SCORE": {}, "MEMJEV_RETRIEVAL_MAX_SELECTIONS": {},
+	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
 }
 
 type Config struct {
@@ -44,6 +48,7 @@ type Config struct {
 	Archive         ArchiveConfig
 	Temporal        TemporalConfig
 	Worker          WorkerConfig
+	Retrieval       RetrievalConfig
 	OTLPEndpoint    string
 	Build           BuildConfig
 }
@@ -66,6 +71,15 @@ type WorkerConfig struct {
 	BatchSize, MaximumAttempts              int
 	StageRetention                          time.Duration
 	ArchiveMaximumBytes                     int64
+}
+
+type RetrievalConfig struct {
+	PolicyVersion, QueryKeyID, QueryKeyBase64 string
+	ChannelTimeout, Retention                 time.Duration
+	MinimumScore                              int64
+	MaximumSelections                         uint32
+	ExactManifestID, LexicalManifestID        string
+	FacetManifestID, GraphManifestID          string
 }
 
 type BuildConfig struct {
@@ -134,7 +148,17 @@ func load() (Config, error) {
 			PollInterval: time.Second, LeaseDuration: 30 * time.Second, MaxBackoff: time.Minute,
 			BatchSize: 32, MaximumAttempts: 10, StageRetention: 24 * time.Hour, ArchiveMaximumBytes: 16 << 20,
 		},
+		Retrieval: RetrievalConfig{
+			PolicyVersion: valueOr("MEMJEV_RETRIEVAL_POLICY_VERSION", "retrieval-policy.v1"),
+			QueryKeyID:    valueOr("MEMJEV_RETRIEVAL_QUERY_KEY_ID", "development-only"), QueryKeyBase64: os.Getenv("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64"),
+			ChannelTimeout: 150 * time.Millisecond, Retention: 24 * time.Hour, MaximumSelections: 5,
+			ExactManifestID: valueOr("MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID", "idx_exact.v1"), LexicalManifestID: valueOr("MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID", "idx_lexical.v1"),
+			FacetManifestID: valueOr("MEMJEV_RETRIEVAL_FACET_MANIFEST_ID", "idx_facet.v1"), GraphManifestID: valueOr("MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID", "idx_graph.v1"),
+		},
 		Build: BuildConfig{Version: valueOr("MEMJEV_BUILD_VERSION", "dev"), Commit: valueOr("MEMJEV_BUILD_COMMIT", "unknown"), BuiltAt: valueOr("MEMJEV_BUILD_AT", "unknown")},
+	}
+	if config.Environment == "development" && config.Retrieval.QueryKeyBase64 == "" {
+		config.Retrieval.QueryKeyBase64 = base64.StdEncoding.EncodeToString([]byte("memjev-development-key-32-byte!!"))
 	}
 	if raw := os.Getenv("MEMJEV_SHUTDOWN_TIMEOUT"); raw != "" {
 		parsed, err := time.ParseDuration(raw)
@@ -156,6 +180,33 @@ func load() (Config, error) {
 			return Config{}, fieldError("MEMJEV_TENANT_METRICS")
 		}
 		config.TenantMetrics = parsed
+	}
+	retrievalDurations := []struct {
+		name   string
+		target *time.Duration
+	}{{"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT", &config.Retrieval.ChannelTimeout}, {"MEMJEV_RETRIEVAL_RETENTION", &config.Retrieval.Retention}}
+	for _, item := range retrievalDurations {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, err := time.ParseDuration(raw)
+			if err != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	if raw := os.Getenv("MEMJEV_RETRIEVAL_MINIMUM_SCORE"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			return Config{}, fieldError("MEMJEV_RETRIEVAL_MINIMUM_SCORE")
+		}
+		config.Retrieval.MinimumScore = parsed
+	}
+	if raw := os.Getenv("MEMJEV_RETRIEVAL_MAX_SELECTIONS"); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil || parsed == 0 || parsed > 100 {
+			return Config{}, fieldError("MEMJEV_RETRIEVAL_MAX_SELECTIONS")
+		}
+		config.Retrieval.MaximumSelections = uint32(parsed)
 	}
 	workerDurations := []struct {
 		name   string
@@ -207,6 +258,18 @@ func validate(config Config, requireAPICredentials bool) error {
 	}
 	if config.Environment != "development" && config.Environment != "staging" && config.Environment != "production" {
 		return fieldError("MEMJEV_ENVIRONMENT")
+	}
+	if config.Retrieval.PolicyVersion == "" || config.Retrieval.QueryKeyID == "" || config.Retrieval.ChannelTimeout <= 0 || config.Retrieval.ChannelTimeout > config.RequestTimeout || config.Retrieval.Retention <= 0 || config.Retrieval.Retention > 30*24*time.Hour || config.Retrieval.MaximumSelections == 0 || config.Retrieval.MaximumSelections > 100 || config.Retrieval.ExactManifestID == "" || config.Retrieval.LexicalManifestID == "" || config.Retrieval.FacetManifestID == "" || config.Retrieval.GraphManifestID == "" {
+		return fieldError("retrieval configuration")
+	}
+	if config.Environment != "development" && config.Retrieval.QueryKeyBase64 == "" {
+		return fieldError("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64")
+	}
+	if config.Retrieval.QueryKeyBase64 != "" {
+		key, err := base64.StdEncoding.DecodeString(config.Retrieval.QueryKeyBase64)
+		if err != nil || len(key) != 32 {
+			return fieldError("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64")
+		}
 	}
 	if config.AdapterMode == "memory" {
 		if config.Environment != "development" {

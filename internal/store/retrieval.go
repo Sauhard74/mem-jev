@@ -10,7 +10,7 @@ import (
 
 var (
 	ErrServingConfigUnavailable  = errors.New("retrieval serving configuration unavailable")
-	ErrRetrievalRunNotFound      = errors.New("retrieval run not found")
+	ErrRetrievalRunNotFound      = retrieval.ErrRunNotFound
 	ErrRetrievalRunConflict      = errors.New("retrieval run conflict")
 	ErrRetrievalSnapshotMismatch = errors.New("retrieval snapshot mismatch")
 )

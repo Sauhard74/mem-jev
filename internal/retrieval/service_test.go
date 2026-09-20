@@ -101,8 +101,29 @@ func TestServiceNeverServesUnpersistedDecisionOrCallsDormantJudge(t *testing.T) 
 func TestServiceDeniesRecallBeforeCandidateAccessWhenCurrentConsentIsFalse(t *testing.T) {
 	fixture := newServiceFixture(t, false)
 	fixture.request.RecallAllowed = false
-	if _, err := fixture.service.Retrieve(context.Background(), fixture.request); !errors.Is(err, ErrServiceUnavailable) || fixture.exact.calls != 0 {
+	if _, err := fixture.service.Retrieve(context.Background(), fixture.request); !errors.Is(err, ErrRecallDenied) || fixture.exact.calls != 0 {
 		t.Fatalf("error=%v channel_calls=%d", err, fixture.exact.calls)
+	}
+}
+
+func TestServiceReplaysIdempotentRequestWithoutRerunningChannels(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	fixture.request.RequestIdentityHash = strings.Repeat("e", 64)
+	first, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := fixture.service.Retrieve(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RunID != second.RunID || fixture.exact.calls != 1 || len(fixture.repository.runs) != 1 || len(second.Candidates) != 1 {
+		t.Fatalf("first=%#v second=%#v calls=%d runs=%d", first, second, fixture.exact.calls, len(fixture.repository.runs))
+	}
+	changed := fixture.request
+	changed.Input.Task = "different task"
+	if _, err = fixture.service.Retrieve(context.Background(), changed); err == nil {
+		t.Fatal("changed request reused idempotency identity")
 	}
 }
 
@@ -203,7 +224,7 @@ func (r *fakeDecisionRepository) RetrievalRun(_ context.Context, _ domain.Tenant
 			return run, nil
 		}
 	}
-	return Run{}, errors.New("not found")
+	return Run{}, ErrRunNotFound
 }
 
 type fakeDocumentReader struct {

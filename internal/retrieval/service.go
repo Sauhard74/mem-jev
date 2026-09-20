@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
@@ -16,7 +17,10 @@ import (
 	"github.com/sauhard74/mem-jev/internal/ranking"
 )
 
-var ErrServiceUnavailable = errors.New("retrieval service unavailable")
+var (
+	ErrServiceUnavailable = errors.New("retrieval service unavailable")
+	ErrRecallDenied       = errors.New("retrieval recall not permitted")
+)
 
 type DecisionRepository interface {
 	AcquireServingSnapshot(context.Context, domain.TenantID) (ServingSnapshot, error)
@@ -79,6 +83,7 @@ type Service struct {
 type ServiceRequest struct {
 	TenantID                domain.TenantID
 	CurrentPolicyVersion    string
+	RequestIdentityHash     string
 	Input                   Input
 	RecallAllowed           bool
 	AllowedResidencyRegions []string
@@ -114,7 +119,7 @@ func (e *ServiceError) Error() string { return fmt.Sprintf("retrieval %s: %v", e
 func (e *ServiceError) Unwrap() error { return e.Err }
 
 func NewService(repository DecisionRepository, documents DocumentReader, manifests ManifestResolver, effects EffectInferer, cipher EnvelopeCipher, ids RunIDSource, config ServiceConfig) (*Service, error) {
-	if repository == nil || documents == nil || manifests == nil || effects == nil || cipher == nil || ids == nil || config.ChannelTimeout <= 0 || config.Retention <= 0 || config.Retention > 30*24*time.Hour || config.MaximumSelections == 0 || config.MaximumSelections > 100 || len(config.Channels) == 0 {
+	if repository == nil || documents == nil || manifests == nil || cipher == nil || ids == nil || config.ChannelTimeout <= 0 || config.Retention <= 0 || config.Retention > 30*24*time.Hour || config.MaximumSelections == 0 || config.MaximumSelections > 100 || len(config.Channels) == 0 {
 		return nil, ErrServiceUnavailable
 	}
 	seen := map[ChannelName]bool{}
@@ -141,20 +146,41 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	if err := ctx.Err(); err != nil {
 		return ServiceResponse{}, err
 	}
-	if s == nil || !request.RecallAllowed || len(request.AllowedResidencyRegions) == 0 {
+	if !request.RecallAllowed {
+		return ServiceResponse{}, ErrRecallDenied
+	}
+	if s == nil || len(request.AllowedResidencyRegions) == 0 {
 		return ServiceResponse{}, ErrServiceUnavailable
 	}
 	query, err := BuildQuery(request.TenantID, request.CurrentPolicyVersion, s.config.Aliases, request.Input)
 	if err != nil {
 		return ServiceResponse{}, err
 	}
-	effectHash, err := s.effects.InferEffectSignature(ctx, request.TenantID, query)
-	if err != nil {
-		return ServiceResponse{}, &ServiceError{Code: "effect_inference_failed", Err: err}
+	if s.effects != nil {
+		effectHash, inferErr := s.effects.InferEffectSignature(ctx, request.TenantID, query)
+		if inferErr != nil {
+			return ServiceResponse{}, &ServiceError{Code: "effect_inference_failed", Err: inferErr}
+		}
+		query, err = BindEffectSignature(query, effectHash)
+		if err != nil {
+			return ServiceResponse{}, err
+		}
 	}
-	query, err = BindEffectSignature(query, effectHash)
+	runID, err := s.runID(request.TenantID, request.RequestIdentityHash)
 	if err != nil {
 		return ServiceResponse{}, err
+	}
+	if request.RequestIdentityHash != "" {
+		existing, findErr := s.repository.RetrievalRun(ctx, request.TenantID, runID)
+		if findErr == nil {
+			if existing.QueryHash != query.Hash {
+				return ServiceResponse{}, &ServiceError{Code: "idempotency_conflict", RunID: runID, Err: ErrInvalidRun}
+			}
+			return s.responseFromRun(ctx, existing)
+		}
+		if !errors.Is(findErr, ErrRunNotFound) {
+			return ServiceResponse{}, &ServiceError{Code: "run_lookup_failed", RunID: runID, Err: findErr}
+		}
 	}
 	snapshot, err := s.repository.AcquireServingSnapshot(ctx, request.TenantID)
 	if err != nil {
@@ -170,10 +196,6 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	ranker, err := s.manifests.Ranker(ctx, request.TenantID, snapshot.RankerManifestID)
 	if err != nil || ranker.ID != snapshot.RankerManifestID {
 		return ServiceResponse{}, &ServiceError{Code: "ranker_manifest_unavailable", Err: ErrServiceUnavailable}
-	}
-	runID, err := s.ids.NewRunID()
-	if err != nil {
-		return ServiceResponse{}, &ServiceError{Code: "run_id_unavailable", Err: err}
 	}
 	envelope, err := s.cipher.Encrypt(ctx, request.TenantID, query.CanonicalJSON)
 	if err != nil {
@@ -215,7 +237,13 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	}
 	docByID := make(map[string]Document, len(documents))
 	for _, document := range documents {
+		if _, exists := docByID[document.ProcedureVersionID]; exists {
+			return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: runID, Err: ErrServiceUnavailable}
+		}
 		docByID[document.ProcedureVersionID] = document
+	}
+	if len(docByID) != len(versionIDs) {
+		return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: runID, Err: ErrServiceUnavailable}
 	}
 	eligibilityContext := eligibilityContextFrom(request, query, s.clock().UTC())
 	gates := make([]PersistedGate, 0, len(versionIDs))
@@ -273,6 +301,81 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
 	response.Candidates = responseCandidates
 	return response, err
+}
+
+func (s *Service) runID(tenantID domain.TenantID, requestIdentityHash string) (string, error) {
+	if requestIdentityHash == "" {
+		id, err := s.ids.NewRunID()
+		if err != nil {
+			return "", &ServiceError{Code: "run_id_unavailable", Err: err}
+		}
+		return id, nil
+	}
+	if !sha256Pattern.MatchString(requestIdentityHash) {
+		return "", ErrInvalidQuery
+	}
+	sum := sha256.Sum256([]byte(string(tenantID) + "\x00" + requestIdentityHash))
+	return "rrun_" + hex.EncodeToString(sum[:]), nil
+}
+
+func (s *Service) responseFromRun(ctx context.Context, run Run) (ServiceResponse, error) {
+	response := ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash}
+	for _, execution := range run.ChannelExecutions {
+		response.Approximate = response.Approximate || execution.Approximate && execution.Complete
+		if !execution.Complete {
+			response.Degraded = append(response.Degraded, DegradedChannel{Channel: execution.Channel, Code: execution.DegradationCode, IndexManifestID: execution.IndexManifestID, Approximate: execution.Approximate, LatencyMicros: execution.LatencyMicros})
+		}
+	}
+	if run.Disposition == RunFailed {
+		code := run.DecisionCode
+		if index := strings.IndexByte(code, ':'); index >= 0 {
+			code = code[:index]
+		}
+		return ServiceResponse{}, &ServiceError{Code: code, RunID: run.ID, Err: ErrServiceUnavailable}
+	}
+	include := make(map[string]bool)
+	for _, id := range run.SelectedVersionIDs {
+		include[id] = true
+	}
+	for _, gate := range run.Gates {
+		if gate.AdvisoryOnly {
+			include[gate.VersionID] = true
+		}
+	}
+	if len(include) == 0 {
+		return response, nil
+	}
+	ids := make([]string, 0, len(include))
+	for id := range include {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	documents, err := s.documents.RetrievalDocuments(ctx, run.TenantID, ids, run.Snapshot.ProjectionEpoch)
+	if err != nil || len(documents) != len(ids) {
+		return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: run.ID, Err: ErrServiceUnavailable}
+	}
+	docByID := make(map[string]Document, len(documents))
+	for _, item := range documents {
+		if _, exists := docByID[item.ProcedureVersionID]; exists {
+			return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: run.ID, Err: ErrServiceUnavailable}
+		}
+		docByID[item.ProcedureVersionID] = item
+	}
+	gateByID := make(map[string]PersistedGate, len(run.Gates))
+	for _, item := range run.Gates {
+		gateByID[item.VersionID] = item
+	}
+	for _, item := range run.Ranked {
+		if !include[item.VersionID] {
+			continue
+		}
+		document, ok := docByID[item.VersionID]
+		if !ok {
+			return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: run.ID, Err: ErrServiceUnavailable}
+		}
+		response.Candidates = append(response.Candidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd, AdvisoryOnly: gateByID[item.VersionID].AdvisoryOnly})
+	}
+	return response, nil
 }
 
 func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {

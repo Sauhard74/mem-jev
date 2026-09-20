@@ -17,8 +17,9 @@ import (
 const runSchemaVersion = "retrieval-run.v1"
 
 var (
-	ErrInvalidRun = errors.New("invalid retrieval run")
-	runIDPattern  = regexp.MustCompile(`^rrun_[0-9a-f]{64}$`)
+	ErrInvalidRun  = errors.New("invalid retrieval run")
+	ErrRunNotFound = errors.New("retrieval run not found")
+	runIDPattern   = regexp.MustCompile(`^rrun_[0-9a-f]{64}$`)
 )
 
 type RunDisposition string

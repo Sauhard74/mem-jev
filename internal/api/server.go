@@ -23,13 +23,15 @@ const (
 )
 
 type Dependencies struct {
-	Ingest        *ingest.Service
-	Outcome       *outcome.Service
-	Authenticator security.Authenticator
-	BuildInfo     buildinfo.Info
-	Readiness     func(context.Context) error
-	Timeout       time.Duration
-	Logger        *slog.Logger
+	Ingest                 *ingest.Service
+	Outcome                *outcome.Service
+	Retrieval              retrievalAPI
+	RetrievalPolicyVersion string
+	Authenticator          security.Authenticator
+	BuildInfo              buildinfo.Info
+	Readiness              func(context.Context) error
+	Timeout                time.Duration
+	Logger                 *slog.Logger
 }
 
 func NewHandler(dependencies Dependencies) http.Handler {
@@ -65,6 +67,15 @@ func NewHandler(dependencies Dependencies) http.Handler {
 	outcomePath, outcomeHTTPHandler := memjevv1connect.NewOutcomeServiceHandler(
 		&outcomeHandler{service: dependencies.Outcome}, outcomeOptions...)
 	mux.Handle(outcomePath, outcomeHTTPHandler)
+	retrievalOptions := append([]connect.HandlerOption{}, commonOptions...)
+	retrievalOptions = append(retrievalOptions, connect.WithInterceptors(
+		errorDetailsInterceptor(),
+		interceptors.NewAuth(dependencies.Authenticator, security.ScopeRetrievalRead),
+		interceptors.NewIdempotencyFor(memjevv1connect.RetrievalServiceRetrieveProcedure),
+	))
+	retrievalPath, retrievalHTTPHandler := memjevv1connect.NewRetrievalServiceHandler(
+		&retrievalHandler{service: dependencies.Retrieval, currentPolicyVersion: dependencies.RetrievalPolicyVersion}, retrievalOptions...)
+	mux.Handle(retrievalPath, retrievalHTTPHandler)
 	healthPath, healthHTTPHandler := memjevv1connect.NewHealthServiceHandler(
 		&healthHandler{info: dependencies.BuildInfo, readiness: dependencies.Readiness}, commonOptions...)
 	mux.Handle(healthPath, healthHTTPHandler)

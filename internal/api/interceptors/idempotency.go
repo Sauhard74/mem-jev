@@ -11,8 +11,19 @@ import (
 )
 
 func NewIdempotency() connect.Interceptor {
+	return newIdempotency("")
+}
+
+func NewIdempotencyFor(procedure string) connect.Interceptor {
+	return newIdempotency(procedure)
+}
+
+func newIdempotency(procedure string) connect.Interceptor {
 	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, request connect.AnyRequest) (connect.AnyResponse, error) {
+			if procedure != "" && request.Spec().Procedure != procedure {
+				return next(ctx, request)
+			}
 			key := request.Header().Get("Idempotency-Key")
 			if !validIdempotencyKey(key) {
 				return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("a valid idempotency key is required"))

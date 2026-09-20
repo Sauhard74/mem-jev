@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"testing"
 	"time"
@@ -60,6 +61,15 @@ func TestLoadProductionAcceptsDatabaseScopedSurrealAuthentication(t *testing.T) 
 	}
 }
 
+func TestLoadRejectsInvalidRetrievalEncryptionKey(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64", "not-base64")
+	if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestLoadWorkerParsesDurableLeaseAndTemporalConfiguration(t *testing.T) {
 	setValidDurableEnvironment(t)
 	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
@@ -105,6 +115,8 @@ func setValidDurableEnvironment(t *testing.T) {
 	t.Setenv("MEMJEV_SURREAL_PASSWORD", "secret")
 	t.Setenv("MEMJEV_ARCHIVE_BUCKET", "archive")
 	t.Setenv("MEMJEV_ARCHIVE_REGION", "us-east-1")
+	t.Setenv("MEMJEV_RETRIEVAL_QUERY_KEY_ID", "kms-key-version-1")
+	t.Setenv("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64", base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 }
 
 func clearKnownEnvironment(t *testing.T) {

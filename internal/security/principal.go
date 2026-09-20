@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	ScopeIngestWrite  = "ingest:write"
-	ScopeOutcomeWrite = "outcomes:write"
+	ScopeIngestWrite   = "ingest:write"
+	ScopeOutcomeWrite  = "outcomes:write"
+	ScopeRetrievalRead = "retrievals:read"
 )
 
 type Principal struct {

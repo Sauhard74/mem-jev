@@ -17,6 +17,7 @@ type Explanation struct {
 	Snapshot     ServingSnapshot
 	Candidates   []CandidateExplanation
 	Degraded     []DegradedChannel
+	Approximate  bool
 }
 
 type CandidateExplanation struct {
@@ -55,6 +56,7 @@ func (s *Service) Explain(ctx context.Context, tenantID domain.TenantID, runID s
 	}
 	explanation := Explanation{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, QueryHash: run.QueryHash, Snapshot: run.Snapshot}
 	for _, execution := range run.ChannelExecutions {
+		explanation.Approximate = explanation.Approximate || execution.Complete && execution.Approximate
 		if !execution.Complete {
 			explanation.Degraded = append(explanation.Degraded, DegradedChannel{Channel: execution.Channel, Code: execution.DegradationCode, IndexManifestID: execution.IndexManifestID, Approximate: execution.Approximate, LatencyMicros: execution.LatencyMicros})
 		}
