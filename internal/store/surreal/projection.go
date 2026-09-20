@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
@@ -626,6 +627,48 @@ func (r *ProjectionRepository) RetrievalDocument(ctx context.Context, tenantID d
 		return retrieval.Document{}, projection.ErrProjectionConflict
 	}
 	return document, nil
+}
+
+func (r *ProjectionRepository) RetrievalDocuments(ctx context.Context, tenantID domain.TenantID, versionIDs []string, epoch uint64) ([]retrieval.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if r == nil || r.db == nil || tenantID == "" || epoch == 0 || len(versionIDs) == 0 || len(versionIDs) > 1000 {
+		return nil, projection.ErrProjectionNotFound
+	}
+	type row struct {
+		ID        string `json:"retrieval_document_id"`
+		VersionID string `json:"procedure_version_id"`
+		Hash      string `json:"content_hash"`
+		Canonical string `json:"canonical_document"`
+		Epoch     uint64 `json:"projection_epoch"`
+	}
+	results, err := surrealdb.Query[[]row](ctx, r.db, `SELECT retrieval_document_id, procedure_version_id, content_hash, canonical_document, projection_epoch FROM retrieval_document WHERE tenant_id = $tenant_id AND procedure_version_id IN $version_ids AND projection_epoch <= $epoch ORDER BY procedure_version_id ASC, projection_epoch DESC`, map[string]any{"tenant_id": string(tenantID), "version_ids": versionIDs, "epoch": epoch})
+	if err != nil {
+		return nil, databaseFailure("read retrieval documents", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(versionIDs))
+	documents := make([]retrieval.Document, 0, len(versionIDs))
+	for _, stored := range (*results)[0].Result {
+		if _, ok := seen[stored.VersionID]; ok {
+			continue
+		}
+		var document retrieval.Document
+		if err := json.Unmarshal([]byte(stored.Canonical), &document); err != nil {
+			return nil, databaseFailure("decode retrieval document", err)
+		}
+		document.ID, document.ContentHash, document.CanonicalJSON = stored.ID, stored.Hash, []byte(stored.Canonical)
+		if retrieval.ValidateDocument(document) != nil || document.ProcedureVersionID != stored.VersionID {
+			return nil, projection.ErrProjectionConflict
+		}
+		seen[stored.VersionID] = struct{}{}
+		documents = append(documents, document)
+	}
+	sort.Slice(documents, func(i, j int) bool { return documents[i].ProcedureVersionID < documents[j].ProcedureVersionID })
+	return documents, nil
 }
 
 func (r *ProjectionRepository) Canonical(ctx context.Context, tenantID domain.TenantID, versionID string) ([]byte, error) {

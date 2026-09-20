@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/eligibility"
+	"github.com/sauhard74/mem-jev/internal/ranking"
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/store/storetest"
 	surrealdb "github.com/surrealdb/surrealdb.go"
@@ -90,6 +92,45 @@ func TestSurrealRetrievalRunAcceptsCapturedHistoricalSnapshot(t *testing.T) {
 	}
 	if err = repository.SaveRetrievalRun(context.Background(), storetest.ValidRetrievalRun(t, snapshot, 'e')); err != nil {
 		t.Fatalf("save against captured snapshot: %v", err)
+	}
+}
+
+func TestSurrealRetrievalManifestRepositoryValidatesContentAddressedManifests(t *testing.T) {
+	db := projectionDatabase(t)
+	policy, err := eligibility.NewPolicy(eligibility.PolicySpec{Version: "v1", AllowedLifecycle: []eligibility.Lifecycle{eligibility.LifecycleActive}, MaximumRisk: eligibility.RiskMedium, MaximumValidationAgeSeconds: 3600, CompatibleValidationPolicies: []string{"evidence.v1"}, AllowedResidencyRegions: []string{"local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranker, err := ranking.NewManifest(ranking.ManifestSpec{Version: "v1", RRFK: 60, RRFCoefficient: 1, MaxCandidates: 100, Channels: []ranking.ChannelWeight{{Channel: "exact", WeightMicros: 1_000_000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, item := range []struct {
+		statement string
+		record    map[string]any
+	}{
+		{`CREATE ONLY eligibility_policy_manifest CONTENT $record`, map[string]any{"tenant_id": "tenant_a", "policy_manifest_id": policy.ID, "version": policy.Version, "manifest": string(policy.CanonicalJSON), "created_at": now, "schema_version": "eligibility-policy.v1", "content_hash": strings.TrimPrefix(policy.ID, "egp_")}},
+		{`CREATE ONLY ranker_manifest CONTENT $record`, map[string]any{"tenant_id": "tenant_a", "ranker_manifest_id": ranker.ID, "version": ranker.Version, "manifest": string(ranker.CanonicalJSON), "created_at": now, "schema_version": "ranker.v1", "content_hash": strings.TrimPrefix(ranker.ID, "rnk_")}},
+	} {
+		if _, err = surrealdb.Query[any](context.Background(), db, item.statement, map[string]any{"record": item.record}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository, err := NewRetrievalManifestRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedPolicy, err := repository.EligibilityPolicy(context.Background(), "tenant_a", policy.ID)
+	if err != nil || loadedPolicy.ID != policy.ID {
+		t.Fatalf("policy=%#v err=%v", loadedPolicy, err)
+	}
+	loadedRanker, err := repository.Ranker(context.Background(), "tenant_a", ranker.ID)
+	if err != nil || loadedRanker.ID != ranker.ID {
+		t.Fatalf("ranker=%#v err=%v", loadedRanker, err)
+	}
+	if _, err = repository.Ranker(context.Background(), "tenant_b", ranker.ID); err == nil {
+		t.Fatal("cross-tenant manifest read succeeded")
 	}
 }
 

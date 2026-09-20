@@ -153,7 +153,7 @@ func validPolicy() eligibility.PolicySpec {
 
 func validContext() eligibility.Context {
 	return eligibility.Context{
-		TenantID: "tenant-a", AsOfUnix: 10_000,
+		TenantID: "tenant-a", AsOfUnix: 10_000, RecallAllowed: true,
 		Tools:       []eligibility.Tool{{Name: "shell", ContractVersionID: "tc_1"}},
 		Harness:     eligibility.Harness{Name: "codex", Version: "1"},
 		Environment: []eligibility.Fact{{Name: "os", Value: "linux"}},

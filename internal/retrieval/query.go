@@ -78,23 +78,38 @@ type AliasSet struct {
 }
 
 type Query struct {
-	SchemaVersion    string          `json:"schema_version"`
-	TenantID         domain.TenantID `json:"tenant_id"`
-	PolicyVersion    string          `json:"policy_version"`
-	Task             string          `json:"task"`
-	IntentHash       string          `json:"intent_hash"`
-	Tools            []Tool          `json:"tools"`
-	Harness          Harness         `json:"harness"`
-	Environment      []Fact          `json:"environment,omitempty"`
-	EnvironmentHash  string          `json:"environment_hash"`
-	Resources        []Resource      `json:"resources,omitempty"`
-	Constraints      []Fact          `json:"constraints,omitempty"`
-	ForbiddenEffects []string        `json:"forbidden_effects,omitempty"`
-	RiskClass        RiskClass       `json:"risk_class"`
-	LatencyClass     LatencyClass    `json:"latency_class"`
-	MaxCandidates    uint32          `json:"max_candidates"`
-	Hash             string          `json:"-"`
-	CanonicalJSON    []byte          `json:"-"`
+	SchemaVersion       string          `json:"schema_version"`
+	TenantID            domain.TenantID `json:"tenant_id"`
+	PolicyVersion       string          `json:"policy_version"`
+	Task                string          `json:"task"`
+	IntentHash          string          `json:"intent_hash"`
+	EffectSignatureHash string          `json:"effect_signature_hash,omitempty"`
+	Tools               []Tool          `json:"tools"`
+	Harness             Harness         `json:"harness"`
+	Environment         []Fact          `json:"environment,omitempty"`
+	EnvironmentHash     string          `json:"environment_hash"`
+	Resources           []Resource      `json:"resources,omitempty"`
+	Constraints         []Fact          `json:"constraints,omitempty"`
+	ForbiddenEffects    []string        `json:"forbidden_effects,omitempty"`
+	RiskClass           RiskClass       `json:"risk_class"`
+	LatencyClass        LatencyClass    `json:"latency_class"`
+	MaxCandidates       uint32          `json:"max_candidates"`
+	Hash                string          `json:"-"`
+	CanonicalJSON       []byte          `json:"-"`
+}
+
+func BindEffectSignature(query Query, effectSignatureHash string) (Query, error) {
+	if ValidateQuery(query) != nil || !sha256Pattern.MatchString(strings.TrimSpace(effectSignatureHash)) {
+		return Query{}, ErrInvalidQuery
+	}
+	query.EffectSignatureHash = strings.TrimSpace(effectSignatureHash)
+	query.Hash, query.CanonicalJSON = "", nil
+	canonicalJSON, hash, err := canonical.MarshalAndHash(query)
+	if err != nil {
+		return Query{}, err
+	}
+	query.Hash, query.CanonicalJSON = hash, canonicalJSON
+	return query, nil
 }
 
 func InputFromProto(request *memjevv1.RetrieveRequest) Input {

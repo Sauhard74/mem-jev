@@ -57,6 +57,7 @@ type Resource struct {
 type Context struct {
 	TenantID                string
 	AsOfUnix                int64
+	RecallAllowed           bool
 	Tools                   []Tool
 	Harness                 Harness
 	Environment             []Fact
@@ -85,11 +86,11 @@ type Candidate struct {
 }
 
 type Rejection struct {
-	Code      ReasonCode
-	SubjectID string
-	Field     string
-	Expected  string
-	Observed  string
+	Code      ReasonCode `json:"code"`
+	SubjectID string     `json:"subject_id"`
+	Field     string     `json:"field"`
+	Expected  string     `json:"expected"`
+	Observed  string     `json:"observed"`
 }
 
 type Decision struct {
@@ -188,7 +189,7 @@ func Evaluate(policySpec PolicySpec, context Context, candidate Candidate) Decis
 	if !contains(policy.CompatibleValidationPolicies, candidate.ValidationPolicyVersion) {
 		reject(ReasonPolicyIncompatible, candidate.VersionID, "validation_policy", "compatible", "incompatible")
 	}
-	if !candidate.RecallAllowed {
+	if !context.RecallAllowed || !candidate.RecallAllowed {
 		reject(ReasonConsentDenied, candidate.VersionID, "recall_consent", "allowed", "denied")
 	}
 	if !contains(policy.AllowedResidencyRegions, candidate.ResidencyRegion) || !contains(context.AllowedResidencyRegions, candidate.ResidencyRegion) {

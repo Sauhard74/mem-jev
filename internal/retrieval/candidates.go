@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 var ErrInvalidChannels = errors.New("invalid candidate channels")
@@ -28,11 +29,15 @@ type ChannelResult struct {
 	IndexManifestID string
 	HitCount        uint32
 	Approximate     bool
+	LatencyMicros   int64
 }
 
 type DegradedChannel struct {
-	Channel ChannelName
-	Code    string
+	Channel         ChannelName
+	Code            string
+	IndexManifestID string
+	Approximate     bool
+	LatencyMicros   int64
 }
 
 type CandidateCollection struct {
@@ -43,11 +48,12 @@ type CandidateCollection struct {
 }
 
 type channelResponse struct {
-	name        ChannelName
-	manifestID  string
-	approximate bool
-	hits        []Hit
-	err         error
+	name          ChannelName
+	manifestID    string
+	approximate   bool
+	hits          []Hit
+	err           error
+	latencyMicros int64
 }
 
 func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCollection, error) {
@@ -59,8 +65,9 @@ func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCo
 	responses := make(chan channelResponse, len(request.Channels))
 	for _, channel := range request.Channels {
 		go func() {
+			started := time.Now()
 			hits, err := channel.Search(channelCtx, request.Request)
-			responses <- channelResponse{name: channel.Name(), manifestID: channel.ManifestID(), approximate: channel.Approximate(), hits: hits, err: err}
+			responses <- channelResponse{name: channel.Name(), manifestID: channel.ManifestID(), approximate: channel.Approximate(), hits: hits, err: err, latencyMicros: max(0, time.Since(started).Microseconds())}
 		}()
 	}
 	byChannel := make(map[ChannelName]channelResponse, len(request.Channels))
@@ -82,7 +89,7 @@ func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCo
 			}
 			for _, channel := range request.Channels {
 				if _, exists := pending[channel.Name()]; exists {
-					byChannel[channel.Name()] = channelResponse{name: channel.Name(), manifestID: channel.ManifestID(), approximate: channel.Approximate(), err: context.DeadlineExceeded}
+					byChannel[channel.Name()] = channelResponse{name: channel.Name(), manifestID: channel.ManifestID(), approximate: channel.Approximate(), err: context.DeadlineExceeded, latencyMicros: request.Timeout.Microseconds()}
 				}
 			}
 			clear(pending)
@@ -101,7 +108,7 @@ func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCo
 	for _, name := range names {
 		response := byChannel[name]
 		if response.err != nil {
-			collection.Degraded = append(collection.Degraded, DegradedChannel{Channel: name, Code: channelFailure(response.err)})
+			collection.Degraded = append(collection.Degraded, DegradedChannel{Channel: name, Code: channelFailure(response.err), IndexManifestID: response.manifestID, Approximate: response.approximate, LatencyMicros: response.latencyMicros})
 			continue
 		}
 		result, err := validateHits(name, response.manifestID, response.approximate, response.hits, request.Request.Limit)
@@ -109,6 +116,7 @@ func CollectCandidates(ctx context.Context, request CollectRequest) (CandidateCo
 			return CandidateCollection{}, err
 		}
 		collection.Results = append(collection.Results, result)
+		collection.Results[len(collection.Results)-1].LatencyMicros = response.latencyMicros
 		collection.Approximate = collection.Approximate || result.Approximate
 		for index, hit := range response.hits {
 			union[hit.VersionID] = append(union[hit.VersionID], RankedHit{Channel: name, Rank: uint32(index + 1), RawScoreQuantized: hit.RawScoreQuantized, IndexManifestID: hit.IndexManifestID, Approximate: hit.Approximate})

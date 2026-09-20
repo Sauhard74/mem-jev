@@ -67,7 +67,7 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 func (c *RetrievalChannel) score(query retrieval.Query, document retrieval.Document) int64 {
 	switch c.name {
 	case retrieval.ChannelExact:
-		if query.IntentHash != "" && query.IntentHash == document.IntentHash {
+		if query.IntentHash != "" && query.EffectSignatureHash != "" && query.IntentHash == document.IntentHash && query.EffectSignatureHash == document.EffectSignatureHash {
 			return 1_000_000
 		}
 	case retrieval.ChannelLexical:

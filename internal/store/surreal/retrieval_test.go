@@ -35,6 +35,10 @@ func TestSurrealRetrievalChannelsMatchImmutableSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	query, err = retrieval.BindEffectSignature(query, value.RetrievalDocument.EffectSignatureHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []retrieval.ChannelName{retrieval.ChannelExact, retrieval.ChannelLexical, retrieval.ChannelFacet, retrieval.ChannelGraph} {
 		t.Run(string(name), func(t *testing.T) {
 			channel, channelErr := NewRetrievalChannel(db, name, "idx_"+string(name)+".v1")

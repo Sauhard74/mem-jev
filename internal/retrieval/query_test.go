@@ -1,6 +1,7 @@
 package retrieval_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -130,6 +131,23 @@ func TestInputFromProtoPreservesTypedRequest(t *testing.T) {
 	input := retrieval.InputFromProto(req)
 	if input.Task != req.Task || len(input.Tools) != 1 || input.Tools[0].ContractVersionID != "tc_1" || input.MaxCandidates != 12 {
 		t.Fatalf("InputFromProto() = %#v", input)
+	}
+}
+
+func TestBindEffectSignatureIsServerSideAndChangesCanonicalIdentity(t *testing.T) {
+	query, err := retrieval.BuildQuery("tenant-a", "policy.v1", retrieval.AliasSet{}, validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := retrieval.BindEffectSignature(query, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.EffectSignatureHash == "" || bound.Hash == query.Hash || retrieval.ValidateQuery(bound) != nil {
+		t.Fatalf("bound query = %#v", bound)
+	}
+	if _, err = retrieval.BindEffectSignature(query, "client-controlled"); !errors.Is(err, retrieval.ErrInvalidQuery) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

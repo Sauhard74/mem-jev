@@ -29,6 +29,10 @@ func TestRetrievalChannelsUseLatestDocumentAtRequestedEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	query, err = retrieval.BindEffectSignature(query, first.RetrievalDocument.EffectSignatureHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []retrieval.ChannelName{retrieval.ChannelExact, retrieval.ChannelLexical, retrieval.ChannelFacet, retrieval.ChannelGraph, retrieval.ChannelVector} {
 		t.Run(string(name), func(t *testing.T) {
 			channel := memory.NewRetrievalChannel(repository, name)

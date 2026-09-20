@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -146,6 +147,46 @@ func (r *ProjectionRepository) RetrievalDocument(ctx context.Context, tenantID d
 		return retrieval.Document{}, projection.ErrProjectionNotFound
 	}
 	return document, nil
+}
+
+func (r *ProjectionRepository) RetrievalDocuments(ctx context.Context, tenantID domain.TenantID, versionIDs []string, epoch uint64) ([]retrieval.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenantID == "" || epoch == 0 || len(versionIDs) == 0 || len(versionIDs) > 1000 {
+		return nil, projection.ErrProjectionNotFound
+	}
+	wanted := make(map[string]struct{}, len(versionIDs))
+	for _, id := range versionIDs {
+		if id == "" {
+			return nil, projection.ErrProjectionNotFound
+		}
+		wanted[id] = struct{}{}
+	}
+	r.mu.RLock()
+	latestEpoch := make(map[string]uint64, len(wanted))
+	latest := make(map[string]retrieval.Document, len(wanted))
+	for key, document := range r.documents {
+		documentEpoch := r.documentEpoch[key]
+		if document.TenantID != tenantID || documentEpoch > epoch {
+			continue
+		}
+		if _, ok := wanted[document.ProcedureVersionID]; !ok || documentEpoch <= latestEpoch[document.ProcedureVersionID] {
+			continue
+		}
+		latestEpoch[document.ProcedureVersionID], latest[document.ProcedureVersionID] = documentEpoch, document
+	}
+	r.mu.RUnlock()
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]retrieval.Document, len(ids))
+	for index, id := range ids {
+		result[index] = latest[id]
+	}
+	return result, nil
 }
 
 func documentKey(tenantID domain.TenantID, versionID string, epoch uint64) string {

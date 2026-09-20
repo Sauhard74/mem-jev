@@ -3,7 +3,7 @@ package surreal
 const exactCandidateQuery = `
 SELECT procedure_version_id, projection_epoch, 1.0 AS score
 FROM retrieval_document
-WHERE tenant_id = $tenant_id AND projection_epoch <= $epoch AND intent_hash = $intent_hash
+WHERE tenant_id = $tenant_id AND projection_epoch <= $epoch AND intent_hash = $intent_hash AND effect_signature_hash = $effect_hash
 ORDER BY projection_epoch DESC, procedure_version_id ASC
 LIMIT $scan_limit`
 

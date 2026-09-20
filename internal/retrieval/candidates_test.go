@@ -71,6 +71,12 @@ func TestCollectCandidatesIsIndependentOfChannelAndHitInputOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for index := range left.Results {
+		left.Results[index].LatencyMicros = 0
+	}
+	for index := range right.Results {
+		right.Results[index].LatencyMicros = 0
+	}
 	if !reflect.DeepEqual(left, right) {
 		t.Fatalf("order changed output:\n%#v\n%#v", left, right)
 	}

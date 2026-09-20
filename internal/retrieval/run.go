@@ -318,11 +318,13 @@ func validateCanonicalRun(run *Run) error {
 		}
 		ranked[item.VersionID] = item
 	}
-	for index, versionID := range run.SelectedVersionIDs {
+	var previousSelectedRank uint32
+	for _, versionID := range run.SelectedVersionIDs {
 		item, ok := ranked[versionID]
-		if !ok || item.Rank != uint32(index+1) {
+		if !ok || item.Rank <= previousSelectedRank {
 			return ErrInvalidRun
 		}
+		previousSelectedRank = item.Rank
 	}
 	return nil
 }
