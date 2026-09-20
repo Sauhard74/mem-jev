@@ -17,6 +17,13 @@ import (
 
 func main() { os.Exit(run()) }
 
+func surrealAuthScope() storesurreal.AuthScope {
+	if scope := os.Getenv("MEMJEV_SURREAL_AUTH_SCOPE"); scope != "" {
+		return storesurreal.AuthScope(scope)
+	}
+	return storesurreal.AuthScopeRoot
+}
+
 func run() int {
 	if len(os.Args) != 2 || os.Args[1] != "erase-tenant" {
 		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant < request.json")
@@ -33,7 +40,7 @@ func run() int {
 	defer cancel()
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: os.Getenv("MEMJEV_SURREAL_ENDPOINT"), Namespace: os.Getenv("MEMJEV_SURREAL_NAMESPACE"), Database: os.Getenv("MEMJEV_SURREAL_DATABASE"),
-		Username: os.Getenv("MEMJEV_SURREAL_USER"), Password: os.Getenv("MEMJEV_SURREAL_PASSWORD"), AuthScope: storesurreal.AuthScope(os.Getenv("MEMJEV_SURREAL_AUTH_SCOPE")),
+		Username: os.Getenv("MEMJEV_SURREAL_USER"), Password: os.Getenv("MEMJEV_SURREAL_PASSWORD"), AuthScope: surrealAuthScope(),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "erasure dependency unavailable")

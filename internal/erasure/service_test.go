@@ -71,7 +71,9 @@ func (a *recordingArchive) EraseTenant(context.Context, string) (uint64, error) 
 	if a.order != nil {
 		*a.order = append(*a.order, "archive")
 	}
-	return a.deleted, a.err
+	deleted := a.deleted
+	a.deleted = 0
+	return deleted, a.err
 }
 
 type recordingRepository struct {
@@ -79,11 +81,18 @@ type recordingRepository struct {
 	receipt Receipt
 }
 
+func (r *recordingRepository) FindErasure(_ context.Context, _ string) (Receipt, bool, error) {
+	return r.receipt, r.receipt.ContentHash != "", nil
+}
+
 func (r *recordingRepository) CommitErasure(_ context.Context, _ string, receipt Receipt) (Receipt, error) {
 	if r.order != nil {
 		*r.order = append(*r.order, "database")
 	}
 	if r.receipt.ContentHash != "" {
+		if r.receipt.ContentHash != receipt.ContentHash {
+			return Receipt{}, ErrConflict
+		}
 		return r.receipt, nil
 	}
 	r.receipt = receipt

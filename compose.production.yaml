@@ -21,11 +21,16 @@ services:
       MEMJEV_ARCHIVE_KMS_KEY_ID: "${MEMJEV_ARCHIVE_KMS_KEY_ID:-}"
       MEMJEV_RETRIEVAL_QUERY_KEY_ID: "${MEMJEV_RETRIEVAL_QUERY_KEY_ID:?}"
       MEMJEV_RETRIEVAL_QUERY_KEY_BASE64: "${MEMJEV_RETRIEVAL_QUERY_KEY_BASE64:?}"
+      MEMJEV_JEV_ENABLED: "true"
+      MEMJEV_JEV_MODEL: "${MEMJEV_JEV_MODEL:?pinned Jev model required}"
+      MEMJEV_JEV_API_KEY_FILE: /run/secrets/jev-api-key
       MEMJEV_OTLP_ENDPOINT: "${MEMJEV_OTLP_ENDPOINT:?}"
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?}"
       AWS_EC2_METADATA_DISABLED: "true"
-    volumes: ["${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"]
+    volumes:
+      - "${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"
+      - "${MEMJEV_JEV_API_KEY_HOST_FILE:?}:/run/secrets/jev-api-key:ro"
     networks: [private]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]

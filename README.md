@@ -65,6 +65,12 @@ See [Jev operations](docs/runbooks/jev.md) before enabling tenant traffic. The l
 
 - [System design](docs/superpowers/specs/2026-09-20-procedural-memory-platform-design.md)
 - [Jev judgment-ledger design](docs/superpowers/specs/2026-09-20-jev-judgment-ledger-design.md)
+- [Production deployment and rollback](docs/runbooks/production-deploy.md)
+- [Encrypted backup and verified restore](docs/runbooks/backup-restore.md)
+
+## Controlled production launch
+
+Before the first hosted deployment, configure immutable image digests and production dependencies, run `make production-preflight`, create an encrypted backup, and deploy with `scripts/deploy-production.sh`. Operator-only tenant erasure is available through `go run ./cmd/admin erase-tenant` with a strict JSON request on standard input; the tenant identifier is never placed in command arguments or the durable receipt. Keep the previous image digests available for `scripts/rollback-production.sh`.
 - [Local development and release qualification](docs/runbooks/local-development.md)
 - [Retrieval operations](docs/runbooks/retrieval.md)
 - [Evidence-pipeline operations](docs/runbooks/evidence-pipeline.md)

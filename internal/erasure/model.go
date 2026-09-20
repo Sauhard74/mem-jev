@@ -35,7 +35,7 @@ func NewReceipt(requestID, tenantID string, deleted uint64, completedAt time.Tim
 	if !requestPattern.MatchString(requestID) || !tenantPattern.MatchString(tenantID) || completedAt.IsZero() {
 		return Receipt{}, ErrInvalidRequest
 	}
-	_, tenantHash, err := canonical.MarshalAndHash(tenantID)
+	tenantHash, err := TenantHash(tenantID)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -46,6 +46,14 @@ func NewReceipt(requestID, tenantID string, deleted uint64, completedAt time.Tim
 	}
 	receipt.CanonicalJSON, receipt.ContentHash = encoded, hash
 	return receipt, nil
+}
+
+func TenantHash(tenantID string) (string, error) {
+	if !tenantPattern.MatchString(tenantID) {
+		return "", ErrInvalidRequest
+	}
+	_, hash, err := canonical.MarshalAndHash(tenantID)
+	return hash, err
 }
 
 func ValidateReceipt(receipt Receipt) error {

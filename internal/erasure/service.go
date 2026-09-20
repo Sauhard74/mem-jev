@@ -11,6 +11,7 @@ type ArchiveEraser interface {
 }
 
 type Repository interface {
+	FindErasure(context.Context, string) (Receipt, bool, error)
 	CommitErasure(context.Context, string, Receipt) (Receipt, error)
 }
 
@@ -33,6 +34,15 @@ func (service *Service) Erase(ctx context.Context, request Request) (Receipt, er
 	}
 	if err := ctx.Err(); err != nil {
 		return Receipt{}, err
+	}
+	if existing, found, err := service.repository.FindErasure(ctx, request.RequestID); err != nil {
+		return Receipt{}, err
+	} else if found {
+		wantTenantHash, hashErr := TenantHash(request.TenantID)
+		if hashErr != nil || existing.TenantHash != wantTenantHash {
+			return Receipt{}, ErrConflict
+		}
+		return existing, nil
 	}
 	deleted, err := service.archives.EraseTenant(ctx, request.TenantID)
 	if err != nil {

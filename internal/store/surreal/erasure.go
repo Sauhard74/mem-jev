@@ -16,6 +16,17 @@ type ErasureRepository struct{ db *surrealdb.DB }
 
 func NewErasureRepository(db *surrealdb.DB) *ErasureRepository { return &ErasureRepository{db: db} }
 
+func (repository *ErasureRepository) FindErasure(ctx context.Context, requestID string) (erasure.Receipt, bool, error) {
+	if repository == nil || repository.db == nil {
+		return erasure.Receipt{}, false, erasure.ErrInvalidRequest
+	}
+	receipt, found, err := readErasureReceipt(ctx, repository.db, requestID)
+	if err != nil {
+		return erasure.Receipt{}, false, databaseFailure("read erasure receipt", err)
+	}
+	return receipt, found, nil
+}
+
 var tenantErasureTables = []string{
 	"retrieval_uses_tool", "retrieval_requires_resource", "retrieval_has_effect", "retrieval_has_prefix",
 	"contains", "depends_on", "consumes", "produces", "verified_by", "failed_under", "supersedes", "derived_from", "supported_by",
@@ -35,6 +46,10 @@ func (repository *ErasureRepository) CommitErasure(ctx context.Context, tenantID
 		return erasure.Receipt{}, err
 	}
 	if repository == nil || repository.db == nil || strings.TrimSpace(tenantID) == "" || erasure.ValidateReceipt(receipt) != nil {
+		return erasure.Receipt{}, erasure.ErrInvalidRequest
+	}
+	wantTenantHash, hashErr := erasure.TenantHash(tenantID)
+	if hashErr != nil || receipt.TenantHash != wantTenantHash {
 		return erasure.Receipt{}, erasure.ErrInvalidRequest
 	}
 	if existing, found, lookupErr := readErasureReceipt(ctx, repository.db, receipt.RequestID); lookupErr != nil {
