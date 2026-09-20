@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+import "buf/validate/validate.proto";
+import "memjev/v1/common.proto";
+
+message AvailableTool {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 256}];
+  string contract_version_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+}
+
+message HarnessIdentity {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+  string version = 2 [(buf.validate.field).string.max_len = 128];
+}
+
+message QueryFact {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+  string value = 2 [(buf.validate.field).string.max_len = 4096];
+}
+
+message AccessibleResource {
+  string type = 1 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+  string namespace = 2 [(buf.validate.field).string.max_len = 128];
+  string identity = 3 [(buf.validate.field).string = {min_len: 1, max_len: 2048}];
+  string schema_version = 4 [(buf.validate.field).string.max_len = 128];
+}
+
+message RetrieveRequest {
+  string task = 1 [(buf.validate.field).string = {min_len: 1, max_len: 1048576}];
+  repeated AvailableTool tools = 2 [(buf.validate.field).repeated = {min_items: 1, max_items: 256}];
+  HarnessIdentity harness = 3 [(buf.validate.field).required = true];
+  repeated QueryFact environment = 4 [(buf.validate.field).repeated.max_items = 256];
+  repeated AccessibleResource resources = 5 [(buf.validate.field).repeated.max_items = 512];
+  repeated QueryFact constraints = 6 [(buf.validate.field).repeated.max_items = 256];
+  repeated string forbidden_effects = 7 [(buf.validate.field).repeated.max_items = 256];
+  RiskClass risk_class = 8 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  LatencyClass latency_class = 9 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  uint32 max_candidates = 10 [(buf.validate.field).uint32 = {gte: 1, lte: 100}];
+}
+
+message RetrievalCandidate {
+  string procedure_version_id = 1;
+  string procedure_id = 2;
+  int64 final_score = 3;
+  uint32 rank = 4;
+  CandidateLifecycle lifecycle = 5;
+  bool observed_end_to_end = 6;
+  bool advisory_only = 7;
+}
+
+message RetrievalProvenance {
+  uint64 projection_epoch = 1;
+  string query_hash = 2;
+  string policy_version = 3;
+  string ranker_version = 4;
+  repeated string index_manifest_ids = 5;
+  repeated string degraded_channels = 6;
+  bool approximate_candidates = 7;
+}
+
+message RetrieveResponse {
+  string retrieval_run_id = 1;
+  RetrievalDisposition disposition = 2;
+  repeated RetrievalCandidate candidates = 3;
+  string abstention_code = 4;
+  RetrievalProvenance provenance = 5;
+}
+
+message ExplainRetrievalRequest {
+  string retrieval_run_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 80}];
+}
+
+message ExplanationFact {
+  string code = 1;
+  string subject_id = 2;
+  string field = 3;
+  string expected = 4;
+  string observed = 5;
+}
+
+message CandidateExplanation {
+  string procedure_version_id = 1;
+  bool eligible = 2;
+  repeated string source_channels = 3;
+  repeated ExplanationFact facts = 4;
+  int64 fused_rank_score = 5;
+  int64 final_score = 6;
+  uint32 final_rank = 7;
+}
+
+message ExplainRetrievalResponse {
+  string retrieval_run_id = 1;
+  RetrievalDisposition disposition = 2;
+  string abstention_code = 3;
+  RetrievalProvenance provenance = 4;
+  repeated CandidateExplanation candidates = 5;
+}
+
+service RetrievalService {
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse) {}
+  rpc ExplainRetrieval(ExplainRetrievalRequest) returns (ExplainRetrievalResponse) {}
+}

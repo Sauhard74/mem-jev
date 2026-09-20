@@ -450,6 +450,214 @@ func (OutcomeDisposition) EnumDescriptor() ([]byte, []int) {
 	return file_memjev_v1_common_proto_rawDescGZIP(), []int{7}
 }
 
+type RiskClass int32
+
+const (
+	RiskClass_RISK_CLASS_UNSPECIFIED RiskClass = 0
+	RiskClass_RISK_CLASS_LOW         RiskClass = 1
+	RiskClass_RISK_CLASS_MEDIUM      RiskClass = 2
+	RiskClass_RISK_CLASS_HIGH        RiskClass = 3
+	RiskClass_RISK_CLASS_CRITICAL    RiskClass = 4
+)
+
+// Enum value maps for RiskClass.
+var (
+	RiskClass_name = map[int32]string{
+		0: "RISK_CLASS_UNSPECIFIED",
+		1: "RISK_CLASS_LOW",
+		2: "RISK_CLASS_MEDIUM",
+		3: "RISK_CLASS_HIGH",
+		4: "RISK_CLASS_CRITICAL",
+	}
+	RiskClass_value = map[string]int32{
+		"RISK_CLASS_UNSPECIFIED": 0,
+		"RISK_CLASS_LOW":         1,
+		"RISK_CLASS_MEDIUM":      2,
+		"RISK_CLASS_HIGH":        3,
+		"RISK_CLASS_CRITICAL":    4,
+	}
+)
+
+func (x RiskClass) Enum() *RiskClass {
+	p := new(RiskClass)
+	*p = x
+	return p
+}
+
+func (x RiskClass) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RiskClass) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[8].Descriptor()
+}
+
+func (RiskClass) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[8]
+}
+
+func (x RiskClass) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RiskClass.Descriptor instead.
+func (RiskClass) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{8}
+}
+
+type LatencyClass int32
+
+const (
+	LatencyClass_LATENCY_CLASS_UNSPECIFIED LatencyClass = 0
+	LatencyClass_LATENCY_CLASS_INTERACTIVE LatencyClass = 1
+	LatencyClass_LATENCY_CLASS_STANDARD    LatencyClass = 2
+	LatencyClass_LATENCY_CLASS_BATCH       LatencyClass = 3
+)
+
+// Enum value maps for LatencyClass.
+var (
+	LatencyClass_name = map[int32]string{
+		0: "LATENCY_CLASS_UNSPECIFIED",
+		1: "LATENCY_CLASS_INTERACTIVE",
+		2: "LATENCY_CLASS_STANDARD",
+		3: "LATENCY_CLASS_BATCH",
+	}
+	LatencyClass_value = map[string]int32{
+		"LATENCY_CLASS_UNSPECIFIED": 0,
+		"LATENCY_CLASS_INTERACTIVE": 1,
+		"LATENCY_CLASS_STANDARD":    2,
+		"LATENCY_CLASS_BATCH":       3,
+	}
+)
+
+func (x LatencyClass) Enum() *LatencyClass {
+	p := new(LatencyClass)
+	*p = x
+	return p
+}
+
+func (x LatencyClass) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LatencyClass) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[9].Descriptor()
+}
+
+func (LatencyClass) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[9]
+}
+
+func (x LatencyClass) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LatencyClass.Descriptor instead.
+func (LatencyClass) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{9}
+}
+
+type RetrievalDisposition int32
+
+const (
+	RetrievalDisposition_RETRIEVAL_DISPOSITION_UNSPECIFIED RetrievalDisposition = 0
+	RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED    RetrievalDisposition = 1
+	RetrievalDisposition_RETRIEVAL_DISPOSITION_ABSTAINED   RetrievalDisposition = 2
+)
+
+// Enum value maps for RetrievalDisposition.
+var (
+	RetrievalDisposition_name = map[int32]string{
+		0: "RETRIEVAL_DISPOSITION_UNSPECIFIED",
+		1: "RETRIEVAL_DISPOSITION_SELECTED",
+		2: "RETRIEVAL_DISPOSITION_ABSTAINED",
+	}
+	RetrievalDisposition_value = map[string]int32{
+		"RETRIEVAL_DISPOSITION_UNSPECIFIED": 0,
+		"RETRIEVAL_DISPOSITION_SELECTED":    1,
+		"RETRIEVAL_DISPOSITION_ABSTAINED":   2,
+	}
+)
+
+func (x RetrievalDisposition) Enum() *RetrievalDisposition {
+	p := new(RetrievalDisposition)
+	*p = x
+	return p
+}
+
+func (x RetrievalDisposition) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RetrievalDisposition) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[10].Descriptor()
+}
+
+func (RetrievalDisposition) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[10]
+}
+
+func (x RetrievalDisposition) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RetrievalDisposition.Descriptor instead.
+func (RetrievalDisposition) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{10}
+}
+
+type CandidateLifecycle int32
+
+const (
+	CandidateLifecycle_CANDIDATE_LIFECYCLE_UNSPECIFIED CandidateLifecycle = 0
+	CandidateLifecycle_CANDIDATE_LIFECYCLE_CANDIDATE   CandidateLifecycle = 1
+	CandidateLifecycle_CANDIDATE_LIFECYCLE_TRIAL       CandidateLifecycle = 2
+	CandidateLifecycle_CANDIDATE_LIFECYCLE_ACTIVE      CandidateLifecycle = 3
+)
+
+// Enum value maps for CandidateLifecycle.
+var (
+	CandidateLifecycle_name = map[int32]string{
+		0: "CANDIDATE_LIFECYCLE_UNSPECIFIED",
+		1: "CANDIDATE_LIFECYCLE_CANDIDATE",
+		2: "CANDIDATE_LIFECYCLE_TRIAL",
+		3: "CANDIDATE_LIFECYCLE_ACTIVE",
+	}
+	CandidateLifecycle_value = map[string]int32{
+		"CANDIDATE_LIFECYCLE_UNSPECIFIED": 0,
+		"CANDIDATE_LIFECYCLE_CANDIDATE":   1,
+		"CANDIDATE_LIFECYCLE_TRIAL":       2,
+		"CANDIDATE_LIFECYCLE_ACTIVE":      3,
+	}
+)
+
+func (x CandidateLifecycle) Enum() *CandidateLifecycle {
+	p := new(CandidateLifecycle)
+	*p = x
+	return p
+}
+
+func (x CandidateLifecycle) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CandidateLifecycle) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_common_proto_enumTypes[11].Descriptor()
+}
+
+func (CandidateLifecycle) Type() protoreflect.EnumType {
+	return &file_memjev_v1_common_proto_enumTypes[11]
+}
+
+func (x CandidateLifecycle) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CandidateLifecycle.Descriptor instead.
+func (CandidateLifecycle) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_common_proto_rawDescGZIP(), []int{11}
+}
+
 type Field struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -554,7 +762,27 @@ const file_memjev_v1_common_proto_rawDesc = "" +
 	"\x12OutcomeDisposition\x12#\n" +
 	"\x1fOUTCOME_DISPOSITION_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cOUTCOME_DISPOSITION_ACCEPTED\x10\x01\x12!\n" +
-	"\x1dOUTCOME_DISPOSITION_DUPLICATE\x10\x02B\x96\x01\n" +
+	"\x1dOUTCOME_DISPOSITION_DUPLICATE\x10\x02*\x80\x01\n" +
+	"\tRiskClass\x12\x1a\n" +
+	"\x16RISK_CLASS_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eRISK_CLASS_LOW\x10\x01\x12\x15\n" +
+	"\x11RISK_CLASS_MEDIUM\x10\x02\x12\x13\n" +
+	"\x0fRISK_CLASS_HIGH\x10\x03\x12\x17\n" +
+	"\x13RISK_CLASS_CRITICAL\x10\x04*\x81\x01\n" +
+	"\fLatencyClass\x12\x1d\n" +
+	"\x19LATENCY_CLASS_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19LATENCY_CLASS_INTERACTIVE\x10\x01\x12\x1a\n" +
+	"\x16LATENCY_CLASS_STANDARD\x10\x02\x12\x17\n" +
+	"\x13LATENCY_CLASS_BATCH\x10\x03*\x86\x01\n" +
+	"\x14RetrievalDisposition\x12%\n" +
+	"!RETRIEVAL_DISPOSITION_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eRETRIEVAL_DISPOSITION_SELECTED\x10\x01\x12#\n" +
+	"\x1fRETRIEVAL_DISPOSITION_ABSTAINED\x10\x02*\x9b\x01\n" +
+	"\x12CandidateLifecycle\x12#\n" +
+	"\x1fCANDIDATE_LIFECYCLE_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dCANDIDATE_LIFECYCLE_CANDIDATE\x10\x01\x12\x1d\n" +
+	"\x19CANDIDATE_LIFECYCLE_TRIAL\x10\x02\x12\x1e\n" +
+	"\x1aCANDIDATE_LIFECYCLE_ACTIVE\x10\x03B\x96\x01\n" +
 	"\rcom.memjev.v1B\vCommonProtoP\x01Z3github.com/sauhard74/mem-jev/gen/memjev/v1;memjevv1\xa2\x02\x03MXX\xaa\x02\tMemjev.V1\xca\x02\tMemjev\\V1\xe2\x02\x15Memjev\\V1\\GPBMetadata\xea\x02\n" +
 	"Memjev::V1b\x06proto3"
 
@@ -570,18 +798,22 @@ func file_memjev_v1_common_proto_rawDescGZIP() []byte {
 	return file_memjev_v1_common_proto_rawDescData
 }
 
-var file_memjev_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_memjev_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
 var file_memjev_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_memjev_v1_common_proto_goTypes = []any{
-	(ConsentMode)(0),        // 0: memjev.v1.ConsentMode
-	(EventKind)(0),          // 1: memjev.v1.EventKind
-	(ToolResultState)(0),    // 2: memjev.v1.ToolResultState
-	(IngestDisposition)(0),  // 3: memjev.v1.IngestDisposition
-	(OutcomeState)(0),       // 4: memjev.v1.OutcomeState
-	(EvidenceClass)(0),      // 5: memjev.v1.EvidenceClass
-	(EvidenceVerdict)(0),    // 6: memjev.v1.EvidenceVerdict
-	(OutcomeDisposition)(0), // 7: memjev.v1.OutcomeDisposition
-	(*Field)(nil),           // 8: memjev.v1.Field
+	(ConsentMode)(0),          // 0: memjev.v1.ConsentMode
+	(EventKind)(0),            // 1: memjev.v1.EventKind
+	(ToolResultState)(0),      // 2: memjev.v1.ToolResultState
+	(IngestDisposition)(0),    // 3: memjev.v1.IngestDisposition
+	(OutcomeState)(0),         // 4: memjev.v1.OutcomeState
+	(EvidenceClass)(0),        // 5: memjev.v1.EvidenceClass
+	(EvidenceVerdict)(0),      // 6: memjev.v1.EvidenceVerdict
+	(OutcomeDisposition)(0),   // 7: memjev.v1.OutcomeDisposition
+	(RiskClass)(0),            // 8: memjev.v1.RiskClass
+	(LatencyClass)(0),         // 9: memjev.v1.LatencyClass
+	(RetrievalDisposition)(0), // 10: memjev.v1.RetrievalDisposition
+	(CandidateLifecycle)(0),   // 11: memjev.v1.CandidateLifecycle
+	(*Field)(nil),             // 12: memjev.v1.Field
 }
 var file_memjev_v1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -601,7 +833,7 @@ func file_memjev_v1_common_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memjev_v1_common_proto_rawDesc), len(file_memjev_v1_common_proto_rawDesc)),
-			NumEnums:      8,
+			NumEnums:      12,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,

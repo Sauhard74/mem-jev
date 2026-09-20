@@ -51,6 +51,42 @@ func TestOutcomeRequestDoesNotExposeTenantOrIdempotency(t *testing.T) {
 	}
 }
 
+func TestRetrievalRequestDoesNotExposeServerAuthority(t *testing.T) {
+	fields := (&memjevv1.RetrieveRequest{}).ProtoReflect().Descriptor().Fields()
+	for _, forbidden := range []string{"tenant_id", "snapshot_id", "projection_epoch", "policy_version", "ranker_version", "embedding_version", "idempotency_key"} {
+		if fields.ByName(protoreflect.Name(forbidden)) != nil {
+			t.Fatalf("%s must be selected by the authenticated server context", forbidden)
+		}
+	}
+}
+
+func TestValidateRetrievalRejectsInvalidBoundaryValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*memjevv1.RetrieveRequest)
+		wantErr string
+	}{
+		{name: "task", mutate: func(req *memjevv1.RetrieveRequest) { req.Task = "  " }, wantErr: "task"},
+		{name: "tools", mutate: func(req *memjevv1.RetrieveRequest) { req.Tools = nil }, wantErr: "tools"},
+		{name: "duplicate tool", mutate: func(req *memjevv1.RetrieveRequest) {
+			req.Tools = append(req.Tools, proto.Clone(req.Tools[0]).(*memjevv1.AvailableTool))
+		}, wantErr: "tools[1]"},
+		{name: "duplicate environment", mutate: func(req *memjevv1.RetrieveRequest) {
+			req.Environment = append(req.Environment, &memjevv1.QueryFact{Name: " os ", Value: "darwin"})
+		}, wantErr: "environment[1]"},
+		{name: "max candidates", mutate: func(req *memjevv1.RetrieveRequest) { req.MaxCandidates = 101 }, wantErr: "max_candidates"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := validRetrievalRequest()
+			tt.mutate(req)
+			if err := contracts.ValidateRetrieval(req); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateRetrieval() error = %v; want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateOutcomeRequiresTraceAndEvidence(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -127,5 +163,18 @@ func validRequest() *memjevv1.IngestTraceRequest {
 				State: memjevv1.ToolResultState_TOOL_RESULT_STATE_SUCCESS,
 			},
 		}},
+	}
+}
+
+func validRetrievalRequest() *memjevv1.RetrieveRequest {
+	return &memjevv1.RetrieveRequest{
+		Task:          "ship the release",
+		Tools:         []*memjevv1.AvailableTool{{Name: "shell", ContractVersionId: "tc_1"}},
+		Harness:       &memjevv1.HarnessIdentity{Name: "codex", Version: "1"},
+		Environment:   []*memjevv1.QueryFact{{Name: "os", Value: "linux"}},
+		Resources:     []*memjevv1.AccessibleResource{{Type: "repository", Identity: "src/app"}},
+		RiskClass:     memjevv1.RiskClass_RISK_CLASS_MEDIUM,
+		LatencyClass:  memjevv1.LatencyClass_LATENCY_CLASS_INTERACTIVE,
+		MaxCandidates: 20,
 	}
 }
