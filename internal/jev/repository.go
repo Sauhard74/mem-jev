@@ -192,6 +192,9 @@ func (repository *MemoryRepository) Commit(ctx context.Context, baseKey, expecte
 		if current.ContentHash != expectedPredecessorHash {
 			return cloneRecord(current), false, nil
 		}
+		if record.CreatedAt.Before(current.ReusableUntil) {
+			return cloneRecord(current), false, nil
+		}
 	} else if expectedPredecessorHash != "" {
 		return JudgmentRecord{}, false, ErrInvalidJudgment
 	}

@@ -97,6 +97,30 @@ func TestMemoryJudgmentRepositorySelectsOneConcurrentWinner(t *testing.T) {
 	}
 }
 
+func TestMemoryJudgmentRepositoryRejectsEarlySuccessor(t *testing.T) {
+	repository := NewMemoryRepository()
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	first := validRecordAt(t, "tenant_a", 875_000, now)
+	if _, created, err := repository.Commit(context.Background(), first.BaseKey, "", first); err != nil || !created {
+		t.Fatalf("first commit created=%v err=%v", created, err)
+	}
+	successor, err := NewJudgmentRecord(JudgmentRecordInput{
+		KeyInput: JudgmentKeyInput{
+			TenantID: first.TenantID, QueryHash: first.QueryHash, ProcedureVersionID: first.ProcedureVersionID,
+			DocumentHash: first.DocumentHash, EnvironmentHash: first.EnvironmentHash, PolicyManifestID: first.PolicyManifestID,
+			RubricManifestID: first.RubricManifestID, Provider: first.Provider, Model: first.Model, PredecessorHash: first.ContentHash,
+		},
+		Judgment: first.Judgment, Usage: first.Usage, CreatedAt: now.Add(time.Minute), ReusableUntil: now.Add(25 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	winner, created, err := repository.Commit(context.Background(), first.BaseKey, first.ContentHash, successor)
+	if err != nil || created || winner.ContentHash != first.ContentHash {
+		t.Fatalf("early successor winner=%#v created=%v err=%v", winner, created, err)
+	}
+}
+
 func validRecord(t *testing.T, tenant domain.TenantID, intent int32) JudgmentRecord {
 	t.Helper()
 	return validRecordAt(t, tenant, intent, time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC))

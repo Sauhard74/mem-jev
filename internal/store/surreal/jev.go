@@ -134,6 +134,12 @@ func (repository *JevRepository) commitOnce(ctx context.Context, baseKey, expect
 		}
 		return current, false, nil
 	}
+	if currentFound && record.CreatedAt.Before(current.ReusableUntil) {
+		if cancelErr := tx.Cancel(ctx); cancelErr != nil {
+			return jev.JudgmentRecord{}, false, cancelErr
+		}
+		return current, false, nil
+	}
 	if !currentFound && expectedPredecessorHash != "" {
 		return jev.JudgmentRecord{}, false, jev.ErrInvalidJudgment
 	}

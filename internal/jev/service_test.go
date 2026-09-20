@@ -114,6 +114,49 @@ func TestServiceRenewsExpiredJudgmentAsImmutableSuccessor(t *testing.T) {
 	}
 }
 
+func TestServiceRechecksFreshWinnerBeforeCrossReplicaRenewal(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	shared := NewMemoryRepository()
+	ready := make(chan struct{})
+	release := make(chan struct{})
+	aRepository := &barrierLookupRepository{MemoryRepository: shared, ready: ready, release: release}
+	aEvaluator := &fakeEvaluator{}
+	bEvaluator := &fakeEvaluator{}
+	aService := newTestService(t, aEvaluator, aRepository, ServiceLimits{})
+	bService := newTestService(t, bEvaluator, shared, ServiceLimits{})
+	aService.clock = func() time.Time { return now }
+	bService.clock = func() time.Time { return now }
+	request := testServiceRequest(t, "tenant_a", 78)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	type outcome struct {
+		result ServiceResult
+		err    error
+	}
+	aDone := make(chan outcome, 1)
+	go func() {
+		result, err := aService.Judge(ctx, request)
+		aDone <- outcome{result: result, err: err}
+	}()
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		t.Fatal("service A did not reach the renewal barrier")
+	}
+	bResult, err := bService.Judge(ctx, request)
+	if err != nil || bResult.Disposition != DispositionCommitted {
+		t.Fatalf("service B result = %#v, %v", bResult, err)
+	}
+	close(release)
+	aOutcome := <-aDone
+	if aOutcome.err != nil || aOutcome.result.Disposition != DispositionCacheHit || aOutcome.result.Record.ContentHash != bResult.Record.ContentHash {
+		t.Fatalf("service A result = %#v, %v", aOutcome.result, aOutcome.err)
+	}
+	if aEvaluator.calls.Load() != 0 || bEvaluator.calls.Load() != 1 {
+		t.Fatalf("provider calls: A=%d B=%d", aEvaluator.calls.Load(), bEvaluator.calls.Load())
+	}
+}
+
 func TestServiceDegradesAndOpensCircuit(t *testing.T) {
 	evaluator := &fakeEvaluator{err: &ProviderError{Code: FailureProvider, StatusCode: 500}}
 	service := newTestService(t, evaluator, NewMemoryRepository(), ServiceLimits{CircuitFailureThreshold: 2, CircuitOpenDuration: time.Minute})
@@ -219,6 +262,25 @@ func TestLedgerFailureReleasesHalfOpenCircuitProbe(t *testing.T) {
 type toggleCommitRepository struct {
 	*MemoryRepository
 	fail bool
+}
+
+type barrierLookupRepository struct {
+	*MemoryRepository
+	calls   atomic.Int32
+	ready   chan struct{}
+	release chan struct{}
+}
+
+func (repository *barrierLookupRepository) LookupReusable(ctx context.Context, _ domain.TenantID, _ string, _ time.Time) (JudgmentRecord, error) {
+	if repository.calls.Add(1) == 2 {
+		close(repository.ready)
+		select {
+		case <-repository.release:
+		case <-ctx.Done():
+			return JudgmentRecord{}, ctx.Err()
+		}
+	}
+	return JudgmentRecord{}, ErrJudgmentNotFound
 }
 
 func (repository *toggleCommitRepository) Commit(ctx context.Context, baseKey, expectedPredecessorHash string, record JudgmentRecord) (JudgmentRecord, bool, error) {

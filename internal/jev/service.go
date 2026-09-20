@@ -147,6 +147,9 @@ func (service *Service) judgeMiss(ctx context.Context, key string, request Servi
 	keyInput := request.KeyInput
 	expectedPredecessorHash := ""
 	if current, err := service.repository.Current(ctx, request.KeyInput.TenantID, key); err == nil {
+		if now.Before(current.ReusableUntil) {
+			return resultFromRecord(DispositionCacheHit, current, false), nil
+		}
 		expectedPredecessorHash = current.ContentHash
 		keyInput.PredecessorHash = current.ContentHash
 	} else if !errors.Is(err, ErrJudgmentNotFound) {

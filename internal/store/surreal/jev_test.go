@@ -46,6 +46,11 @@ func TestSurrealJevRepositoryContract(t *testing.T) {
 	if _, err = repository.LookupReusable(context.Background(), "tenant_a", first.Key, first.ReusableUntil); !errors.Is(err, jev.ErrJudgmentNotFound) {
 		t.Fatalf("expired lookup error = %v", err)
 	}
+	early := surrealJevSuccessor(t, first, 925_000, now.Add(time.Minute))
+	winner, created, err = repository.Commit(context.Background(), first.BaseKey, first.ContentHash, early)
+	if err != nil || created || winner.ContentHash != first.ContentHash {
+		t.Fatalf("early renewal = %#v, %v, %v", winner, created, err)
+	}
 	renewal := surrealJevSuccessor(t, first, 925_000, first.ReusableUntil.Add(time.Minute))
 	winner, created, err = repository.Commit(context.Background(), first.BaseKey, first.ContentHash, renewal)
 	if err != nil || !created || winner.ContentHash != renewal.ContentHash {
