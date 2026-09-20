@@ -85,7 +85,7 @@ func validRunInput(t *testing.T) retrieval.RunInput {
 	}
 	created := time.Date(2026, 9, 20, 1, 2, 3, 0, time.UTC)
 	return retrieval.RunInput{
-		ID: "rrun_" + strings.Repeat("a", 64), TenantID: "tenant_a", Query: query, QueryEnvelope: "enc.v1.key-a.nonce.ciphertext",
+		ID: "rrun_" + strings.Repeat("a", 64), TenantID: "tenant_a", Query: query, RequestContextHash: strings.Repeat("d", 64), QueryEnvelope: "enc.v1.key-a.nonce.ciphertext",
 		Snapshot:          retrieval.ServingSnapshot{ProjectionEpoch: 7, DocumentSetHash: strings.Repeat("b", 64), ServingConfigID: "rsc_" + strings.Repeat("c", 64), PolicyManifestID: "pol_1", RankerManifestID: "rnk_1", Indexes: []retrieval.SnapshotIndex{{Channel: retrieval.ChannelVector, ManifestID: "idx_vector", Approximate: true}, {Channel: retrieval.ChannelExact, ManifestID: "idx_exact"}}},
 		ChannelExecutions: []retrieval.ChannelExecution{{Channel: retrieval.ChannelExact, IndexManifestID: "idx_exact", HitCount: 1, Complete: true}, {Channel: retrieval.ChannelVector, IndexManifestID: "idx_vector", HitCount: 1, Approximate: true, Complete: true}},
 		Hits:              []retrieval.PersistedHit{{Channel: retrieval.ChannelExact, VersionID: "pv_a", Rank: 1, RawScoreQuantized: 100, IndexManifestID: "idx_exact"}, {Channel: retrieval.ChannelVector, VersionID: "pv_a", Rank: 1, RawScoreQuantized: 90, IndexManifestID: "idx_vector", Approximate: true}},

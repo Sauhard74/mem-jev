@@ -163,11 +163,29 @@ func (r *RetrievalRunRepository) AcquireServingSnapshot(ctx context.Context, ten
 	if err != nil || epochs == nil || len(*epochs) == 0 || len((*epochs)[0].Result) == 0 {
 		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
 	}
+	epoch := (*epochs)[0].Result[0]
+	type createdAtRow struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	createdRows, err := surrealdb.Query[[]createdAtRow](ctx, tx, `SELECT created_at FROM projection_epoch WHERE tenant_id = $tenant_id AND epoch = $epoch LIMIT 1`, map[string]any{"tenant_id": string(tenantID), "epoch": epoch.Epoch})
+	if err != nil || createdRows == nil || len(*createdRows) == 0 || len((*createdRows)[0].Result) == 0 || (*createdRows)[0].Result[0].CreatedAt.IsZero() {
+		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
+	}
+	vectorCreatedAt := time.Time{}
+	for _, index := range config.Indexes {
+		if index.Channel != retrieval.ChannelVector {
+			continue
+		}
+		manifestRows, queryErr := surrealdb.Query[[]createdAtRow](ctx, tx, `SELECT created_at FROM retrieval_index_manifest WHERE tenant_id = $tenant_id AND index_manifest_id = $manifest_id LIMIT 1`, map[string]any{"tenant_id": string(tenantID), "manifest_id": index.ManifestID})
+		if queryErr != nil || manifestRows == nil || len(*manifestRows) == 0 || len((*manifestRows)[0].Result) == 0 || (*manifestRows)[0].Result[0].CreatedAt.IsZero() {
+			return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
+		}
+		vectorCreatedAt = (*manifestRows)[0].Result[0].CreatedAt.UTC()
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return retrieval.ServingSnapshot{}, databaseFailure("commit serving snapshot", err)
 	}
-	epoch := (*epochs)[0].Result[0]
-	return retrieval.ServingSnapshot{ProjectionEpoch: epoch.Epoch, DocumentSetHash: epoch.Hash, ServingConfigID: config.ID, PolicyManifestID: config.PolicyManifestID, RankerManifestID: config.RankerManifestID, Indexes: append([]retrieval.SnapshotIndex(nil), config.Indexes...)}, nil
+	return retrieval.ServingSnapshot{ProjectionEpoch: epoch.Epoch, ProjectionCreatedAt: (*createdRows)[0].Result[0].CreatedAt.UTC(), VectorIndexCreatedAt: vectorCreatedAt, DocumentSetHash: epoch.Hash, ServingConfigID: config.ID, PolicyManifestID: config.PolicyManifestID, RankerManifestID: config.RankerManifestID, Indexes: append([]retrieval.SnapshotIndex(nil), config.Indexes...)}, nil
 }
 
 func (r *RetrievalRunRepository) SaveRetrievalRun(ctx context.Context, run retrieval.Run) (err error) {

@@ -58,11 +58,13 @@ func (r *RetrievalRunRepository) AcquireServingSnapshot(ctx context.Context, ten
 	r.projection.mu.RLock()
 	defer r.projection.mu.RUnlock()
 	epoch := r.projection.epochs[tenantID]
-	hash := r.projection.epochHistory[epochKey(tenantID, epoch)]
+	epochKey := epochKey(tenantID, epoch)
+	hash := r.projection.epochHistory[epochKey]
+	createdAt := r.projection.epochCreated[epochKey]
 	if epoch == 0 || hash == "" {
 		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
 	}
-	return retrieval.ServingSnapshot{ProjectionEpoch: epoch, DocumentSetHash: hash, ServingConfigID: config.ID, PolicyManifestID: config.PolicyManifestID, RankerManifestID: config.RankerManifestID, Indexes: append([]retrieval.SnapshotIndex(nil), config.Indexes...)}, nil
+	return retrieval.ServingSnapshot{ProjectionEpoch: epoch, ProjectionCreatedAt: createdAt, DocumentSetHash: hash, ServingConfigID: config.ID, PolicyManifestID: config.PolicyManifestID, RankerManifestID: config.RankerManifestID, Indexes: append([]retrieval.SnapshotIndex(nil), config.Indexes...)}, nil
 }
 
 func (r *RetrievalRunRepository) SaveRetrievalRun(ctx context.Context, run retrieval.Run) error {

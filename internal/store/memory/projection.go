@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
@@ -29,6 +30,7 @@ type ProjectionRepository struct {
 	epochs        map[domain.TenantID]uint64
 	epochHashes   map[domain.TenantID]string
 	epochHistory  map[string]string
+	epochCreated  map[string]time.Time
 }
 
 func NewProjectionRepository() *ProjectionRepository {
@@ -36,7 +38,7 @@ func NewProjectionRepository() *ProjectionRepository {
 		families: make(map[string]projection.Family), versions: make(map[string]projection.Version),
 		steps: make(map[string]projection.Step), edges: make(map[string]projection.Edge), negative: make(map[string]struct{}),
 		manifests: make(map[string]projection.Manifest), evidence: make(map[string]struct{}), canonical: make(map[string][]byte),
-		documents: make(map[string]retrieval.Document), documentEpoch: make(map[string]uint64), epochs: make(map[domain.TenantID]uint64), epochHashes: make(map[domain.TenantID]string), epochHistory: make(map[string]string),
+		documents: make(map[string]retrieval.Document), documentEpoch: make(map[string]uint64), epochs: make(map[domain.TenantID]uint64), epochHashes: make(map[domain.TenantID]string), epochHistory: make(map[string]string), epochCreated: make(map[string]time.Time),
 	}
 }
 
@@ -120,6 +122,7 @@ func (r *ProjectionRepository) Publish(ctx context.Context, value projection.Pro
 	}
 	r.epochHashes[value.TenantID] = documentSetHash
 	r.epochHistory[epochKey(value.TenantID, receipt.ProjectionEpoch)] = documentSetHash
+	r.epochCreated[epochKey(value.TenantID, receipt.ProjectionEpoch)] = value.CreatedAt.UTC()
 	receipt.RetrievalDocumentID = document.ID
 	key := documentKey(value.TenantID, value.Version.ID, receipt.ProjectionEpoch)
 	r.documents[key] = document

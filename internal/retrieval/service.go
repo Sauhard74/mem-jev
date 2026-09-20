@@ -169,6 +169,10 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 			return ServiceResponse{}, err
 		}
 	}
+	requestContextHash, err := retrievalRequestContextHash(request, query)
+	if err != nil {
+		return ServiceResponse{}, err
+	}
 	runID, err := s.runID(request.TenantID, request.RequestIdentityHash)
 	if err != nil {
 		return ServiceResponse{}, err
@@ -176,7 +180,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	if request.RequestIdentityHash != "" {
 		existing, findErr := s.repository.RetrievalRun(ctx, request.TenantID, runID)
 		if findErr == nil {
-			if existing.QueryHash != query.Hash {
+			if existing.QueryHash != query.Hash || existing.RequestContextHash != requestContextHash {
 				observability.RecordRetrievalReplayMismatch(ctx)
 				return ServiceResponse{}, &ServiceError{Code: "idempotency_conflict", RunID: runID, Err: ErrIdempotencyConflict}
 			}
@@ -193,6 +197,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	if err = s.validateSnapshotChannels(snapshot); err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "serving_config_mismatch", Err: err}
 	}
+	observability.RecordRetrievalSnapshot(ctx, s.clock().UTC(), snapshot.ProjectionCreatedAt, snapshot.VectorIndexCreatedAt, snapshot.RankerManifestID)
 	policy, err := s.manifests.EligibilityPolicy(ctx, request.TenantID, snapshot.PolicyManifestID)
 	if err != nil || policy.ID != snapshot.PolicyManifestID {
 		return ServiceResponse{}, &ServiceError{Code: "policy_manifest_unavailable", Err: ErrServiceUnavailable}
@@ -218,33 +223,26 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	}
 	executions, hits := persistedChannels(collection)
 	if missing := requiredDegradation(collection.Degraded, s.config.RequiredChannels); missing != "" {
-		run, buildErr := s.buildRun(runID, request.TenantID, query, envelope, snapshot, executions, hits, nil, nil, RunFailed, "required_channel_unavailable:"+missing, nil, started)
+		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunFailed, "required_channel_unavailable:"+missing, nil, started)
 		if buildErr != nil {
 			return ServiceResponse{}, buildErr
 		}
-		if saveErr := s.repository.SaveRetrievalRun(ctx, run); saveErr != nil {
-			observability.RecordRetrievalPersistenceFailure(ctx, "required_channel_unavailable")
-			return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: runID, Err: saveErr}
-		}
-		return ServiceResponse{}, &ServiceError{Code: "required_channel_unavailable", RunID: runID, Err: ErrServiceUnavailable}
+		return s.persistRun(ctx, run, collection)
 	}
 	versionIDs := make([]string, len(collection.Candidates))
 	for index, item := range collection.Candidates {
 		versionIDs[index] = item.VersionID
 	}
 	if len(versionIDs) == 0 {
-		return s.persistOutcome(ctx, runID, request.TenantID, query, envelope, snapshot, executions, hits, nil, nil, RunAbstained, "no_candidates", nil, started, collection)
+		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunAbstained, "no_candidates", nil, started, collection)
 	}
 	documents, err := s.documents.RetrievalDocuments(ctx, request.TenantID, versionIDs, snapshot.ProjectionEpoch)
 	if err != nil || len(documents) != len(versionIDs) {
-		run, buildErr := s.buildRun(runID, request.TenantID, query, envelope, snapshot, executions, hits, nil, nil, RunFailed, "candidate_snapshot_missing", nil, started)
+		run, buildErr := s.buildRun(runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, nil, nil, RunFailed, "candidate_snapshot_missing", nil, started)
 		if buildErr != nil {
 			return ServiceResponse{}, buildErr
 		}
-		if saveErr := s.repository.SaveRetrievalRun(ctx, run); saveErr != nil {
-			return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: runID, Err: saveErr}
-		}
-		return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: runID, Err: ErrServiceUnavailable}
+		return s.persistRun(ctx, run, collection)
 	}
 	docByID := make(map[string]Document, len(documents))
 	for _, document := range documents {
@@ -285,7 +283,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		rankingCandidates = append(rankingCandidates, ranking.Candidate{VersionID: document.ProcedureVersionID, ChannelRanks: ranks, Features: rankingFeatures(ranker, document), VerificationStrength: int32(document.VerificationStrength), ObservedEndToEnd: document.ObservedEndToEnd})
 	}
 	if len(rankingCandidates) == 0 {
-		return s.persistOutcome(ctx, runID, request.TenantID, query, envelope, snapshot, executions, hits, gates, nil, RunAbstained, "no_eligible_candidates", nil, started, collection)
+		return s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, nil, RunAbstained, "no_eligible_candidates", nil, started, collection)
 	}
 	ranked, err := ranking.Rank(ranker, rankingCandidates)
 	if err != nil {
@@ -308,11 +306,11 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		responseCandidates = append(responseCandidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd})
 	}
 	if len(selectedIDs) == 0 {
-		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, envelope, snapshot, executions, hits, gates, persistedRanks, RunAbstained, "below_confidence_threshold", nil, started, collection)
+		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunAbstained, "below_confidence_threshold", nil, started, collection)
 		response.Candidates = responseCandidates
 		return response, persistErr
 	}
-	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
+	response, err := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, RunSelected, "", selectedIDs, started, collection)
 	response.Candidates = responseCandidates
 	return response, err
 }
@@ -392,24 +390,90 @@ func (s *Service) responseFromRun(ctx context.Context, run Run) (ServiceResponse
 	return response, nil
 }
 
-func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {
-	run, err := s.buildRun(runID, tenantID, query, envelope, snapshot, executions, hits, gates, ranks, disposition, code, selected, started)
+func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {
+	run, err := s.buildRun(runID, tenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, ranks, disposition, code, selected, started)
 	if err != nil {
 		return ServiceResponse{}, err
 	}
-	if err = s.repository.SaveRetrievalRun(ctx, run); err != nil {
-		observability.RecordRetrievalPersistenceFailure(ctx, "save_run")
-		return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: runID, Err: err}
-	}
-	return ServiceResponse{RunID: runID, Disposition: disposition, DecisionCode: code, Snapshot: snapshot, QueryHash: query.Hash, Degraded: append([]DegradedChannel(nil), collection.Degraded...), Approximate: collection.Approximate}, nil
+	return s.persistRun(ctx, run, collection)
 }
 
-func (s *Service) buildRun(id string, tenantID domain.TenantID, query Query, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time) (Run, error) {
+func (s *Service) persistRun(ctx context.Context, run Run, collection CandidateCollection) (ServiceResponse, error) {
+	if err := s.repository.SaveRetrievalRun(ctx, run); err != nil {
+		winner, lookupErr := s.persistedWinner(ctx, run.TenantID, run.ID)
+		if lookupErr == nil {
+			if winner.QueryHash != run.QueryHash || winner.RequestContextHash != run.RequestContextHash {
+				observability.RecordRetrievalReplayMismatch(ctx)
+				return ServiceResponse{}, &ServiceError{Code: "idempotency_conflict", RunID: run.ID, Err: ErrIdempotencyConflict}
+			}
+			return s.responseFromRun(ctx, winner)
+		}
+		observability.RecordRetrievalPersistenceFailure(ctx, run.DecisionCode)
+		return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: run.ID, Err: err}
+	}
+	if run.Disposition == RunFailed {
+		code := run.DecisionCode
+		if index := strings.IndexByte(code, ':'); index >= 0 {
+			code = code[:index]
+		}
+		return ServiceResponse{}, &ServiceError{Code: code, RunID: run.ID, Err: ErrServiceUnavailable}
+	}
+	return ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Degraded: append([]DegradedChannel(nil), collection.Degraded...), Approximate: collection.Approximate}, nil
+}
+
+func (s *Service) persistedWinner(ctx context.Context, tenantID domain.TenantID, runID string) (Run, error) {
+	var lastErr error
+	for attempt := range 3 {
+		run, err := s.repository.RetrievalRun(ctx, tenantID, runID)
+		if err == nil || !errors.Is(err, ErrRunNotFound) {
+			return run, err
+		}
+		lastErr = err
+		if attempt == 2 {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 5 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Run{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return Run{}, lastErr
+}
+
+func (s *Service) buildRun(id string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, disposition RunDisposition, code string, selected []string, started time.Time) (Run, error) {
 	completed := s.clock().UTC()
 	if completed.Before(started) {
 		completed = started
 	}
-	return BuildRun(RunInput{ID: id, TenantID: tenantID, Query: query, QueryEnvelope: envelope, Snapshot: snapshot, ChannelExecutions: executions, Hits: hits, Gates: gates, Ranked: ranks, Disposition: disposition, DecisionCode: code, SelectedVersionIDs: selected, CreatedAt: started, CompletedAt: completed, ExpiresAt: completed.Add(s.config.Retention)})
+	return BuildRun(RunInput{ID: id, TenantID: tenantID, Query: query, RequestContextHash: requestContextHash, QueryEnvelope: envelope, Snapshot: snapshot, ChannelExecutions: executions, Hits: hits, Gates: gates, Ranked: ranks, Disposition: disposition, DecisionCode: code, SelectedVersionIDs: selected, CreatedAt: started, CompletedAt: completed, ExpiresAt: completed.Add(s.config.Retention)})
+}
+
+func retrievalRequestContextHash(request ServiceRequest, query Query) (string, error) {
+	regions := append([]string(nil), request.AllowedResidencyRegions...)
+	sort.Strings(regions)
+	unique := regions[:0]
+	for _, region := range regions {
+		region = strings.TrimSpace(region)
+		if region == "" {
+			return "", ErrInvalidQuery
+		}
+		if len(unique) == 0 || unique[len(unique)-1] != region {
+			unique = append(unique, region)
+		}
+	}
+	_, hash, err := canonical.MarshalAndHash(struct {
+		TenantID                domain.TenantID `json:"tenant_id"`
+		QueryHash               string          `json:"query_hash"`
+		RecallAllowed           bool            `json:"recall_allowed"`
+		AllowedResidencyRegions []string        `json:"allowed_residency_regions"`
+	}{request.TenantID, query.Hash, request.RecallAllowed, unique})
+	if err != nil {
+		return "", fmt.Errorf("canonicalize retrieval request context: %w", err)
+	}
+	return hash, nil
 }
 
 func (s *Service) validateSnapshotChannels(snapshot ServingSnapshot) error {

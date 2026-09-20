@@ -14,7 +14,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/domain"
 )
 
-const runSchemaVersion = "retrieval-run.v1"
+const runSchemaVersion = "retrieval-run.v2"
 
 var (
 	ErrInvalidRun  = errors.New("invalid retrieval run")
@@ -71,12 +71,14 @@ func ValidateServingConfig(config ServingConfig) error {
 }
 
 type ServingSnapshot struct {
-	ProjectionEpoch  uint64          `json:"projection_epoch"`
-	DocumentSetHash  string          `json:"document_set_hash"`
-	ServingConfigID  string          `json:"serving_config_id"`
-	PolicyManifestID string          `json:"policy_manifest_id"`
-	RankerManifestID string          `json:"ranker_manifest_id"`
-	Indexes          []SnapshotIndex `json:"indexes"`
+	ProjectionEpoch      uint64          `json:"projection_epoch"`
+	ProjectionCreatedAt  time.Time       `json:"projection_created_at,omitempty"`
+	VectorIndexCreatedAt time.Time       `json:"vector_index_created_at,omitempty"`
+	DocumentSetHash      string          `json:"document_set_hash"`
+	ServingConfigID      string          `json:"serving_config_id"`
+	PolicyManifestID     string          `json:"policy_manifest_id"`
+	RankerManifestID     string          `json:"ranker_manifest_id"`
+	Indexes              []SnapshotIndex `json:"indexes"`
 }
 
 type ChannelExecution struct {
@@ -126,6 +128,7 @@ type RunInput struct {
 	ID                 string
 	TenantID           domain.TenantID
 	Query              Query
+	RequestContextHash string
 	QueryEnvelope      string
 	Snapshot           ServingSnapshot
 	ChannelExecutions  []ChannelExecution
@@ -145,6 +148,7 @@ type Run struct {
 	ID                  string             `json:"id"`
 	TenantID            domain.TenantID    `json:"tenant_id"`
 	QueryHash           string             `json:"query_hash"`
+	RequestContextHash  string             `json:"request_context_hash"`
 	QueryEnvelope       string             `json:"query_envelope"`
 	Snapshot            ServingSnapshot    `json:"snapshot"`
 	ChannelExecutions   []ChannelExecution `json:"channel_executions,omitempty"`
@@ -168,7 +172,7 @@ func BuildRun(input RunInput) (Run, error) {
 		return Run{}, ErrInvalidRun
 	}
 	run := Run{
-		SchemaVersion: runSchemaVersion, ID: input.ID, TenantID: input.TenantID, QueryHash: input.Query.Hash,
+		SchemaVersion: runSchemaVersion, ID: input.ID, TenantID: input.TenantID, QueryHash: input.Query.Hash, RequestContextHash: input.RequestContextHash,
 		QueryEnvelope: input.QueryEnvelope, Snapshot: cloneSnapshot(input.Snapshot),
 		ChannelExecutions: append([]ChannelExecution(nil), input.ChannelExecutions...), Hits: append([]PersistedHit(nil), input.Hits...),
 		Gates: cloneGates(input.Gates), Ranked: cloneRanks(input.Ranked), Disposition: input.Disposition,
@@ -189,7 +193,7 @@ func BuildRun(input RunInput) (Run, error) {
 func ValidateRun(run Run) error {
 	// Query contents are encrypted by this boundary, so validation uses the
 	// persisted hash after structural validation below rather than rebuilding it.
-	if !sha256Pattern.MatchString(run.QueryHash) {
+	if !sha256Pattern.MatchString(run.QueryHash) || !sha256Pattern.MatchString(run.RequestContextHash) {
 		return ErrInvalidRun
 	}
 	copyOfRun := run
@@ -228,7 +232,7 @@ func canonicalizeRun(run *Run) error {
 }
 
 func validateCanonicalRun(run *Run) error {
-	if run.SchemaVersion != runSchemaVersion || !runIDPattern.MatchString(run.ID) || run.TenantID == "" || !sha256Pattern.MatchString(run.QueryHash) || !strings.HasPrefix(run.QueryEnvelope, "enc.v1.") || len(run.QueryEnvelope) > 1<<20 || validateSnapshot(&run.Snapshot) != nil || run.CreatedAt.IsZero() || run.CompletedAt.Before(run.CreatedAt) || !run.ExpiresAt.After(run.CompletedAt) || run.ExpiresAt.After(run.CompletedAt.Add(30*24*time.Hour)) || len(run.ChannelExecutions) > 5 || len(run.Hits) > 5000 || len(run.Gates) > 1000 || len(run.Ranked) > 1000 {
+	if run.SchemaVersion != runSchemaVersion || !runIDPattern.MatchString(run.ID) || run.TenantID == "" || !sha256Pattern.MatchString(run.QueryHash) || !sha256Pattern.MatchString(run.RequestContextHash) || !strings.HasPrefix(run.QueryEnvelope, "enc.v1.") || len(run.QueryEnvelope) > 1<<20 || validateSnapshot(&run.Snapshot) != nil || run.CreatedAt.IsZero() || run.CompletedAt.Before(run.CreatedAt) || !run.ExpiresAt.After(run.CompletedAt) || run.ExpiresAt.After(run.CompletedAt.Add(30*24*time.Hour)) || len(run.ChannelExecutions) > 5 || len(run.Hits) > 5000 || len(run.Gates) > 1000 || len(run.Ranked) > 1000 {
 		return ErrInvalidRun
 	}
 	if run.Disposition != RunSelected && run.Disposition != RunAbstained && run.Disposition != RunFailed {

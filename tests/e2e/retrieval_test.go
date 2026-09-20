@@ -3,9 +3,11 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
 	surrealdb "github.com/surrealdb/surrealdb.go"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestDeterministicHostedRetrieval(t *testing.T) {
@@ -25,13 +28,28 @@ func TestDeterministicHostedRetrieval(t *testing.T) {
 	defer cancel()
 	db := openSurreal(t, ctx)
 	defer func() { _ = db.Close(context.Background()) }()
+	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
+		t.Fatalf("first migration replay: %v", err)
+	}
+	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
+		t.Fatalf("second migration replay: %v", err)
+	}
 	seedRetrievalServingState(t, ctx, db)
 
 	client := memjevv1connect.NewRetrievalServiceClient(httpClient(), requiredEnv(t, "MEMJEV_E2E_API_URL"))
 	first := callRetrieve(t, ctx, client, "retrieval-e2e-key-0001", "write output", nil)
+	seedTieRetrievalDocument(t, ctx, db)
 	second := callRetrieve(t, ctx, client, "retrieval-e2e-key-0001", "write output", nil)
 	if first.Msg.GetRetrievalRunId() == "" || first.Msg.GetRetrievalRunId() != second.Msg.GetRetrievalRunId() || first.Msg.GetProvenance().GetQueryHash() != second.Msg.GetProvenance().GetQueryHash() {
 		t.Fatalf("non-deterministic replay: first=%#v second=%#v", first.Msg, second.Msg)
+	}
+	firstWire, err := proto.MarshalOptions{Deterministic: true}.Marshal(first.Msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWire, err := proto.MarshalOptions{Deterministic: true}.Marshal(second.Msg)
+	if err != nil || !bytes.Equal(firstWire, secondWire) {
+		t.Fatalf("replay response changed: equal=%v error=%v", bytes.Equal(firstWire, secondWire), err)
 	}
 	if first.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || len(first.Msg.GetCandidates()) != 1 || first.Msg.GetCandidates()[0].GetProcedureVersionId() != "pv_retrieval_e2e" || first.Msg.GetCandidates()[0].GetAdvisoryOnly() {
 		t.Fatalf("selected response = %#v", first.Msg)
@@ -39,15 +57,22 @@ func TestDeterministicHostedRetrieval(t *testing.T) {
 	if first.Msg.GetProvenance().GetProjectionEpoch() == 0 || len(first.Msg.GetProvenance().GetIndexManifestIds()) != 4 || first.Msg.GetProvenance().GetApproximateCandidates() {
 		t.Fatalf("provenance = %#v", first.Msg.GetProvenance())
 	}
+	tied := callRetrieve(t, ctx, client, "retrieval-e2e-key-tie", "write output", nil)
+	if tied.Msg.GetProvenance().GetProjectionEpoch() <= first.Msg.GetProvenance().GetProjectionEpoch() || len(tied.Msg.GetCandidates()) != 2 || tied.Msg.GetCandidates()[0].GetProcedureVersionId() != "pv_retrieval_e2e" || tied.Msg.GetCandidates()[1].GetProcedureVersionId() != "pv_retrieval_e2e_z" {
+		t.Fatalf("stable tied ranking = %#v", tied.Msg)
+	}
 
 	explainRequest := connect.NewRequest(&memjevv1.ExplainRetrievalRequest{RetrievalRunId: first.Msg.GetRetrievalRunId()})
 	explainRequest.Header().Set("Authorization", "Bearer "+requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 	explanation, err := client.ExplainRetrieval(ctx, explainRequest)
+	if err != nil {
+		t.Fatalf("explanation error = %v", err)
+	}
 	eligible := false
 	for _, candidate := range explanation.Msg.GetCandidates() {
 		eligible = eligible || candidate.GetProcedureVersionId() == "pv_retrieval_e2e" && candidate.GetEligible()
 	}
-	if err != nil || explanation.Msg.GetProvenance().GetQueryHash() != first.Msg.GetProvenance().GetQueryHash() || len(explanation.Msg.GetCandidates()) < 1 || !eligible {
+	if explanation.Msg.GetProvenance().GetQueryHash() != first.Msg.GetProvenance().GetQueryHash() || len(explanation.Msg.GetCandidates()) < 1 || !eligible {
 		t.Fatalf("explanation message=%s err=%v", explanation.Msg.String(), err)
 	}
 
@@ -68,9 +93,57 @@ func TestDeterministicHostedRetrieval(t *testing.T) {
 	if _, err = client.Retrieve(ctx, changed); connect.CodeOf(err) != connect.CodeAlreadyExists {
 		t.Fatalf("idempotency conflict error = %v", err)
 	}
+	regionChanged := retrievalRequest("write output", nil)
+	regionChanged.Header().Set("Authorization", "Bearer "+requiredEnv(t, "MEMJEV_E2E_OTHER_REGION_TOKEN"))
+	regionChanged.Header().Set("Idempotency-Key", "retrieval-e2e-key-0001")
+	if _, err = client.Retrieve(ctx, regionChanged); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Fatalf("residency-context conflict error = %v", err)
+	}
+
+	concurrentResponses := make(chan *memjevv1.RetrieveResponse, 16)
+	concurrentErrors := make(chan error, 16)
+	retrievalToken := requiredEnv(t, "MEMJEV_E2E_TOKEN")
+	var workers sync.WaitGroup
+	workers.Add(16)
+	for range 16 {
+		go func() {
+			defer workers.Done()
+			request := retrievalRequest("write output", nil)
+			request.Header().Set("Authorization", "Bearer "+retrievalToken)
+			request.Header().Set("Idempotency-Key", "retrieval-e2e-key-concurrent")
+			response, callErr := client.Retrieve(ctx, request)
+			if callErr != nil {
+				concurrentErrors <- callErr
+				return
+			}
+			concurrentResponses <- response.Msg
+		}()
+	}
+	workers.Wait()
+	close(concurrentResponses)
+	close(concurrentErrors)
+	for callErr := range concurrentErrors {
+		t.Errorf("concurrent replay error = %v", callErr)
+	}
+	var concurrentWire []byte
+	var concurrentRunID string
+	for response := range concurrentResponses {
+		wire, marshalErr := proto.MarshalOptions{Deterministic: true}.Marshal(response)
+		if marshalErr != nil || response.GetRetrievalRunId() == "" {
+			t.Errorf("invalid concurrent response run=%q marshal_error=%v", response.GetRetrievalRunId(), marshalErr)
+			continue
+		}
+		if concurrentWire == nil {
+			concurrentWire, concurrentRunID = wire, response.GetRetrievalRunId()
+			continue
+		}
+		if response.GetRetrievalRunId() != concurrentRunID || !bytes.Equal(wire, concurrentWire) {
+			t.Errorf("concurrent responses diverged: run=%q want=%q bytes_equal=%v", response.GetRetrievalRunId(), concurrentRunID, bytes.Equal(wire, concurrentWire))
+		}
+	}
 
 	rows, err := surrealdb.Query[[]map[string]any](ctx, db, `SELECT retrieval_run_id, canonical_query_envelope FROM retrieval_run WHERE tenant_id = "tenant_e2e"`, nil)
-	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) != 2 {
+	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) != 4 {
 		t.Fatalf("retrieval run rows=%#v err=%v", rows, err)
 	}
 	for _, row := range (*rows)[0].Result {
@@ -79,6 +152,30 @@ func TestDeterministicHostedRetrieval(t *testing.T) {
 			t.Fatalf("unsafe query envelope = %#v", envelope)
 		}
 	}
+}
+
+func seedTieRetrievalDocument(t *testing.T, ctx context.Context, db *surrealdb.DB) {
+	t.Helper()
+	now := time.Now().UTC().Add(-30 * time.Second)
+	intentHash, err := retrieval.CanonicalIntentHash("write output", retrieval.Harness{Name: "e2e", Version: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, environmentHash, err := canonical.MarshalAndHash([]retrieval.Fact{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := retrieval.BuildDocument(retrieval.DocumentInput{
+		TenantID: "tenant_e2e", ProcedureVersionID: "pv_retrieval_e2e_z", ProcedureID: "proc_retrieval_e2e_z", TaskText: "write output",
+		IntentHash: intentHash, EffectSignatureHash: strings.Repeat("e", 64), Tools: []retrieval.ToolRequirement{{Name: "writer", ContractVersionID: "tcv_retrieval_e2e"}},
+		OrderedStepContractIDs: []string{"tcv_retrieval_e2e"}, Effects: []string{"filesystem.write"}, EnvironmentScopeHash: environmentHash,
+		Harness: retrieval.Harness{Name: "e2e", Version: "1"}, Lifecycle: "active", ObservedEndToEnd: true, VerificationStrength: 5,
+		VerifiedSuccessCount: 3, ValidatedAt: now, ValidationPolicyVersion: "evidence.v1", LearnedWithRecallConsent: true, ResidencyRegion: "local", RiskClass: "low",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRetrievalDocument(t, ctx, db, document, now)
 }
 
 func callRetrieve(t *testing.T, ctx context.Context, client memjevv1connect.RetrievalServiceClient, key, task string, forbidden []string) *connect.Response[memjevv1.RetrieveResponse] {

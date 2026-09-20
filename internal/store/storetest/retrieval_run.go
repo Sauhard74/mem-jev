@@ -101,7 +101,7 @@ func ValidRetrievalRunInput(t *testing.T, snapshot retrieval.ServingSnapshot, id
 	}
 	created := time.Date(2026, 9, 20, 1, 2, 3, 0, time.UTC)
 	return retrieval.RunInput{
-		ID: "rrun_" + strings.Repeat(string(idByte), 64), TenantID: "tenant_a", Query: query, QueryEnvelope: "enc.v1.key.nonce.ciphertext", Snapshot: snapshot,
+		ID: "rrun_" + strings.Repeat(string(idByte), 64), TenantID: "tenant_a", Query: query, RequestContextHash: strings.Repeat("d", 64), QueryEnvelope: "enc.v1.key.nonce.ciphertext", Snapshot: snapshot,
 		ChannelExecutions: []retrieval.ChannelExecution{{Channel: retrieval.ChannelExact, IndexManifestID: "index.exact.v1", HitCount: 1, Complete: true}},
 		Hits:              []retrieval.PersistedHit{{Channel: retrieval.ChannelExact, VersionID: "pv_a", Rank: 1, RawScoreQuantized: 100, IndexManifestID: "index.exact.v1"}},
 		Gates:             []retrieval.PersistedGate{{VersionID: "pv_a", Eligible: true, CanonicalFacts: `{}`}},

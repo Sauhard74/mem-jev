@@ -137,6 +137,9 @@ var (
 	retrievalGateRejections     metric.Int64Counter
 	retrievalPersistenceFailure metric.Int64Counter
 	retrievalReplayMismatch     metric.Int64Counter
+	retrievalSnapshotAge        metric.Float64Histogram
+	retrievalRankerRequests     metric.Int64Counter
+	retrievalVectorStaleness    metric.Float64Histogram
 )
 
 func initializeMetrics() {
@@ -171,6 +174,9 @@ func initializeMetrics() {
 	retrievalGateRejections, _ = meter.Int64Counter("memjev.retrieval.gate_rejections")
 	retrievalPersistenceFailure, _ = meter.Int64Counter("memjev.retrieval.persistence_failures")
 	retrievalReplayMismatch, _ = meter.Int64Counter("memjev.retrieval.replay_mismatches")
+	retrievalSnapshotAge, _ = meter.Float64Histogram("memjev.retrieval.snapshot_age", metric.WithUnit("s"))
+	retrievalRankerRequests, _ = meter.Int64Counter("memjev.retrieval.ranker_requests")
+	retrievalVectorStaleness, _ = meter.Float64Histogram("memjev.retrieval.vector_staleness", metric.WithUnit("s"))
 }
 
 func RecordRetrieval(ctx context.Context, facts RetrievalMetrics) {
@@ -204,6 +210,18 @@ func RecordRetrievalPersistenceFailure(ctx context.Context, code string) {
 func RecordRetrievalReplayMismatch(ctx context.Context) {
 	metricsOnce.Do(initializeMetrics)
 	retrievalReplayMismatch.Add(ctx, 1)
+}
+
+func RecordRetrievalSnapshot(ctx context.Context, now, projectionCreatedAt, vectorIndexCreatedAt time.Time, rankerManifestID string) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("ranker.manifest_id", rankerManifestID))
+	retrievalRankerRequests.Add(ctx, 1, options)
+	if !projectionCreatedAt.IsZero() && !now.Before(projectionCreatedAt) {
+		retrievalSnapshotAge.Record(ctx, now.Sub(projectionCreatedAt).Seconds(), options)
+	}
+	if !vectorIndexCreatedAt.IsZero() && !now.Before(vectorIndexCreatedAt) {
+		retrievalVectorStaleness.Record(ctx, now.Sub(vectorIndexCreatedAt).Seconds(), options)
+	}
 }
 
 func RecordArchiveCorruption(ctx context.Context, code string) {

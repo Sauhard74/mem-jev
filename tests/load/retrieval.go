@@ -19,6 +19,8 @@ import (
 
 type report struct {
 	Requests, Successes, Failures   int64
+	Selected, Abstained, Explained  int64
+	ValidationFailures, MaxInFlight int64
 	DurationSeconds                 float64
 	AchievedRPS                     float64
 	P50Millis, P95Millis, P99Millis float64
@@ -36,6 +38,16 @@ func main() {
 		os.Exit(2)
 	}
 	client := memjevv1connect.NewRetrievalServiceClient(http.DefaultClient, *endpoint)
+	warmup := connect.NewRequest(&memjevv1.RetrieveRequest{Task: "write output", Tools: []*memjevv1.AvailableTool{{Name: "writer", ContractVersionId: "tcv_retrieval_e2e"}}, Harness: &memjevv1.HarnessIdentity{Name: "e2e", Version: "1"}, RiskClass: memjevv1.RiskClass_RISK_CLASS_LOW, LatencyClass: memjevv1.LatencyClass_LATENCY_CLASS_INTERACTIVE, MaxCandidates: 10})
+	warmup.Header().Set("Authorization", "Bearer "+*token)
+	warmup.Header().Set("Idempotency-Key", fmt.Sprintf("load-warmup-%d", time.Now().UnixNano()))
+	warmupResponse, err := client.Retrieve(context.Background(), warmup)
+	if err != nil || warmupResponse.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || warmupResponse.Msg.GetRetrievalRunId() == "" {
+		fmt.Fprintf(os.Stderr, "warmup retrieval failed: response=%v error=%v\n", warmupResponse, err)
+		os.Exit(1)
+	}
+	warmupRunID := warmupResponse.Msg.GetRetrievalRunId()
+	warmupEpoch := warmupResponse.Msg.GetProvenance().GetProjectionEpoch()
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+30*time.Second)
 	defer cancel()
@@ -45,7 +57,8 @@ func main() {
 	defer deadline.Stop()
 	semaphore := make(chan struct{}, *concurrency)
 	var wg sync.WaitGroup
-	var requests, successes, failures atomic.Int64
+	var requests, successes, failures, selected, abstained, explained, validationFailures atomic.Int64
+	var inFlight, maxInFlight atomic.Int64
 	var latencyMu sync.Mutex
 	latencies := make([]time.Duration, 0, *rate*int(duration.Seconds()))
 	loop := true
@@ -55,21 +68,52 @@ func main() {
 			loop = false
 		case at := <-ticker.C:
 			sequence := requests.Add(1)
-			semaphore <- struct{}{}
 			wg.Add(1)
 			go func(id int64, scheduled time.Time) {
 				defer wg.Done()
+				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
-				request := connect.NewRequest(&memjevv1.RetrieveRequest{Task: "write output", Tools: []*memjevv1.AvailableTool{{Name: "writer", ContractVersionId: "tcv_retrieval_e2e"}}, Harness: &memjevv1.HarnessIdentity{Name: "e2e", Version: "1"}, RiskClass: memjevv1.RiskClass_RISK_CLASS_LOW, LatencyClass: memjevv1.LatencyClass_LATENCY_CLASS_INTERACTIVE, MaxCandidates: 10})
-				request.Header().Set("Authorization", "Bearer "+*token)
-				request.Header().Set("Idempotency-Key", fmt.Sprintf("load-%020d-%d", id, scheduled.UnixNano()))
-				callStarted := time.Now()
-				_, err := client.Retrieve(ctx, request)
+				current := inFlight.Add(1)
+				defer inFlight.Add(-1)
+				for observed := maxInFlight.Load(); current > observed && !maxInFlight.CompareAndSwap(observed, current); observed = maxInFlight.Load() {
+				}
+				valid := false
+				var err error
+				switch id % 10 {
+				case 0, 1:
+					request := connect.NewRequest(&memjevv1.ExplainRetrievalRequest{RetrievalRunId: warmupRunID})
+					request.Header().Set("Authorization", "Bearer "+*token)
+					var response *connect.Response[memjevv1.ExplainRetrievalResponse]
+					response, err = client.ExplainRetrieval(ctx, request)
+					valid = err == nil && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch && len(response.Msg.GetCandidates()) > 0
+					if valid {
+						explained.Add(1)
+					}
+				case 2:
+					request := loadRetrieveRequest(*token, id, scheduled, []string{"filesystem.write"})
+					var response *connect.Response[memjevv1.RetrieveResponse]
+					response, err = client.Retrieve(ctx, request)
+					valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_ABSTAINED && response.Msg.GetAbstentionCode() == "no_eligible_candidates" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch
+					if valid {
+						abstained.Add(1)
+					}
+				default:
+					request := loadRetrieveRequest(*token, id, scheduled, nil)
+					var response *connect.Response[memjevv1.RetrieveResponse]
+					response, err = client.Retrieve(ctx, request)
+					valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED && len(response.Msg.GetCandidates()) >= 1 && response.Msg.GetCandidates()[0].GetProcedureVersionId() == "pv_retrieval_e2e" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch
+					if valid {
+						selected.Add(1)
+					}
+				}
 				latencyMu.Lock()
-				latencies = append(latencies, time.Since(callStarted))
+				latencies = append(latencies, time.Since(scheduled))
 				latencyMu.Unlock()
-				if err != nil {
+				if err != nil || !valid {
 					failures.Add(1)
+					if err == nil {
+						validationFailures.Add(1)
+					}
 				} else {
 					successes.Add(1)
 				}
@@ -79,11 +123,18 @@ func main() {
 	wg.Wait()
 	elapsed := time.Since(started)
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	result := report{Requests: requests.Load(), Successes: successes.Load(), Failures: failures.Load(), DurationSeconds: elapsed.Seconds(), AchievedRPS: float64(requests.Load()) / elapsed.Seconds(), P50Millis: percentile(latencies, 0.50), P95Millis: percentile(latencies, 0.95), P99Millis: percentile(latencies, 0.99)}
+	result := report{Requests: requests.Load(), Successes: successes.Load(), Failures: failures.Load(), Selected: selected.Load(), Abstained: abstained.Load(), Explained: explained.Load(), ValidationFailures: validationFailures.Load(), MaxInFlight: maxInFlight.Load(), DurationSeconds: elapsed.Seconds(), AchievedRPS: float64(successes.Load()) / elapsed.Seconds(), P50Millis: percentile(latencies, 0.50), P95Millis: percentile(latencies, 0.95), P99Millis: percentile(latencies, 0.99)}
 	_ = json.NewEncoder(os.Stdout).Encode(result)
 	if result.Failures > 0 || result.P95Millis > 250 || result.AchievedRPS < float64(*rate)*0.95 {
 		os.Exit(1)
 	}
+}
+
+func loadRetrieveRequest(token string, id int64, scheduled time.Time, forbidden []string) *connect.Request[memjevv1.RetrieveRequest] {
+	request := connect.NewRequest(&memjevv1.RetrieveRequest{Task: "write output", Tools: []*memjevv1.AvailableTool{{Name: "writer", ContractVersionId: "tcv_retrieval_e2e"}}, Harness: &memjevv1.HarnessIdentity{Name: "e2e", Version: "1"}, ForbiddenEffects: forbidden, RiskClass: memjevv1.RiskClass_RISK_CLASS_LOW, LatencyClass: memjevv1.LatencyClass_LATENCY_CLASS_INTERACTIVE, MaxCandidates: 10})
+	request.Header().Set("Authorization", "Bearer "+token)
+	request.Header().Set("Idempotency-Key", fmt.Sprintf("load-%020d-%d", id, scheduled.UnixNano()))
+	return request
 }
 
 func percentile(values []time.Duration, quantile float64) float64 {

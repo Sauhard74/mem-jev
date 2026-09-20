@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,63 @@ func TestServiceReplaysIdempotentRequestWithoutRerunningChannels(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsReplayWhenEligibilityContextChanges(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	fixture.request.RequestIdentityHash = strings.Repeat("e", 64)
+	if _, err := fixture.service.Retrieve(context.Background(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	changed := fixture.request
+	changed.AllowedResidencyRegions = []string{"other"}
+	if _, err := fixture.service.Retrieve(context.Background(), changed); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("eligibility-context conflict = %v", err)
+	}
+	if fixture.exact.calls != 1 {
+		t.Fatalf("channel calls = %d, want 1", fixture.exact.calls)
+	}
+}
+
+func TestServiceConvergesConcurrentIdempotentRequestsOnPersistedWinner(t *testing.T) {
+	fixture := newServiceFixture(t, false)
+	fixture.request.RequestIdentityHash = strings.Repeat("e", 64)
+	repository := &racingDecisionRepository{snapshot: fixture.repository.snapshot, initialLookups: make(chan struct{})}
+	fixture.service.repository = repository
+
+	responses := make(chan ServiceResponse, 2)
+	errorsSeen := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	for range 2 {
+		go func() {
+			defer workers.Done()
+			response, err := fixture.service.Retrieve(context.Background(), fixture.request)
+			responses <- response
+			errorsSeen <- err
+		}()
+	}
+	workers.Wait()
+	close(responses)
+	close(errorsSeen)
+	for err := range errorsSeen {
+		if err != nil {
+			t.Fatalf("concurrent retrieve: %v", err)
+		}
+	}
+	var runID string
+	for response := range responses {
+		if response.Disposition != RunSelected || len(response.Candidates) != 1 {
+			t.Fatalf("response = %#v", response)
+		}
+		if runID != "" && response.RunID != runID {
+			t.Fatalf("run ids differ: %s != %s", response.RunID, runID)
+		}
+		runID = response.RunID
+	}
+	if repository.saveConflicts != 1 {
+		t.Fatalf("save conflicts = %d, want 1", repository.saveConflicts)
+	}
+}
+
 type serviceFixture struct {
 	service    *Service
 	repository *fakeDecisionRepository
@@ -181,6 +239,7 @@ func newServiceFixture(t *testing.T, degradedVector bool) serviceFixture {
 }
 
 type serviceChannel struct {
+	mu             sync.Mutex
 	name           ChannelName
 	manifest       string
 	approximate    bool
@@ -194,9 +253,52 @@ func (c *serviceChannel) Name() ChannelName  { return c.name }
 func (c *serviceChannel) ManifestID() string { return c.manifest }
 func (c *serviceChannel) Approximate() bool  { return c.approximate }
 func (c *serviceChannel) Search(_ context.Context, request ChannelRequest) ([]Hit, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.calls++
 	c.seenEffectHash = request.Query.EffectSignatureHash
 	return c.hits, c.err
+}
+
+type racingDecisionRepository struct {
+	mu             sync.Mutex
+	snapshot       ServingSnapshot
+	run            *Run
+	lookupCount    int
+	initialLookups chan struct{}
+	saveConflicts  int
+}
+
+func (r *racingDecisionRepository) AcquireServingSnapshot(context.Context, domain.TenantID) (ServingSnapshot, error) {
+	return r.snapshot, nil
+}
+
+func (r *racingDecisionRepository) RetrievalRun(_ context.Context, _ domain.TenantID, _ string) (Run, error) {
+	r.mu.Lock()
+	if r.run != nil {
+		run := *r.run
+		r.mu.Unlock()
+		return run, nil
+	}
+	r.lookupCount++
+	if r.lookupCount == 2 {
+		close(r.initialLookups)
+	}
+	barrier := r.initialLookups
+	r.mu.Unlock()
+	<-barrier
+	return Run{}, ErrRunNotFound
+}
+
+func (r *racingDecisionRepository) SaveRetrievalRun(_ context.Context, run Run) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.run == nil {
+		r.run = &run
+		return nil
+	}
+	r.saveConflicts++
+	return errors.New("concurrent insert conflict")
 }
 
 type fakeDecisionRepository struct {

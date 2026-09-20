@@ -1,13 +1,14 @@
 # Retrieval operations
 
-The retrieval response is valid only after its decision record commits. A selected response identifies the immutable projection epoch, eligibility policy, ranker, and channel manifests used to produce it. Never reconstruct a historical answer from current indexes.
+The retrieval response is valid only after its decision record commits. A selected response identifies the immutable projection epoch, eligibility policy, ranker, and channel manifests used to produce it. Never reconstruct a historical answer from current indexes. Idempotency binds both the canonical query and the server-owned authorization context (tenant, recall consent, and allowed residency regions); a key reused under different context must return a conflict.
 
 ## Triage order
 
 1. Check API readiness, SurrealDB quorum, and `memjev.retrieval.persistence_failures`.
-2. Split latency by channel and result code. Required channels are exact, lexical, facet, and graph; any sustained failure is an availability incident. Vector and Jev are optional and must degrade without changing hard gates.
-3. Inspect the run through `ExplainRetrieval` using a credential for the owning tenant. The explanation contains hashes, manifest IDs, channel membership, gate facts, scores, and ranks; it never returns the raw query.
-4. Confirm the serving head references immutable manifests that exist for the same tenant. Do not edit a manifest in place. Publish a new content-addressed manifest and atomically activate a new serving configuration.
+2. Check `memjev.retrieval.snapshot_age`, `memjev.retrieval.vector_staleness`, and the active `ranker.manifest_id` series before changing serving heads.
+3. Split latency by channel and result code. Required channels are exact, lexical, facet, and graph; any sustained failure is an availability incident. Vector and Jev are optional and must degrade without changing hard gates.
+4. Inspect the run through `ExplainRetrieval` using a credential for the owning tenant. The explanation contains hashes, manifest IDs, channel membership, gate facts, scores, and ranks; it never returns the raw query.
+5. Confirm the serving head references immutable manifests that exist for the same tenant. Do not edit a manifest in place. Publish a new content-addressed manifest and atomically activate a new serving configuration.
 
 ## Safe rollback
 

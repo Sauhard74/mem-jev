@@ -37,3 +37,21 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: A retrieval channel is persistently degraded
+      - alert: MemjevRetrievalSnapshotStale
+        expr: histogram_quantile(0.95, sum by (le) (rate(memjev_retrieval_snapshot_age_seconds_bucket[15m]))) > 900
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: The p95 retrieval projection snapshot is older than 15 minutes
+      - alert: MemjevRetrievalVectorIndexStale
+        expr: histogram_quantile(0.95, sum by (le) (rate(memjev_retrieval_vector_staleness_seconds_bucket[15m]))) > 3600
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: The p95 vector index used for retrieval is older than one hour
+      - alert: MemjevRetrievalRankerVersionDrift
+        expr: count(count by (ranker_manifest_id) (rate(memjev_retrieval_ranker_requests_total[15m]))) > 2
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: More than two immutable ranker manifests are serving traffic concurrently
