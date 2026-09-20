@@ -117,6 +117,17 @@ func TestRetrievalHTTPEnforcesScopeConsentAndSafeErrors(t *testing.T) {
 	})
 }
 
+func TestRetrievalHTTPMapsIdempotencyConflict(t *testing.T) {
+	fake := &recordingRetrievalAPI{err: &retrieval.ServiceError{Code: "idempotency_conflict", Err: retrieval.ErrIdempotencyConflict}}
+	server := httptest.NewServer(retrievalTestHandler(fake, policy.LearnAndRecall))
+	defer server.Close()
+	client := memjevv1connect.NewRetrievalServiceClient(server.Client(), server.URL)
+	_, err := client.Retrieve(context.Background(), retrievalConnectRequest())
+	if connect.CodeOf(err) != connect.CodeAlreadyExists || !strings.Contains(err.Error(), "request failed") {
+		t.Fatalf("conflict error = %v", err)
+	}
+}
+
 func retrievalTestHandler(service retrievalAPI, consent policy.ConsentMode) http.Handler {
 	return retrievalHandlerWithPrincipal(service, testPrincipal(consent))
 }

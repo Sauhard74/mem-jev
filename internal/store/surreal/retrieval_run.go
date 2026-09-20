@@ -25,10 +25,6 @@ func NewRetrievalRunRepository(db *surrealdb.DB) *RetrievalRunRepository {
 	return &RetrievalRunRepository{db: db}
 }
 
-func newRetrievalRunRepository(db *surrealdb.DB, failure failurePoint) *RetrievalRunRepository {
-	return &RetrievalRunRepository{db: db, failure: failure}
-}
-
 func (r *RetrievalRunRepository) ActivateServingConfig(ctx context.Context, config retrieval.ServingConfig) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err

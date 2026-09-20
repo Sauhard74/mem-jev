@@ -138,6 +138,8 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason = connect.CodePermissionDenied, "learning_not_permitted"
 	case errors.Is(err, store.ErrIdempotencyConflict):
 		code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
+	case errors.Is(err, retrieval.ErrIdempotencyConflict):
+		code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
 	case errors.Is(err, store.ErrTraceConflict):
 		code, reason = connect.CodeAlreadyExists, "trace_conflict"
 	case errors.Is(err, store.ErrOutcomeTraceNotFound):

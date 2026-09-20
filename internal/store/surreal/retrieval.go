@@ -41,7 +41,9 @@ func (c *RetrievalChannel) Search(ctx context.Context, request retrieval.Channel
 	var err error
 	switch c.name {
 	case retrieval.ChannelExact:
-		if request.Query.EffectSignatureHash == "" { return nil, nil }
+		if request.Query.EffectSignatureHash == "" {
+			return nil, nil
+		}
 		rows, err = c.query(ctx, exactCandidateQuery, request, map[string]any{"intent_hash": request.Query.IntentHash, "effect_hash": request.Query.EffectSignatureHash})
 	case retrieval.ChannelLexical:
 		rows, err = c.query(ctx, lexicalCandidateQuery, request, map[string]any{"task": request.Query.Task})

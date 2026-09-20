@@ -21,6 +21,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/projection"
 	"github.com/sauhard74/mem-jev/internal/rebuild"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 	"github.com/sauhard74/mem-jev/internal/synthesis"
@@ -54,7 +55,7 @@ func TestEvidencePipelineProductionCases(t *testing.T) {
 			}
 		}
 		before := canonicalProjection(t, ctx, db, manifest["procedure_version_id"])
-		assertByteIdenticalRebuild(t, ctx, db, traceID, outcome.Msg.GetOutcomeId(), before)
+		assertByteIdenticalRebuild(t, ctx, db, traceID, outcome.Msg.GetOutcomeId(), fmt.Sprint(manifest["procedure_version_id"]), before)
 		duplicate := recordPipelineOutcome(t, ctx, traceID, "qualified-success", satisfiedEvidence("success"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		if duplicate.Msg.GetOutcomeId() != outcome.Msg.GetOutcomeId() || duplicate.Msg.GetDisposition() != memjevv1.OutcomeDisposition_OUTCOME_DISPOSITION_DUPLICATE {
 			t.Fatalf("duplicate = %#v", duplicate.Msg)
@@ -278,7 +279,7 @@ func canonicalProjection(t *testing.T, ctx context.Context, db *surrealdb.DB, id
 	return fmt.Sprint(row["canonical_projection"])
 }
 
-func assertByteIdenticalRebuild(t *testing.T, ctx context.Context, db *surrealdb.DB, traceID, outcomeID, want string) {
+func assertByteIdenticalRebuild(t *testing.T, ctx context.Context, db *surrealdb.DB, traceID, outcomeID, versionID, want string) {
 	t.Helper()
 	workflowID := store.OutcomeWorkflowID("tenant_e2e", domain.TraceID(traceID), domain.OutcomeID(outcomeID))
 	var source memworkflow.LoadedSource
@@ -295,11 +296,25 @@ func assertByteIdenticalRebuild(t *testing.T, ctx context.Context, db *surrealdb
 	}
 	decodeStagePayload(t, ctx, db, workflowID, memworkflow.StageSynthesize, &synthesized)
 	synthesized.Result.Hash = synthesized.ResultHash
+	rows, err := surrealdb.Query[[]struct {
+		Canonical string `json:"canonical_document"`
+		Epoch     uint64 `json:"projection_epoch"`
+	}](ctx, db, `SELECT canonical_document, projection_epoch FROM retrieval_document WHERE tenant_id = $tenant AND procedure_version_id = $version ORDER BY projection_epoch DESC LIMIT 1`, map[string]any{"tenant": "tenant_e2e", "version": versionID})
+	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) != 1 {
+		t.Fatalf("load serving document: rows=%#v err=%v", rows, err)
+	}
+	var document retrieval.Document
+	if err := json.Unmarshal([]byte((*rows)[0].Result[0].Canonical), &document); err != nil {
+		t.Fatal(err)
+	}
 	rebuilt, err := projection.Build(projection.BuildRequest{
 		TenantID: "tenant_e2e", OutcomeID: domain.OutcomeID(outcomeID), IntentHash: graph.IntentHash,
 		EffectSignatureHash: graph.EffectSignatureHash, EnvironmentScopeHash: graph.EnvironmentHash,
 		ArchiveHash: source.ArchiveHash, CanonicalEventStart: 0, CanonicalEventEnd: uint32(len(source.Batch.Events) - 1),
 		CreatedAt: time.Unix(100, 0).UTC(), Synthesis: synthesized.Result,
+		Serving: projection.ServingMetadata{TaskText: document.TaskText, Harness: document.Harness, Environment: document.Environment,
+			Resources: document.Resources, Effects: document.Effects, RiskClass: document.RiskClass, VerificationStrength: document.VerificationStrength,
+			LearnedWithRecallConsent: document.LearnedWithRecallConsent, ResidencyRegion: document.ResidencyRegion},
 	})
 	if err != nil {
 		t.Fatal(err)

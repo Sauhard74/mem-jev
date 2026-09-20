@@ -16,7 +16,7 @@ minio_kms=${MINIO_KMS_SECRET_KEY:-memjev-local:$(openssl rand -base64 32 | tr -d
 temporal_postgres_pass=${TEMPORAL_POSTGRES_PASSWORD:-$(openssl rand -hex 24)}
 
 credential_path="$repo_dir/.runtime/credentials.json"
-printf '{"credentials":[{"credential_sha256":"%s","tenant_id":"tenant_e2e","region":"local","scopes":["ingest:write","outcomes:write"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_other","region":"local","scopes":["ingest:write","outcomes:write"],"consent":"learn_and_recall"}]}' "$token_hash" "$other_token_hash" > "$credential_path"
+printf '{"credentials":[{"credential_sha256":"%s","tenant_id":"tenant_e2e","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_other","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read"],"consent":"learn_and_recall"}]}' "$token_hash" "$other_token_hash" > "$credential_path"
 chmod 600 "$credential_path"
 
 cat > .env.local <<EOF
@@ -52,4 +52,5 @@ docker compose --env-file .env.local up --detach --build --wait
 go test -race -tags=integration ./internal/store/... -count=1
 go test -race -tags=e2e ./tests/e2e -run TestDurableIdempotentIngest -count=1 -v
 ./scripts/evidence-integration.sh
+./scripts/retrieval-integration.sh
 printf '%s\n' 'integration gate: PASS'

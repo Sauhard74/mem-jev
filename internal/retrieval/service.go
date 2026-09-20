@@ -14,12 +14,14 @@ import (
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/eligibility"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/ranking"
 )
 
 var (
-	ErrServiceUnavailable = errors.New("retrieval service unavailable")
-	ErrRecallDenied       = errors.New("retrieval recall not permitted")
+	ErrServiceUnavailable  = errors.New("retrieval service unavailable")
+	ErrRecallDenied        = errors.New("retrieval recall not permitted")
+	ErrIdempotencyConflict = errors.New("retrieval idempotency conflict")
 )
 
 type DecisionRepository interface {
@@ -108,6 +110,7 @@ type ServiceResponse struct {
 	QueryHash    string
 	Degraded     []DegradedChannel
 	Approximate  bool
+	Replayed     bool
 }
 
 type ServiceError struct {
@@ -174,7 +177,8 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		existing, findErr := s.repository.RetrievalRun(ctx, request.TenantID, runID)
 		if findErr == nil {
 			if existing.QueryHash != query.Hash {
-				return ServiceResponse{}, &ServiceError{Code: "idempotency_conflict", RunID: runID, Err: ErrInvalidRun}
+				observability.RecordRetrievalReplayMismatch(ctx)
+				return ServiceResponse{}, &ServiceError{Code: "idempotency_conflict", RunID: runID, Err: ErrIdempotencyConflict}
 			}
 			return s.responseFromRun(ctx, existing)
 		}
@@ -206,6 +210,12 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	if err != nil {
 		return ServiceResponse{}, err
 	}
+	for _, result := range collection.Results {
+		observability.RecordRetrievalChannel(ctx, string(result.Channel), "complete", time.Duration(result.LatencyMicros)*time.Microsecond)
+	}
+	for _, item := range collection.Degraded {
+		observability.RecordRetrievalChannel(ctx, string(item.Channel), item.Code, time.Duration(item.LatencyMicros)*time.Microsecond)
+	}
 	executions, hits := persistedChannels(collection)
 	if missing := requiredDegradation(collection.Degraded, s.config.RequiredChannels); missing != "" {
 		run, buildErr := s.buildRun(runID, request.TenantID, query, envelope, snapshot, executions, hits, nil, nil, RunFailed, "required_channel_unavailable:"+missing, nil, started)
@@ -213,6 +223,7 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 			return ServiceResponse{}, buildErr
 		}
 		if saveErr := s.repository.SaveRetrievalRun(ctx, run); saveErr != nil {
+			observability.RecordRetrievalPersistenceFailure(ctx, "required_channel_unavailable")
 			return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: runID, Err: saveErr}
 		}
 		return ServiceResponse{}, &ServiceError{Code: "required_channel_unavailable", RunID: runID, Err: ErrServiceUnavailable}
@@ -255,6 +266,9 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 			return ServiceResponse{}, &ServiceError{Code: "candidate_snapshot_missing", RunID: runID, Err: ErrServiceUnavailable}
 		}
 		decision := eligibility.Evaluate(policy.PolicySpec, eligibilityContext, eligibilityCandidateFrom(document))
+		for _, rejection := range decision.Rejections {
+			observability.RecordRetrievalGateRejection(ctx, string(rejection.Code))
+		}
 		decisionByID[document.ProcedureVersionID] = decision
 		gate, gateErr := persistedGate(document.ProcedureVersionID, decision)
 		if gateErr != nil {
@@ -319,7 +333,7 @@ func (s *Service) runID(tenantID domain.TenantID, requestIdentityHash string) (s
 }
 
 func (s *Service) responseFromRun(ctx context.Context, run Run) (ServiceResponse, error) {
-	response := ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash}
+	response := ServiceResponse{RunID: run.ID, Disposition: run.Disposition, DecisionCode: run.DecisionCode, Snapshot: run.Snapshot, QueryHash: run.QueryHash, Replayed: true}
 	for _, execution := range run.ChannelExecutions {
 		response.Approximate = response.Approximate || execution.Approximate && execution.Complete
 		if !execution.Complete {
@@ -384,6 +398,7 @@ func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID dom
 		return ServiceResponse{}, err
 	}
 	if err = s.repository.SaveRetrievalRun(ctx, run); err != nil {
+		observability.RecordRetrievalPersistenceFailure(ctx, "save_run")
 		return ServiceResponse{}, &ServiceError{Code: "run_persistence_failed", RunID: runID, Err: err}
 	}
 	return ServiceResponse{RunID: runID, Disposition: disposition, DecisionCode: code, Snapshot: snapshot, QueryHash: query.Hash, Degraded: append([]DegradedChannel(nil), collection.Degraded...), Approximate: collection.Approximate}, nil

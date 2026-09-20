@@ -35,7 +35,7 @@ func TestSurrealRetrievalRunRollsBackPartialWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedServingManifests(t, db)
-	repository := newRetrievalRunRepository(db, failureAfterRetrievalChildren)
+	repository := &RetrievalRunRepository{db: db, failure: failureAfterRetrievalChildren}
 	config := storetest.ValidServingConfig(t, "tenant_a")
 	if err := repository.ActivateServingConfig(context.Background(), config); err != nil {
 		t.Fatal(err)

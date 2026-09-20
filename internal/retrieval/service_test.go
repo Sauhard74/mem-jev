@@ -122,8 +122,8 @@ func TestServiceReplaysIdempotentRequestWithoutRerunningChannels(t *testing.T) {
 	}
 	changed := fixture.request
 	changed.Input.Task = "different task"
-	if _, err = fixture.service.Retrieve(context.Background(), changed); err == nil {
-		t.Fatal("changed request reused idempotency identity")
+	if _, err = fixture.service.Retrieve(context.Background(), changed); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed request conflict = %v", err)
 	}
 }
 

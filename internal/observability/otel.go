@@ -98,6 +98,13 @@ type OutcomeMetrics struct {
 	Conflict   bool
 }
 
+type RetrievalMetrics struct {
+	ResultCode, Disposition string
+	Latency                 time.Duration
+	Candidates              int
+	Replayed                bool
+}
+
 var (
 	metricsOnce                 sync.Once
 	requests                    metric.Int64Counter
@@ -121,6 +128,15 @@ var (
 	outboxDeadLetters           metric.Int64Counter
 	projectionLag               metric.Float64Histogram
 	projectionRebuildMismatches metric.Int64Counter
+	retrievalRequests           metric.Int64Counter
+	retrievalLatency            metric.Float64Histogram
+	retrievalCandidates         metric.Int64Histogram
+	retrievalReplays            metric.Int64Counter
+	retrievalChannels           metric.Int64Counter
+	retrievalChannelLatency     metric.Float64Histogram
+	retrievalGateRejections     metric.Int64Counter
+	retrievalPersistenceFailure metric.Int64Counter
+	retrievalReplayMismatch     metric.Int64Counter
 )
 
 func initializeMetrics() {
@@ -146,6 +162,48 @@ func initializeMetrics() {
 	outboxDeadLetters, _ = meter.Int64Counter("memjev.outbox.dead_letters")
 	projectionLag, _ = meter.Float64Histogram("memjev.projection.lag", metric.WithUnit("s"))
 	projectionRebuildMismatches, _ = meter.Int64Counter("memjev.projection.rebuild_mismatches")
+	retrievalRequests, _ = meter.Int64Counter("memjev.retrieval.requests")
+	retrievalLatency, _ = meter.Float64Histogram("memjev.retrieval.duration", metric.WithUnit("ms"))
+	retrievalCandidates, _ = meter.Int64Histogram("memjev.retrieval.candidates")
+	retrievalReplays, _ = meter.Int64Counter("memjev.retrieval.replays")
+	retrievalChannels, _ = meter.Int64Counter("memjev.retrieval.channels")
+	retrievalChannelLatency, _ = meter.Float64Histogram("memjev.retrieval.channel.duration", metric.WithUnit("ms"))
+	retrievalGateRejections, _ = meter.Int64Counter("memjev.retrieval.gate_rejections")
+	retrievalPersistenceFailure, _ = meter.Int64Counter("memjev.retrieval.persistence_failures")
+	retrievalReplayMismatch, _ = meter.Int64Counter("memjev.retrieval.replay_mismatches")
+}
+
+func RecordRetrieval(ctx context.Context, facts RetrievalMetrics) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("result.code", facts.ResultCode), attribute.String("disposition", facts.Disposition))
+	retrievalRequests.Add(ctx, 1, options)
+	retrievalLatency.Record(ctx, float64(facts.Latency.Microseconds())/1000, options)
+	retrievalCandidates.Record(ctx, int64(facts.Candidates), options)
+	if facts.Replayed {
+		retrievalReplays.Add(ctx, 1, options)
+	}
+}
+
+func RecordRetrievalChannel(ctx context.Context, channel, result string, latency time.Duration) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("channel", channel), attribute.String("result.code", result))
+	retrievalChannels.Add(ctx, 1, options)
+	retrievalChannelLatency.Record(ctx, float64(latency.Microseconds())/1000, options)
+}
+
+func RecordRetrievalGateRejection(ctx context.Context, code string) {
+	metricsOnce.Do(initializeMetrics)
+	retrievalGateRejections.Add(ctx, 1, metric.WithAttributes(attribute.String("reason.code", code)))
+}
+
+func RecordRetrievalPersistenceFailure(ctx context.Context, code string) {
+	metricsOnce.Do(initializeMetrics)
+	retrievalPersistenceFailure.Add(ctx, 1, metric.WithAttributes(attribute.String("reason.code", code)))
+}
+
+func RecordRetrievalReplayMismatch(ctx context.Context) {
+	metricsOnce.Do(initializeMetrics)
+	retrievalReplayMismatch.Add(ctx, 1)
 }
 
 func RecordArchiveCorruption(ctx context.Context, code string) {

@@ -1,0 +1,39 @@
+groups:
+  - name: memjev-retrieval
+    rules:
+      - alert: MemjevRetrievalPersistenceFailure
+        expr: increase(memjev_retrieval_persistence_failures_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: A retrieval decision could not be durably recorded
+      - alert: MemjevRetrievalReplayMismatch
+        expr: increase(memjev_retrieval_replay_mismatches_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: An idempotency identity was reused for a different canonical query
+      - alert: MemjevRequiredRetrievalChannelUnavailable
+        expr: sum(rate(memjev_retrieval_requests_total{result_code="required_channel_unavailable"}[5m])) > 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: A required deterministic retrieval channel is unavailable
+      - alert: MemjevRetrievalLatencySLOBreach
+        expr: histogram_quantile(0.95, sum by (le) (rate(memjev_retrieval_duration_milliseconds_bucket{result_code="ok"}[10m]))) > 250
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Deterministic no-Jev retrieval p95 exceeds 250 ms
+      - alert: MemjevRetrievalAbstentionSurge
+        expr: sum(rate(memjev_retrieval_requests_total{disposition="abstained"}[15m])) / clamp_min(sum(rate(memjev_retrieval_requests_total[15m])), 0.001) > 0.25
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 25 percent of retrieval requests are abstaining
+      - alert: MemjevRetrievalChannelDegradation
+        expr: sum by (channel, result_code) (rate(memjev_retrieval_channels_total{result_code!="complete"}[10m])) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: A retrieval channel is persistently degraded

@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"connectrpc.com/connect"
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/security"
@@ -22,6 +25,7 @@ type retrievalHandler struct {
 }
 
 func (h *retrievalHandler) Retrieve(ctx context.Context, request *connect.Request[memjevv1.RetrieveRequest]) (*connect.Response[memjevv1.RetrieveResponse], error) {
+	started := time.Now()
 	principal, ok := security.PrincipalFromContext(ctx)
 	if !ok {
 		return nil, safeConnectError(ctx, connect.CodeUnauthenticated, "authentication_required", false)
@@ -35,9 +39,25 @@ func (h *retrievalHandler) Retrieve(ctx context.Context, request *connect.Reques
 	}
 	result, err := h.service.Retrieve(ctx, retrieval.ServiceRequest{TenantID: principal.TenantID, CurrentPolicyVersion: h.currentPolicyVersion, RequestIdentityHash: metadata.IdempotencyKeyHash, Input: retrieval.InputFromProto(request.Msg), RecallAllowed: principal.Consent == policy.RecallOnly || principal.Consent == policy.LearnAndRecall, AllowedResidencyRegions: []string{principal.Region}})
 	if err != nil {
+		observability.RecordRetrieval(ctx, observability.RetrievalMetrics{ResultCode: retrievalMetricCode(err), Latency: time.Since(started)})
 		return nil, mapDomainError(ctx, err)
 	}
+	observability.RecordRetrieval(ctx, observability.RetrievalMetrics{ResultCode: "ok", Disposition: string(result.Disposition), Latency: time.Since(started), Candidates: len(result.Candidates), Replayed: result.Replayed})
 	return connect.NewResponse(retrieveResponse(result)), nil
+}
+
+func retrievalMetricCode(err error) string {
+	var serviceErr *retrieval.ServiceError
+	if errors.As(err, &serviceErr) {
+		return serviceErr.Code
+	}
+	if errors.Is(err, retrieval.ErrRecallDenied) {
+		return "recall_not_permitted"
+	}
+	if errors.Is(err, retrieval.ErrInvalidQuery) || errors.Is(err, retrieval.ErrInvalidRun) {
+		return "invalid_retrieval"
+	}
+	return "failed"
 }
 
 func (h *retrievalHandler) ExplainRetrieval(ctx context.Context, request *connect.Request[memjevv1.ExplainRetrievalRequest]) (*connect.Response[memjevv1.ExplainRetrievalResponse], error) {

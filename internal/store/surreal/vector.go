@@ -159,7 +159,7 @@ func findVectorGeneration(ctx context.Context, db *surrealdb.DB, tenantID, id st
 		return VectorGeneration{}, false, nil
 	}
 	row := (*results)[0].Result[0]
-	return VectorGeneration{SchemaVersion: row.SchemaVersion, TenantID: row.TenantID, IndexManifestID: row.IndexManifestID, EmbeddingID: row.EmbeddingID, TableName: row.TableName, IndexName: row.IndexName, Dimension: row.Dimension, Distance: row.Distance, Algorithm: row.Algorithm, Tuning: row.Tuning, State: row.State, ContentHash: row.ContentHash}, true, nil
+	return VectorGeneration(row), true, nil
 }
 
 func createOrVerifyRecord(ctx context.Context, db *surrealdb.DB, id models.RecordID, record map[string]any, table, idField, tenantID, logicalID, contentHash string) error {
