@@ -105,6 +105,46 @@ func TestLoadProductionRejectsPlaintextEmbeddingProvider(t *testing.T) {
 	}
 }
 
+func TestLoadProductionAcceptsPinnedDirectTypeSafeJev(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_JEV_ENABLED", "true")
+	t.Setenv("MEMJEV_JEV_MODEL", "jev-1.13.0")
+	t.Setenv("MEMJEV_JEV_API_KEY_FILE", "/run/secrets/typesafe-api-key")
+	t.Setenv("MEMJEV_JEV_TIMEOUT", "450ms")
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Jev.Enabled || got.Jev.Endpoint != "https://api.typesafe.ai/v1/systemone" || got.Jev.AllowedHost != "api.typesafe.ai" || got.Jev.Model != "jev-1.13.0" || got.Jev.Timeout != 450*time.Millisecond {
+		t.Fatalf("Jev config = %#v", got.Jev)
+	}
+}
+
+func TestLoadRejectsIncompleteOrMovingJevConfiguration(t *testing.T) {
+	for _, model := range []string{"", "jev-latest", "jev-preview"} {
+		t.Run(model, func(t *testing.T) {
+			setValidDurableEnvironment(t)
+			t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+			t.Setenv("MEMJEV_JEV_ENABLED", "true")
+			t.Setenv("MEMJEV_JEV_MODEL", model)
+			t.Setenv("MEMJEV_JEV_API_KEY_FILE", "/run/secrets/typesafe-api-key")
+			if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("model %q error = %v", model, err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsJevFieldsWhenDisabled(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_JEV_MODEL", "jev-1.13.0")
+	if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestLoadWorkerParsesDurableLeaseAndTemporalConfiguration(t *testing.T) {
 	setValidDurableEnvironment(t)
 	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")

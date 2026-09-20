@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 var (
 	ErrUnknownVariable = errors.New("unknown MEMJEV environment variable")
 	ErrInvalidConfig   = errors.New("invalid configuration")
+	pinnedJevModel     = regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`)
 )
 
 var allowedVariables = map[string]struct{}{
@@ -35,6 +37,11 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT": {}, "MEMJEV_RETRIEVAL_RETENTION": {}, "MEMJEV_RETRIEVAL_MINIMUM_SCORE": {}, "MEMJEV_RETRIEVAL_MAX_SELECTIONS": {},
 	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
 	"MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE": {}, "MEMJEV_EMBEDDING_PROVIDER_ENDPOINT": {}, "MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE": {},
+	"MEMJEV_JEV_ENABLED": {}, "MEMJEV_JEV_MODEL": {}, "MEMJEV_JEV_API_KEY_FILE": {}, "MEMJEV_JEV_TIMEOUT": {},
+	"MEMJEV_JEV_MAX_REQUEST_BYTES": {}, "MEMJEV_JEV_MAX_RESPONSE_BYTES": {}, "MEMJEV_JEV_REUSE_DURATION": {}, "MEMJEV_JEV_MINIMUM_REMAINING": {},
+	"MEMJEV_JEV_MAX_CONCURRENT": {}, "MEMJEV_JEV_GLOBAL_TOKEN_RATE": {}, "MEMJEV_JEV_GLOBAL_TOKEN_BURST": {},
+	"MEMJEV_JEV_TENANT_TOKEN_RATE": {}, "MEMJEV_JEV_TENANT_TOKEN_BURST": {}, "MEMJEV_JEV_MAX_TENANT_LIMITERS": {},
+	"MEMJEV_JEV_CIRCUIT_FAILURE_THRESHOLD": {}, "MEMJEV_JEV_CIRCUIT_OPEN_DURATION": {}, "MEMJEV_JEV_MAX_CANDIDATES": {}, "MEMJEV_JEV_AMBIGUITY_SCORE_DISTANCE": {},
 }
 
 type Config struct {
@@ -50,6 +57,7 @@ type Config struct {
 	Temporal        TemporalConfig
 	Worker          WorkerConfig
 	Retrieval       RetrievalConfig
+	Jev             JevConfig
 	OTLPEndpoint    string
 	Build           BuildConfig
 }
@@ -84,6 +92,22 @@ type RetrievalConfig struct {
 	VectorConfigFile                          string
 	EmbeddingProviderEndpoint                 string
 	EmbeddingProviderTokenFile                string
+}
+
+type JevConfig struct {
+	Enabled                                   bool
+	Endpoint, AllowedHost, Model              string
+	APIKeyFile                                string
+	Timeout, ReuseDuration                    time.Duration
+	MinimumRemaining, CircuitOpenDuration     time.Duration
+	MaximumRequestBytes, MaximumResponseBytes int64
+	MaximumConcurrent                         int
+	GlobalTokenRate, TenantTokenRate          float64
+	GlobalTokenBurst, TenantTokenBurst        int
+	MaximumTenantLimiters                     int
+	CircuitFailureThreshold                   uint32
+	MaximumCandidates                         uint32
+	AmbiguityScoreDistance                    int64
 }
 
 func (c RetrievalConfig) VectorEnabled() bool {
@@ -165,6 +189,13 @@ func load() (Config, error) {
 			VectorConfigFile: os.Getenv("MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE"), EmbeddingProviderEndpoint: os.Getenv("MEMJEV_EMBEDDING_PROVIDER_ENDPOINT"),
 			EmbeddingProviderTokenFile: os.Getenv("MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE"),
 		},
+		Jev: JevConfig{
+			Endpoint: "https://api.typesafe.ai/v1/systemone", AllowedHost: "api.typesafe.ai", Model: os.Getenv("MEMJEV_JEV_MODEL"), APIKeyFile: os.Getenv("MEMJEV_JEV_API_KEY_FILE"),
+			Timeout: 500 * time.Millisecond, ReuseDuration: 7 * 24 * time.Hour, MinimumRemaining: 650 * time.Millisecond, CircuitOpenDuration: 30 * time.Second,
+			MaximumRequestBytes: 256 << 10, MaximumResponseBytes: 1 << 20, MaximumConcurrent: 64,
+			GlobalTokenRate: 200_000, GlobalTokenBurst: 250_000, TenantTokenRate: 20_000, TenantTokenBurst: 25_000,
+			MaximumTenantLimiters: 100_000, CircuitFailureThreshold: 5, MaximumCandidates: 3, AmbiguityScoreDistance: 100_000_000,
+		},
 		Build: BuildConfig{Version: valueOr("MEMJEV_BUILD_VERSION", "dev"), Commit: valueOr("MEMJEV_BUILD_COMMIT", "unknown"), BuiltAt: valueOr("MEMJEV_BUILD_AT", "unknown")},
 	}
 	if config.Environment == "development" && config.Retrieval.QueryKeyBase64 == "" {
@@ -190,6 +221,79 @@ func load() (Config, error) {
 			return Config{}, fieldError("MEMJEV_TENANT_METRICS")
 		}
 		config.TenantMetrics = parsed
+	}
+	if raw := os.Getenv("MEMJEV_JEV_ENABLED"); raw != "" {
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			return Config{}, fieldError("MEMJEV_JEV_ENABLED")
+		}
+		config.Jev.Enabled = parsed
+	}
+	jevDurations := []struct {
+		name   string
+		target *time.Duration
+	}{{"MEMJEV_JEV_TIMEOUT", &config.Jev.Timeout}, {"MEMJEV_JEV_REUSE_DURATION", &config.Jev.ReuseDuration}, {"MEMJEV_JEV_MINIMUM_REMAINING", &config.Jev.MinimumRemaining}, {"MEMJEV_JEV_CIRCUIT_OPEN_DURATION", &config.Jev.CircuitOpenDuration}}
+	for _, item := range jevDurations {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, parseErr := time.ParseDuration(raw)
+			if parseErr != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	jevInt64s := []struct {
+		name   string
+		target *int64
+	}{{"MEMJEV_JEV_MAX_REQUEST_BYTES", &config.Jev.MaximumRequestBytes}, {"MEMJEV_JEV_MAX_RESPONSE_BYTES", &config.Jev.MaximumResponseBytes}, {"MEMJEV_JEV_AMBIGUITY_SCORE_DISTANCE", &config.Jev.AmbiguityScoreDistance}}
+	for _, item := range jevInt64s {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	jevInts := []struct {
+		name   string
+		target *int
+	}{{"MEMJEV_JEV_MAX_CONCURRENT", &config.Jev.MaximumConcurrent}, {"MEMJEV_JEV_GLOBAL_TOKEN_BURST", &config.Jev.GlobalTokenBurst}, {"MEMJEV_JEV_TENANT_TOKEN_BURST", &config.Jev.TenantTokenBurst}, {"MEMJEV_JEV_MAX_TENANT_LIMITERS", &config.Jev.MaximumTenantLimiters}}
+	for _, item := range jevInts {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, parseErr := strconv.Atoi(raw)
+			if parseErr != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	jevRates := []struct {
+		name   string
+		target *float64
+	}{{"MEMJEV_JEV_GLOBAL_TOKEN_RATE", &config.Jev.GlobalTokenRate}, {"MEMJEV_JEV_TENANT_TOKEN_RATE", &config.Jev.TenantTokenRate}}
+	for _, item := range jevRates {
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, parseErr := strconv.ParseFloat(raw, 64)
+			if parseErr != nil || parsed <= 0 {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	if raw := os.Getenv("MEMJEV_JEV_CIRCUIT_FAILURE_THRESHOLD"); raw != "" {
+		parsed, parseErr := strconv.ParseUint(raw, 10, 32)
+		if parseErr != nil || parsed == 0 {
+			return Config{}, fieldError("MEMJEV_JEV_CIRCUIT_FAILURE_THRESHOLD")
+		}
+		config.Jev.CircuitFailureThreshold = uint32(parsed)
+	}
+	if raw := os.Getenv("MEMJEV_JEV_MAX_CANDIDATES"); raw != "" {
+		parsed, parseErr := strconv.ParseUint(raw, 10, 32)
+		if parseErr != nil || parsed < 2 {
+			return Config{}, fieldError("MEMJEV_JEV_MAX_CANDIDATES")
+		}
+		config.Jev.MaximumCandidates = uint32(parsed)
 	}
 	retrievalDurations := []struct {
 		name   string
@@ -271,6 +375,14 @@ func validate(config Config, requireAPICredentials bool) error {
 	}
 	if config.Retrieval.PolicyVersion == "" || config.Retrieval.QueryKeyID == "" || config.Retrieval.ChannelTimeout <= 0 || config.Retrieval.ChannelTimeout > config.RequestTimeout || config.Retrieval.Retention <= 0 || config.Retrieval.Retention > 30*24*time.Hour || config.Retrieval.MaximumSelections == 0 || config.Retrieval.MaximumSelections > 100 || config.Retrieval.ExactManifestID == "" || config.Retrieval.LexicalManifestID == "" || config.Retrieval.FacetManifestID == "" || config.Retrieval.GraphManifestID == "" {
 		return fieldError("retrieval configuration")
+	}
+	if !config.Jev.Enabled && (config.Jev.Model != "" || config.Jev.APIKeyFile != "") {
+		return fieldError("Jev configuration while disabled")
+	}
+	if config.Jev.Enabled {
+		if config.Jev.Endpoint != "https://api.typesafe.ai/v1/systemone" || config.Jev.AllowedHost != "api.typesafe.ai" || !pinnedJevModel.MatchString(config.Jev.Model) || config.Jev.APIKeyFile == "" || config.Jev.Timeout <= 0 || config.Jev.Timeout >= config.RequestTimeout || config.Jev.MinimumRemaining <= config.Jev.Timeout || config.Jev.MinimumRemaining >= config.RequestTimeout || config.Jev.ReuseDuration <= 0 || config.Jev.ReuseDuration > 365*24*time.Hour || config.Jev.MaximumRequestBytes < 1_024 || config.Jev.MaximumRequestBytes > 16<<20 || config.Jev.MaximumResponseBytes < 1_024 || config.Jev.MaximumResponseBytes > 16<<20 || config.Jev.MaximumConcurrent <= 0 || config.Jev.MaximumConcurrent > 10_000 || config.Jev.GlobalTokenRate <= 0 || config.Jev.TenantTokenRate <= 0 || config.Jev.GlobalTokenBurst <= 0 || config.Jev.TenantTokenBurst <= 0 || config.Jev.TenantTokenBurst > config.Jev.GlobalTokenBurst || config.Jev.MaximumTenantLimiters <= 0 || config.Jev.CircuitFailureThreshold == 0 || config.Jev.CircuitOpenDuration <= 0 || config.Jev.MaximumCandidates < 2 || config.Jev.MaximumCandidates > 32 || config.Jev.AmbiguityScoreDistance <= 0 {
+			return fieldError("Jev configuration")
+		}
 	}
 	if config.Environment != "development" && config.Retrieval.QueryKeyBase64 == "" {
 		return fieldError("MEMJEV_RETRIEVAL_QUERY_KEY_BASE64")
