@@ -46,6 +46,8 @@ type CanonicalOutcome struct {
 	TraceID             TraceID           `json:"trace_id"`
 	ExecutionID         string            `json:"execution_id,omitempty"`
 	SelectionID         string            `json:"selection_id,omitempty"`
+	InjectionID         string            `json:"injection_id,omitempty"`
+	TaskExecutionID     string            `json:"task_execution_id,omitempty"`
 	SupersedesOutcomeID OutcomeID         `json:"supersedes_outcome_id,omitempty"`
 	CorrectionReason    string            `json:"correction_reason,omitempty"`
 	Evidence            []OutcomeEvidence `json:"evidence"`

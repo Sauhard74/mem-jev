@@ -445,7 +445,7 @@ func (r *fakePlanIssuer) Issue(_ context.Context, run Run, _ []Document) (PlanAr
 	if r.plan != nil {
 		return *r.plan, nil
 	}
-	plan := PlanArtifact{InjectionID: "inj_test", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), TenantID: run.TenantID, RetrievalRunID: run.ID, QueryHash: run.QueryHash, RequestContextHash: run.RequestContextHash, ProjectionEpoch: run.Snapshot.ProjectionEpoch, Complete: true, NoveltyClass: "exact", Nodes: []PlanNode{{VersionID: run.SelectedVersionIDs[0], InterfaceHash: strings.Repeat("3", 64)}}}
+	plan := PlanArtifact{InjectionID: "inj_test", TaskExecutionID: "texec_test", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), TenantID: run.TenantID, RetrievalRunID: run.ID, QueryHash: run.QueryHash, RequestContextHash: run.RequestContextHash, ProjectionEpoch: run.Snapshot.ProjectionEpoch, Complete: true, NoveltyClass: "exact", Nodes: []PlanNode{{VersionID: run.SelectedVersionIDs[0], InterfaceHash: strings.Repeat("3", 64)}}}
 	r.plan = &plan
 	return plan, nil
 }

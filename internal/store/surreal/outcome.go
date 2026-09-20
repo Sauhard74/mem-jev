@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/store"
@@ -83,10 +84,25 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 		return store.OutcomeReceipt{}, store.ErrOutcomeTraceNotFound
 	}
 	if request.Outcome.SelectionID != "" {
-		// Selection records are introduced by the retrieval slice. Until that
-		// tenant-scoped lookup exists, fail closed rather than accepting an
-		// unattributable causal link.
+		// The legacy selection_id field never carried the immutable injection
+		// contract. Fail closed; attributed outcomes use injection_id instead.
 		return store.OutcomeReceipt{}, store.ErrOutcomeSelectionNotFound
+	}
+	if request.Credit != nil {
+		valid, validationErr := creditSelectionValid(ctx, tx, request, r.now().UTC())
+		if validationErr != nil {
+			return store.OutcomeReceipt{}, validationErr
+		}
+		if !valid {
+			return store.OutcomeReceipt{}, store.ErrOutcomeSelectionNotFound
+		}
+		claimedOutcome, claimed, claimErr := claimedCreditOutcome(ctx, tx, request.TenantID, request.Credit.InjectionID)
+		if claimErr != nil {
+			return store.OutcomeReceipt{}, claimErr
+		}
+		if claimed && claimedOutcome != request.Outcome.ID {
+			return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
+		}
 	}
 	if request.Outcome.SupersedesOutcomeID != "" {
 		previousTraceID, found, findErr := findOutcomeTrace(ctx, tx, request.TenantID, request.Outcome.SupersedesOutcomeID)
@@ -104,6 +120,9 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 		WorkflowID: store.OutcomeWorkflowID(request.TenantID, request.Outcome.TraceID, request.Outcome.ID),
 		State:      request.Evaluation.State, PromotionEligible: request.Evaluation.PromotionEligible,
 		PolicyVersion: request.Evaluation.PolicyVersion, Disposition: store.OutcomeDispositionAccepted, CreatedAt: createdAt,
+	}
+	if request.Credit != nil {
+		receipt.OutcomeCreditID, receipt.CreditClass = request.Credit.ID, request.Credit.Class
 	}
 	if err := createOutcomeReceipt(ctx, tx, request, receipt); err != nil {
 		return store.OutcomeReceipt{}, err
@@ -132,6 +151,11 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 			return store.OutcomeReceipt{}, err
 		}
 	}
+	if request.Credit != nil {
+		if err := createOutcomeCredit(ctx, tx, *request.Credit); err != nil {
+			return store.OutcomeReceipt{}, err
+		}
+	}
 	if err := createOutcomeOutbox(ctx, tx, request, receipt, createdAt); err != nil {
 		return store.OutcomeReceipt{}, err
 	}
@@ -152,13 +176,15 @@ type outcomeReceiptRow struct {
 	PromotionEligible bool      `json:"promotion_eligible"`
 	PolicyVersion     string    `json:"policy_version"`
 	CreatedAt         time.Time `json:"created_at"`
+	OutcomeCreditID   string    `json:"outcome_credit_id"`
+	CreditClass       string    `json:"credit_class"`
 }
 
 func findOutcomeReceipt[S interface {
 	*surrealdb.DB | *surrealdb.Transaction
 }](ctx context.Context, sender S, tenantID domain.TenantID, keyHash string) (store.OutcomeReceipt, bool, error) {
 	results, err := surrealdb.Query[[]outcomeReceiptRow](ctx, sender, `
-		SELECT receipt_id, tenant_id, outcome_id, trace_id, content_hash, state, promotion_eligible, policy_version, created_at
+		SELECT receipt_id, tenant_id, outcome_id, trace_id, content_hash, state, promotion_eligible, policy_version, outcome_credit_id, credit_class, created_at
 		FROM outcome_receipt WHERE tenant_id = $tenant_id AND idempotency_key_hash = $key_hash LIMIT 1`,
 		map[string]any{"tenant_id": string(tenantID), "key_hash": keyHash})
 	if err != nil || results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
@@ -171,6 +197,7 @@ func findOutcomeReceipt[S interface {
 		WorkflowID: store.OutcomeWorkflowID(domain.TenantID(row.TenantID), domain.TraceID(row.TraceID), domain.OutcomeID(row.OutcomeID)),
 		State:      domain.OutcomeState(row.State), PromotionEligible: row.PromotionEligible, PolicyVersion: row.PolicyVersion,
 		Disposition: store.OutcomeDispositionAccepted, CreatedAt: row.CreatedAt,
+		OutcomeCreditID: row.OutcomeCreditID, CreditClass: credit.Class(row.CreditClass),
 	}
 	return receipt, true, nil
 }
@@ -216,13 +243,47 @@ func findOutcomeHash(ctx context.Context, tx *surrealdb.Transaction, tenantID do
 	return (*results)[0].Result[0].ContentHash, true, nil
 }
 
+func creditSelectionValid(ctx context.Context, tx *surrealdb.Transaction, request store.CommitOutcomeRequest, now time.Time) (bool, error) {
+	rows, err := surrealdb.Query[[]struct {
+		InjectionID string `json:"injection_id"`
+	}](ctx, tx, `SELECT injection_id FROM selection_record WHERE tenant_id = $tenant_id AND injection_id = $injection_id AND content_hash = $selection_hash AND expires_at > $now LIMIT 1`, map[string]any{"tenant_id": string(request.TenantID), "injection_id": request.Credit.InjectionID, "selection_hash": request.Credit.SelectionHash, "now": now})
+	return err == nil && rows != nil && len(*rows) > 0 && len((*rows)[0].Result) > 0, err
+}
+
+func claimedCreditOutcome(ctx context.Context, tx *surrealdb.Transaction, tenantID domain.TenantID, injectionID string) (domain.OutcomeID, bool, error) {
+	rows, err := surrealdb.Query[[]struct {
+		OutcomeID string `json:"outcome_id"`
+	}](ctx, tx, `SELECT outcome_id, created_at FROM outcome_credit WHERE tenant_id = $tenant_id AND injection_id = $injection_id ORDER BY created_at DESC LIMIT 1`, map[string]any{"tenant_id": string(tenantID), "injection_id": injectionID})
+	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
+		return "", false, err
+	}
+	return domain.OutcomeID((*rows)[0].Result[0].OutcomeID), true, nil
+}
+
+func createOutcomeCredit(ctx context.Context, tx *surrealdb.Transaction, record credit.Record) error {
+	value := map[string]any{
+		"tenant_id": string(record.TenantID), "outcome_credit_id": record.ID, "outcome_id": string(record.OutcomeID), "injection_id": record.InjectionID,
+		"task_execution_id": record.TaskExecutionID, "credit_class": string(record.Class), "rule_manifest_id": record.RuleManifestID,
+		"selection_hash": record.SelectionHash, "reason_codes": record.ReasonCodes, "canonical_credit": string(record.CanonicalJSON),
+		"created_at": record.CreatedAt, "expires_at": record.ExpiresAt, "schema_version": record.SchemaVersion, "content_hash": record.ContentHash,
+	}
+	if record.ProcedureVersionID != "" {
+		value["procedure_version_id"] = record.ProcedureVersionID
+	}
+	return execute(ctx, tx, "create outcome credit", "CREATE ONLY outcome_credit CONTENT $record", map[string]any{"record": value})
+}
+
 func createOutcomeReceipt(ctx context.Context, tx *surrealdb.Transaction, request store.CommitOutcomeRequest, receipt store.OutcomeReceipt) error {
-	return execute(ctx, tx, "create outcome receipt", "CREATE ONLY outcome_receipt CONTENT $record", map[string]any{"record": map[string]any{
+	value := map[string]any{
 		"tenant_id": string(request.TenantID), "receipt_id": receipt.ID, "outcome_id": string(receipt.OutcomeID),
 		"trace_id": string(receipt.TraceID), "idempotency_key_hash": request.IdempotencyKeyHash,
 		"state": string(receipt.State), "promotion_eligible": receipt.PromotionEligible, "policy_version": receipt.PolicyVersion,
 		"created_at": receipt.CreatedAt, "schema_version": request.Outcome.SchemaVersion, "content_hash": request.Outcome.Hash,
-	}})
+	}
+	if receipt.OutcomeCreditID != "" {
+		value["outcome_credit_id"], value["credit_class"] = receipt.OutcomeCreditID, string(receipt.CreditClass)
+	}
+	return execute(ctx, tx, "create outcome receipt", "CREATE ONLY outcome_receipt CONTENT $record", map[string]any{"record": value})
 }
 
 func createOutcome(ctx context.Context, tx *surrealdb.Transaction, request store.CommitOutcomeRequest, createdAt time.Time) error {
@@ -237,6 +298,9 @@ func createOutcome(ctx context.Context, tx *surrealdb.Transaction, request store
 	}
 	if request.Outcome.SelectionID != "" {
 		record["selection_id"] = request.Outcome.SelectionID
+	}
+	if request.Outcome.InjectionID != "" {
+		record["injection_id"], record["task_execution_id"] = request.Outcome.InjectionID, request.Outcome.TaskExecutionID
 	}
 	if request.Outcome.SupersedesOutcomeID != "" {
 		record["supersedes_outcome_id"] = string(request.Outcome.SupersedesOutcomeID)

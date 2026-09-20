@@ -228,6 +228,11 @@ func InjectionID(tenantID domain.TenantID, idempotencyHash string) string {
 	return "inj_" + hex.EncodeToString(sum[:])
 }
 
+func TaskExecutionID(injectionID string) string {
+	sum := sha256.Sum256([]byte("task-execution.v1\x00" + injectionID))
+	return "texec_" + hex.EncodeToString(sum[:])
+}
+
 func validNovelty(value NoveltyClass) bool {
 	switch value {
 	case NoveltyExact, NoveltyKnownShape, NoveltyBridged, NoveltyPartial, NoveltyUnseen:

@@ -1001,18 +1001,19 @@ func (x *ProcedurePlanProvenance) GetDocumentSetHash() string {
 }
 
 type ExecutableProcedurePlan struct {
-	state          protoimpl.MessageState     `protogen:"open.v1"`
-	InjectionId    string                     `protobuf:"bytes,1,opt,name=injection_id,json=injectionId,proto3" json:"injection_id,omitempty"`
-	Nodes          []*ProcedurePlanNode       `protobuf:"bytes,2,rep,name=nodes,proto3" json:"nodes,omitempty"`
-	Dependencies   []*ProcedurePlanDependency `protobuf:"bytes,3,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	ParallelGroups []*ProcedureParallelGroup  `protobuf:"bytes,4,rep,name=parallel_groups,json=parallelGroups,proto3" json:"parallel_groups,omitempty"`
-	Gaps           []*ProcedurePlanGap        `protobuf:"bytes,5,rep,name=gaps,proto3" json:"gaps,omitempty"`
-	LimitCodes     []string                   `protobuf:"bytes,6,rep,name=limit_codes,json=limitCodes,proto3" json:"limit_codes,omitempty"`
-	NoveltyClass   PlanNoveltyClass           `protobuf:"varint,7,opt,name=novelty_class,json=noveltyClass,proto3,enum=memjev.v1.PlanNoveltyClass" json:"novelty_class,omitempty"`
-	Complete       bool                       `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"`
-	Provenance     *ProcedurePlanProvenance   `protobuf:"bytes,9,opt,name=provenance,proto3" json:"provenance,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState     `protogen:"open.v1"`
+	InjectionId     string                     `protobuf:"bytes,1,opt,name=injection_id,json=injectionId,proto3" json:"injection_id,omitempty"`
+	Nodes           []*ProcedurePlanNode       `protobuf:"bytes,2,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Dependencies    []*ProcedurePlanDependency `protobuf:"bytes,3,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	ParallelGroups  []*ProcedureParallelGroup  `protobuf:"bytes,4,rep,name=parallel_groups,json=parallelGroups,proto3" json:"parallel_groups,omitempty"`
+	Gaps            []*ProcedurePlanGap        `protobuf:"bytes,5,rep,name=gaps,proto3" json:"gaps,omitempty"`
+	LimitCodes      []string                   `protobuf:"bytes,6,rep,name=limit_codes,json=limitCodes,proto3" json:"limit_codes,omitempty"`
+	NoveltyClass    PlanNoveltyClass           `protobuf:"varint,7,opt,name=novelty_class,json=noveltyClass,proto3,enum=memjev.v1.PlanNoveltyClass" json:"novelty_class,omitempty"`
+	Complete        bool                       `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"`
+	Provenance      *ProcedurePlanProvenance   `protobuf:"bytes,9,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	TaskExecutionId string                     `protobuf:"bytes,10,opt,name=task_execution_id,json=taskExecutionId,proto3" json:"task_execution_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ExecutableProcedurePlan) Reset() {
@@ -1106,6 +1107,13 @@ func (x *ExecutableProcedurePlan) GetProvenance() *ProcedurePlanProvenance {
 		return x.Provenance
 	}
 	return nil
+}
+
+func (x *ExecutableProcedurePlan) GetTaskExecutionId() string {
+	if x != nil {
+		return x.TaskExecutionId
+	}
+	return ""
 }
 
 type RetrieveResponse struct {
@@ -1586,7 +1594,7 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\x12ranker_manifest_id\x18\n" +
 	" \x01(\tR\x10rankerManifestId\x12*\n" +
 	"\x11serving_config_id\x18\v \x01(\tR\x0fservingConfigId\x12*\n" +
-	"\x11document_set_hash\x18\f \x01(\tR\x0fdocumentSetHash\"\xf8\x03\n" +
+	"\x11document_set_hash\x18\f \x01(\tR\x0fdocumentSetHash\"\xa4\x04\n" +
 	"\x17ExecutableProcedurePlan\x12!\n" +
 	"\finjection_id\x18\x01 \x01(\tR\vinjectionId\x122\n" +
 	"\x05nodes\x18\x02 \x03(\v2\x1c.memjev.v1.ProcedurePlanNodeR\x05nodes\x12F\n" +
@@ -1599,7 +1607,9 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\bcomplete\x18\b \x01(\bR\bcomplete\x12B\n" +
 	"\n" +
 	"provenance\x18\t \x01(\v2\".memjev.v1.ProcedurePlanProvenanceR\n" +
-	"provenance\"\xdf\x02\n" +
+	"provenance\x12*\n" +
+	"\x11task_execution_id\x18\n" +
+	" \x01(\tR\x0ftaskExecutionId\"\xdf\x02\n" +
 	"\x10RetrieveResponse\x12(\n" +
 	"\x10retrieval_run_id\x18\x01 \x01(\tR\x0eretrievalRunId\x12A\n" +
 	"\vdisposition\x18\x02 \x01(\x0e2\x1f.memjev.v1.RetrievalDispositionR\vdisposition\x12=\n" +

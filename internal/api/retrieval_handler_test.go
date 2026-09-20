@@ -45,7 +45,7 @@ func TestRetrievalHTTPBindsServerAuthorityAndMapsResponse(t *testing.T) {
 		Snapshot:   retrieval.ServingSnapshot{ProjectionEpoch: 42, PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", Indexes: []retrieval.SnapshotIndex{{Channel: retrieval.ChannelExact, ManifestID: "idx_exact"}}},
 		Degraded:   []retrieval.DegradedChannel{{Channel: retrieval.ChannelGraph, Code: "deadline"}},
 		Candidates: []retrieval.SelectedCandidate{{VersionID: "pv_1", ProcedureID: "p_1", FinalScore: 77, Rank: 1, Lifecycle: "active", ObservedEndToEnd: true}},
-		Plan:       &retrieval.PlanArtifact{InjectionID: "inj_1", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), ProjectionEpoch: 42, NoveltyClass: "exact", Complete: true, PlannerManifestID: "pman_1", PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", ServingConfigID: "rsc_1", DocumentSetHash: strings.Repeat("3", 64), CompatibilityGraphID: "cgraph_1", CompatibilityGraphHash: strings.Repeat("4", 64), CompatibilityMatrixHash: strings.Repeat("5", 64), CandidateSetHash: strings.Repeat("6", 64), Nodes: []retrieval.PlanNode{{Ordinal: 0, VersionID: "pv_1", InterfaceHash: strings.Repeat("7", 64)}}, ParallelGroups: []retrieval.ParallelGroup{{Ordinal: 0, NodeVersionIDs: []string{"pv_1"}}}},
+		Plan:       &retrieval.PlanArtifact{InjectionID: "inj_1", TaskExecutionID: "texec_1", SelectionHash: strings.Repeat("1", 64), PlanHash: strings.Repeat("2", 64), ProjectionEpoch: 42, NoveltyClass: "exact", Complete: true, PlannerManifestID: "pman_1", PolicyManifestID: "epm_policy", RankerManifestID: "rkm_ranker", ServingConfigID: "rsc_1", DocumentSetHash: strings.Repeat("3", 64), CompatibilityGraphID: "cgraph_1", CompatibilityGraphHash: strings.Repeat("4", 64), CompatibilityMatrixHash: strings.Repeat("5", 64), CandidateSetHash: strings.Repeat("6", 64), Nodes: []retrieval.PlanNode{{Ordinal: 0, VersionID: "pv_1", InterfaceHash: strings.Repeat("7", 64)}}, ParallelGroups: []retrieval.ParallelGroup{{Ordinal: 0, NodeVersionIDs: []string{"pv_1"}}}},
 	}}
 	server := httptest.NewServer(retrievalTestHandler(fake, policy.LearnAndRecall))
 	defer server.Close()
@@ -68,7 +68,7 @@ func TestRetrievalHTTPBindsServerAuthorityAndMapsResponse(t *testing.T) {
 	if response.Msg.GetRetrievalRunId() != fake.retrieveResult.RunID || response.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || len(response.Msg.GetCandidates()) != 1 || !response.Msg.GetProvenance().GetApproximateCandidates() || response.Msg.GetProvenance().GetProjectionEpoch() != 42 {
 		t.Fatalf("response = %#v", response.Msg)
 	}
-	if response.Msg.GetPlan().GetInjectionId() != "inj_1" || len(response.Msg.GetPlan().GetNodes()) != 1 || !response.Msg.GetPlan().GetComplete() || response.Msg.GetPlan().GetProvenance().GetSelectionHash() != strings.Repeat("1", 64) {
+	if response.Msg.GetPlan().GetInjectionId() != "inj_1" || response.Msg.GetPlan().GetTaskExecutionId() != "texec_1" || len(response.Msg.GetPlan().GetNodes()) != 1 || !response.Msg.GetPlan().GetComplete() || response.Msg.GetPlan().GetProvenance().GetSelectionHash() != strings.Repeat("1", 64) {
 		t.Fatalf("plan = %#v", response.Msg.GetPlan())
 	}
 	first, err := proto.MarshalOptions{Deterministic: true}.Marshal(response.Msg)

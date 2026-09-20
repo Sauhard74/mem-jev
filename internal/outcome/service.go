@@ -10,11 +10,13 @@ import (
 
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/internal/contracts"
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/evidence"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/security"
+	"github.com/sauhard74/mem-jev/internal/selection"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
 
@@ -41,11 +43,20 @@ type Result struct {
 	PromotionEligible bool
 	PolicyVersion     string
 	Disposition       store.OutcomeDisposition
+	OutcomeCreditID   string
+	CreditClass       credit.Class
 }
 
 type Service struct {
-	repository store.OutcomeRepository
-	policy     evidence.Policy
+	repository  store.OutcomeRepository
+	policy      evidence.Policy
+	attribution *Attribution
+	clock       func() time.Time
+}
+
+type Attribution struct {
+	Selections selection.Repository
+	Rules      credit.RuleManifest
 }
 
 func DefaultPolicy() evidence.Policy {
@@ -55,10 +66,15 @@ func DefaultPolicy() evidence.Policy {
 	}
 }
 
-func NewService(repository store.OutcomeRepository, evaluationPolicy evidence.Policy) *Service {
+func NewService(repository store.OutcomeRepository, evaluationPolicy evidence.Policy, attribution ...Attribution) *Service {
 	cloned := evaluationPolicy
 	cloned.RequiredPredicates = append([]string(nil), evaluationPolicy.RequiredPredicates...)
-	return &Service{repository: repository, policy: cloned}
+	service := &Service{repository: repository, policy: cloned, clock: time.Now}
+	if len(attribution) == 1 && attribution[0].Selections != nil && attribution[0].Rules.ID != "" {
+		value := attribution[0]
+		service.attribution = &value
+	}
+	return service
 }
 
 func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
@@ -77,7 +93,7 @@ func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if s == nil || s.repository == nil || s.policy.Version == "" {
+	if s == nil || s.repository == nil || s.policy.Version == "" || s.clock == nil {
 		return Result{}, ErrMisconfigured
 	}
 	if command.Principal.TenantID == "" || command.Request == nil || !idempotencyHashPattern.MatchString(command.IdempotencyKeyHash) {
@@ -108,9 +124,24 @@ func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
 		return Result{}, fmt.Errorf("evaluate outcome: %w", ErrMisconfigured)
 	}
 	conflict = len(evaluation.ConflictPredicates) > 0
+	var outcomeCredit *credit.Record
+	if canonicalOutcome.InjectionID != "" || canonicalOutcome.TaskExecutionID != "" {
+		if canonicalOutcome.InjectionID == "" || canonicalOutcome.TaskExecutionID == "" || s.attribution == nil {
+			return Result{}, ErrInvalidCommand
+		}
+		selected, findErr := s.attribution.Selections.FindByInjectionID(ctx, command.Principal.TenantID, canonicalOutcome.InjectionID)
+		if findErr != nil {
+			return Result{}, fmt.Errorf("resolve injected plan: %w", findErr)
+		}
+		assigned, assignErr := credit.Assign(credit.AssignmentRequest{Manifest: s.attribution.Rules, Selection: selected, Outcome: canonicalOutcome, Evaluation: evaluation, InjectionID: canonicalOutcome.InjectionID, TaskExecutionID: canonicalOutcome.TaskExecutionID, Now: s.clock().UTC()})
+		if assignErr != nil {
+			return Result{}, fmt.Errorf("attribute outcome: %w", ErrInvalidCommand)
+		}
+		outcomeCredit = &assigned
+	}
 	receipt, err := s.repository.CommitOutcome(ctx, store.CommitOutcomeRequest{
 		TenantID: command.Principal.TenantID, IdempotencyKeyHash: command.IdempotencyKeyHash,
-		Outcome: canonicalOutcome, Evaluation: evaluation,
+		Outcome: canonicalOutcome, Evaluation: evaluation, Credit: outcomeCredit,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("commit outcome: %w", err)
@@ -118,7 +149,7 @@ func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
 	resultCode = string(receipt.State)
 	return Result{
 		ReceiptID: receipt.ID, OutcomeID: receipt.OutcomeID, TraceID: receipt.TraceID, State: receipt.State,
-		PromotionEligible: receipt.PromotionEligible, PolicyVersion: receipt.PolicyVersion, Disposition: receipt.Disposition,
+		PromotionEligible: receipt.PromotionEligible, PolicyVersion: receipt.PolicyVersion, Disposition: receipt.Disposition, OutcomeCreditID: receipt.OutcomeCreditID, CreditClass: receipt.CreditClass,
 	}, nil
 }
 
@@ -136,7 +167,7 @@ func inferredPredicates(facts []domain.OutcomeEvidence) []string {
 }
 
 func containsSensitiveEvidence(request *memjevv1.RecordOutcomeRequest) bool {
-	values := []string{request.GetTraceId(), request.GetExecutionId(), request.GetSelectionId(), request.GetSupersedesOutcomeId(), request.GetCorrectionReason()}
+	values := []string{request.GetTraceId(), request.GetExecutionId(), request.GetSelectionId(), request.GetInjectionId(), request.GetTaskExecutionId(), request.GetSupersedesOutcomeId(), request.GetCorrectionReason()}
 	for _, fact := range request.GetEvidence() {
 		values = append(values, fact.GetClientEvidenceId(), fact.GetPredicateId(), fact.GetVerifierId(), fact.GetVerifierVersion())
 		for _, field := range fact.GetFields() {

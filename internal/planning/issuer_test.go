@@ -77,7 +77,7 @@ func TestDeterministicIssuerCommitsAndReplaysAgentPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.InjectionID == "" || first.SelectionHash != second.SelectionHash || first.SelectionHash != replayed.SelectionHash || !first.Complete || first.NoveltyClass != "exact" || len(first.Nodes) != 1 || len(first.ParallelGroups) != 1 {
+	if first.InjectionID == "" || first.TaskExecutionID != selection.TaskExecutionID(first.InjectionID) || first.SelectionHash != second.SelectionHash || first.SelectionHash != replayed.SelectionHash || !first.Complete || first.NoveltyClass != "exact" || len(first.Nodes) != 1 || len(first.ParallelGroups) != 1 {
 		t.Fatalf("first=%#v second=%#v replayed=%#v", first, second, replayed)
 	}
 }

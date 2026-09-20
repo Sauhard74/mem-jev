@@ -19,6 +19,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
+	"github.com/sauhard74/mem-jev/internal/selection"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
 
@@ -146,6 +147,10 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason = connect.CodeNotFound, "trace_not_found"
 	case errors.Is(err, store.ErrOutcomeSelectionNotFound):
 		code, reason = connect.CodeNotFound, "selection_not_found"
+	case errors.Is(err, selection.ErrSelectionNotFound), errors.Is(err, selection.ErrSelectionExpired):
+		code, reason = connect.CodeNotFound, "selection_not_found"
+	case errors.Is(err, store.ErrOutcomeCreditClaimed):
+		code, reason = connect.CodeAlreadyExists, "outcome_credit_claimed"
 	case errors.Is(err, store.ErrOutcomeSupersessionInvalid):
 		code, reason = connect.CodeFailedPrecondition, "invalid_supersession"
 	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidRun):

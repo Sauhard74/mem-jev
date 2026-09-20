@@ -23,6 +23,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/config"
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/embedding"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
@@ -97,7 +98,7 @@ func run() int {
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
 
-	archives, ingestRepository, outcomeRepository, retrievalService, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
+	archives, ingestRepository, outcomeRepository, selectionRepository, retrievalService, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
 	if err != nil {
 		logger.Error("dependency startup failed", "error", err)
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
@@ -106,7 +107,11 @@ func run() int {
 		defer closeDatabase()
 	}
 	ingestService := ingest.NewService(archives, ingestRepository, ingest.DefaultPolicy())
-	outcomeService := outcome.NewService(outcomeRepository, outcome.DefaultPolicy())
+	creditRules, err := credit.NewRuleManifest("outcome-credit.v1", 30*time.Second)
+	if err != nil {
+		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
+	}
+	outcomeService := outcome.NewService(outcomeRepository, outcome.DefaultPolicy(), outcome.Attribution{Selections: selectionRepository, Rules: creditRules})
 	info := buildinfo.Info{Version: configuration.Build.Version, Commit: configuration.Build.Commit, BuiltAt: configuration.Build.BuiltAt}
 	server := &http.Server{
 		Addr:              configuration.ListenAddress,
@@ -140,27 +145,28 @@ func run() int {
 	return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, exitCode)
 }
 
-func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, *retrieval.Service, func(context.Context) error, func(), error) {
+func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, selection.Repository, *retrieval.Service, func(context.Context) error, func(), error) {
 	if configuration.AdapterMode == "memory" {
 		repository := storememory.NewIngestRepository()
-		return archive.NewMemoryStore(), repository, repository, nil, func(context.Context) error { return nil }, nil, nil
+		selections, err := storememory.NewSelectionRepository(selection.RetentionPolicy{TTL: configuration.Retrieval.Retention})
+		return archive.NewMemoryStore(), repository, repository, selections, nil, func(context.Context) error { return nil }, nil, err
 	}
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: configuration.Surreal.Endpoint, Namespace: configuration.Surreal.Namespace, Database: configuration.Surreal.Database,
 		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password, AuthScope: storesurreal.AuthScope(configuration.Surreal.AuthScope),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	closeDB := func() { _ = db.Close(context.Background()) }
 	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(configuration.Archive.Region))
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		if configuration.Archive.Endpoint != "" {
@@ -177,12 +183,17 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	retrievalService, err := buildRetrievalService(db, configuration.Retrieval, configuration.Environment)
+	selectionRepository, err := storesurreal.NewSelectionRepository(db, selection.RetentionPolicy{TTL: configuration.Retrieval.Retention})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	retrievalService, err := buildRetrievalService(db, selectionRepository, configuration.Retrieval, configuration.Environment)
+	if err != nil {
+		closeDB()
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	readiness := func(ctx context.Context) error {
 		if _, err := surrealdb.Query[any](ctx, db, "INFO FOR DB", nil); err != nil {
@@ -191,10 +202,10 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		_, err := s3Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(configuration.Archive.Bucket)})
 		return err
 	}
-	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), retrievalService, readiness, closeDB, nil
+	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), selectionRepository, retrievalService, readiness, closeDB, nil
 }
 
-func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfig, environment string) (*retrieval.Service, error) {
+func buildRetrievalService(db *surrealdb.DB, selectionRepository selection.Repository, configuration config.RetrievalConfig, environment string) (*retrieval.Service, error) {
 	key, err := base64.StdEncoding.DecodeString(configuration.QueryKeyBase64)
 	if err != nil || len(key) != 32 {
 		return nil, fmt.Errorf("retrieval encryption configuration is invalid")
@@ -212,10 +223,6 @@ func buildRetrievalService(db *surrealdb.DB, configuration config.RetrievalConfi
 		return nil, err
 	}
 	projectionRepository := storesurreal.NewProjectionRepository(db)
-	selectionRepository, err := storesurreal.NewSelectionRepository(db, selection.RetentionPolicy{TTL: configuration.Retention})
-	if err != nil {
-		return nil, err
-	}
 	planIssuer, err := planning.NewDeterministicIssuer(selectionRepository)
 	if err != nil {
 		return nil, err

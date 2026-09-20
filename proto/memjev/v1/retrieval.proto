@@ -121,6 +121,7 @@ message ExecutableProcedurePlan {
   PlanNoveltyClass novelty_class = 7;
   bool complete = 8;
   ProcedurePlanProvenance provenance = 9;
+  string task_execution_id = 10;
 }
 
 message RetrieveResponse {

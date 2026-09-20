@@ -8,11 +8,14 @@ import (
 	"time"
 
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/security"
+	"github.com/sauhard74/mem-jev/internal/selection"
 	"github.com/sauhard74/mem-jev/internal/store"
+	"github.com/sauhard74/mem-jev/internal/store/storetest"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -60,6 +63,33 @@ func TestServiceMarksStrongConflictInconclusive(t *testing.T) {
 	}
 	if result.State != domain.OutcomeStateInconclusive || result.PromotionEligible || len(repository.request.Evaluation.ConflictPredicates) != 1 {
 		t.Fatalf("result=%#v evaluation=%#v", result, repository.request.Evaluation)
+	}
+}
+
+func TestServiceAttributesOutcomeToCommittedInjection(t *testing.T) {
+	now := time.Now().UTC()
+	draft := storetest.SelectionDraft(t, "tenant_a", 'a')
+	selected, err := selection.NewRecord(draft, strings.Repeat("d", 64), now.Add(-time.Minute), now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := credit.NewRuleManifest("credit.v1", 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &recordingRepository{}
+	service := outcome.NewService(repository, outcome.DefaultPolicy(), outcome.Attribution{Selections: fixedSelectionRepository{record: selected}, Rules: rules})
+	command := validCommand()
+	command.Request.InjectionId = selected.InjectionID
+	command.Request.TaskExecutionId = selection.TaskExecutionID(selected.InjectionID)
+	command.Request.Evidence[0].PredicateId = "goal.done"
+	command.Request.Evidence[0].ObservedAt = timestamppb.New(now)
+	result, err := service.Record(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.request.Credit == nil || repository.request.Credit.Class != credit.CausalSuccess || result.CreditClass != credit.CausalSuccess || result.OutcomeCreditID == "" {
+		t.Fatalf("request=%#v result=%#v", repository.request, result)
 	}
 }
 
@@ -121,6 +151,21 @@ type recordingRepository struct {
 	err     error
 }
 
+type fixedSelectionRepository struct{ record selection.Record }
+
+func (r fixedSelectionRepository) Commit(context.Context, selection.CommitRequest) (selection.Receipt, error) {
+	return selection.Receipt{}, errors.New("not implemented")
+}
+func (r fixedSelectionRepository) FindByInjectionID(_ context.Context, tenantID domain.TenantID, injectionID string) (selection.Record, error) {
+	if tenantID != r.record.TenantID || injectionID != r.record.InjectionID {
+		return selection.Record{}, selection.ErrSelectionNotFound
+	}
+	return selection.CloneRecord(r.record), nil
+}
+func (r fixedSelectionRepository) FindByRetrievalRunID(context.Context, domain.TenantID, string) (selection.Record, error) {
+	return selection.Record{}, selection.ErrSelectionNotFound
+}
+
 func (r *recordingRepository) CommitOutcome(_ context.Context, request store.CommitOutcomeRequest) (store.OutcomeReceipt, error) {
 	r.called = true
 	r.request = request
@@ -131,5 +176,17 @@ func (r *recordingRepository) CommitOutcome(_ context.Context, request store.Com
 		ID: "orcpt_1", TenantID: request.TenantID, OutcomeID: request.Outcome.ID, TraceID: request.Outcome.TraceID,
 		ContentHash: request.Outcome.Hash, State: request.Evaluation.State, PromotionEligible: request.Evaluation.PromotionEligible,
 		PolicyVersion: request.Evaluation.PolicyVersion, Disposition: store.OutcomeDispositionAccepted,
+		OutcomeCreditID: func() string {
+			if request.Credit != nil {
+				return request.Credit.ID
+			}
+			return ""
+		}(),
+		CreditClass: func() credit.Class {
+			if request.Credit != nil {
+				return request.Credit.Class
+			}
+			return ""
+		}(),
 	}, nil
 }

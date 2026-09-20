@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
@@ -40,6 +41,8 @@ type IngestRepository struct {
 	verificationResults map[string]struct{}
 	auditEvents         map[string]struct{}
 	outcomeOutbox       map[string]struct{}
+	outcomeCredits      map[string]credit.Record
+	creditClaims        map[string]domain.OutcomeID
 	now                 func() time.Time
 }
 
@@ -60,6 +63,8 @@ func newIngestRepository(failure failurePoint) *IngestRepository {
 		verificationResults: make(map[string]struct{}),
 		auditEvents:         make(map[string]struct{}),
 		outcomeOutbox:       make(map[string]struct{}),
+		outcomeCredits:      make(map[string]credit.Record),
+		creditClaims:        make(map[string]domain.OutcomeID),
 		now:                 time.Now,
 	}
 }
@@ -105,12 +110,22 @@ func (r *IngestRepository) CommitOutcome(ctx context.Context, request store.Comm
 		State:      request.Evaluation.State, PromotionEligible: request.Evaluation.PromotionEligible,
 		PolicyVersion: request.Evaluation.PolicyVersion, Disposition: store.OutcomeDispositionAccepted, CreatedAt: createdAt,
 	}
+	if request.Credit != nil {
+		if existing, claimed := r.creditClaims[tenantKey(request.TenantID, request.Credit.InjectionID)]; claimed && existing != request.Outcome.ID {
+			return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
+		}
+		receipt.OutcomeCreditID, receipt.CreditClass = request.Credit.ID, request.Credit.Class
+	}
 	outcomeKey := tenantKey(request.TenantID, string(request.Outcome.ID))
 	if existing, exists := r.outcomes[outcomeKey]; exists && existing.Hash != request.Outcome.Hash {
 		return store.OutcomeReceipt{}, store.ErrInvalidOutcomeCommit
 	}
 	r.outcomeReceipts[receiptKey] = outcomeReceiptRecord{receipt: receipt}
 	r.outcomes[outcomeKey] = request.Outcome
+	if request.Credit != nil {
+		r.outcomeCredits[tenantKey(request.TenantID, request.Credit.ID)] = *request.Credit
+		r.creditClaims[tenantKey(request.TenantID, request.Credit.InjectionID)] = request.Outcome.ID
+	}
 	for _, fact := range request.Outcome.Evidence {
 		r.verificationResults[tenantKey(request.TenantID, string(fact.ID))] = struct{}{}
 	}

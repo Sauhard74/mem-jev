@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/evidence"
 )
@@ -17,6 +18,7 @@ var (
 	ErrOutcomeTraceNotFound       = errors.New("outcome trace was not found")
 	ErrOutcomeSelectionNotFound   = errors.New("outcome selection was not found")
 	ErrOutcomeSupersessionInvalid = errors.New("outcome supersession is invalid")
+	ErrOutcomeCreditClaimed       = errors.New("injected plan already has outcome credit")
 )
 
 type OutcomeDisposition string
@@ -35,6 +37,7 @@ type CommitOutcomeRequest struct {
 	IdempotencyKeyHash string
 	Outcome            domain.CanonicalOutcome
 	Evaluation         evidence.Result
+	Credit             *credit.Record
 }
 
 type OutcomeReceipt struct {
@@ -49,6 +52,8 @@ type OutcomeReceipt struct {
 	PolicyVersion     string
 	Disposition       OutcomeDisposition
 	CreatedAt         time.Time
+	OutcomeCreditID   string
+	CreditClass       credit.Class
 }
 
 type OutcomeCounts struct {
@@ -78,6 +83,12 @@ func ValidateOutcomeCommit(request CommitOutcomeRequest) error {
 		return ErrInvalidOutcomeCommit
 	}
 	if request.Outcome.SupersedesOutcomeID == request.Outcome.ID {
+		return ErrInvalidOutcomeCommit
+	}
+	if (request.Outcome.InjectionID == "") != (request.Outcome.TaskExecutionID == "") || (request.Credit == nil) != (request.Outcome.InjectionID == "") {
+		return ErrInvalidOutcomeCommit
+	}
+	if request.Credit != nil && (credit.Validate(*request.Credit) != nil || request.Credit.TenantID != request.TenantID || request.Credit.OutcomeID != request.Outcome.ID || request.Credit.InjectionID != request.Outcome.InjectionID || request.Credit.TaskExecutionID != request.Outcome.TaskExecutionID) {
 		return ErrInvalidOutcomeCommit
 	}
 	conflicts := append([]string(nil), request.Evaluation.ConflictPredicates...)

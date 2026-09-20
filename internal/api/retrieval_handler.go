@@ -120,7 +120,7 @@ func executablePlan(plan *retrieval.PlanArtifact) *memjevv1.ExecutableProcedureP
 		}
 	}
 	return &memjevv1.ExecutableProcedurePlan{
-		InjectionId: plan.InjectionID, Nodes: nodes, Dependencies: planDependencies(plan.Dependencies), ParallelGroups: groups,
+		InjectionId: plan.InjectionID, TaskExecutionId: plan.TaskExecutionID, Nodes: nodes, Dependencies: planDependencies(plan.Dependencies), ParallelGroups: groups,
 		Gaps: planGaps(plan.Gaps), LimitCodes: append([]string(nil), plan.LimitCodes...), NoveltyClass: noveltyClass(plan.NoveltyClass), Complete: plan.Complete,
 		Provenance: &memjevv1.ProcedurePlanProvenance{
 			ProjectionEpoch: plan.ProjectionEpoch, SelectionHash: plan.SelectionHash, PlanHash: plan.PlanHash,

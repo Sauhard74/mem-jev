@@ -176,7 +176,7 @@ func sortedUnique(values []string) []string {
 
 func artifact(record selection.Record) retrieval.PlanArtifact {
 	result := retrieval.PlanArtifact{
-		InjectionID: record.InjectionID, SelectionHash: record.ContentHash, PlanHash: record.Plan.ContentHash,
+		InjectionID: record.InjectionID, TaskExecutionID: selection.TaskExecutionID(record.InjectionID), SelectionHash: record.ContentHash, PlanHash: record.Plan.ContentHash,
 		CompatibilityGraphID: record.Plan.CompatibilityGraphID, CompatibilityGraphHash: record.Plan.CompatibilityGraphHash,
 		CompatibilityMatrixHash: record.Plan.CompatibilityMatrixHash, CandidateSetHash: record.Plan.CandidateSetHash,
 		PlannerManifestID: record.PlannerManifestID, PolicyManifestID: record.PolicyManifestID, RankerManifestID: record.RankerManifestID,

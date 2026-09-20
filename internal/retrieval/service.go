@@ -437,7 +437,7 @@ func (s *Service) attachPlan(ctx context.Context, response ServiceResponse, run 
 	if err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: err}
 	}
-	if plan.InjectionID == "" || plan.SelectionHash == "" || plan.PlanHash == "" || len(plan.Nodes) == 0 || plan.TenantID != run.TenantID || plan.RetrievalRunID != run.ID || plan.QueryHash != run.QueryHash || plan.RequestContextHash != run.RequestContextHash || plan.ProjectionEpoch != run.Snapshot.ProjectionEpoch {
+	if plan.InjectionID == "" || plan.TaskExecutionID == "" || plan.SelectionHash == "" || plan.PlanHash == "" || len(plan.Nodes) == 0 || plan.TenantID != run.TenantID || plan.RetrievalRunID != run.ID || plan.QueryHash != run.QueryHash || plan.RequestContextHash != run.RequestContextHash || plan.ProjectionEpoch != run.Snapshot.ProjectionEpoch {
 		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: ErrPlanUnavailable}
 	}
 	response.Plan = &plan

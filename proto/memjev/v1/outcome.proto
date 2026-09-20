@@ -45,6 +45,17 @@ message RecordOutcomeRequest {
     min_items: 1
     max_items: 256
   }];
+  string injection_id = 7 [(buf.validate.field).string.max_len = 80];
+  string task_execution_id = 8 [(buf.validate.field).string.max_len = 80];
+}
+
+enum OutcomeCreditClass {
+  OUTCOME_CREDIT_CLASS_UNSPECIFIED = 0;
+  OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS = 1;
+  OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS = 2;
+  OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE = 3;
+  OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE = 4;
+  OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE = 5;
 }
 
 message RecordOutcomeResponse {
@@ -54,6 +65,8 @@ message RecordOutcomeResponse {
   OutcomeDisposition disposition = 4;
   bool promotion_eligible = 5;
   string policy_version = 6;
+  string outcome_credit_id = 7;
+  OutcomeCreditClass credit_class = 8;
 }
 
 service OutcomeService {

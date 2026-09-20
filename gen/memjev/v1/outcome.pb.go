@@ -23,6 +23,64 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type OutcomeCreditClass int32
+
+const (
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_UNSPECIFIED        OutcomeCreditClass = 0
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS     OutcomeCreditClass = 1
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS OutcomeCreditClass = 2
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE     OutcomeCreditClass = 3
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE OutcomeCreditClass = 4
+	OutcomeCreditClass_OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE     OutcomeCreditClass = 5
+)
+
+// Enum value maps for OutcomeCreditClass.
+var (
+	OutcomeCreditClass_name = map[int32]string{
+		0: "OUTCOME_CREDIT_CLASS_UNSPECIFIED",
+		1: "OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS",
+		2: "OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS",
+		3: "OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE",
+		4: "OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE",
+		5: "OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE",
+	}
+	OutcomeCreditClass_value = map[string]int32{
+		"OUTCOME_CREDIT_CLASS_UNSPECIFIED":        0,
+		"OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS":     1,
+		"OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS": 2,
+		"OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE":     3,
+		"OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE": 4,
+		"OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE":     5,
+	}
+)
+
+func (x OutcomeCreditClass) Enum() *OutcomeCreditClass {
+	p := new(OutcomeCreditClass)
+	*p = x
+	return p
+}
+
+func (x OutcomeCreditClass) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (OutcomeCreditClass) Descriptor() protoreflect.EnumDescriptor {
+	return file_memjev_v1_outcome_proto_enumTypes[0].Descriptor()
+}
+
+func (OutcomeCreditClass) Type() protoreflect.EnumType {
+	return &file_memjev_v1_outcome_proto_enumTypes[0]
+}
+
+func (x OutcomeCreditClass) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use OutcomeCreditClass.Descriptor instead.
+func (OutcomeCreditClass) EnumDescriptor() ([]byte, []int) {
+	return file_memjev_v1_outcome_proto_rawDescGZIP(), []int{0}
+}
+
 type OutcomeEvidence struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	ClientEvidenceId string                 `protobuf:"bytes,1,opt,name=client_evidence_id,json=clientEvidenceId,proto3" json:"client_evidence_id,omitempty"`
@@ -131,6 +189,8 @@ type RecordOutcomeRequest struct {
 	SupersedesOutcomeId string                 `protobuf:"bytes,4,opt,name=supersedes_outcome_id,json=supersedesOutcomeId,proto3" json:"supersedes_outcome_id,omitempty"`
 	CorrectionReason    string                 `protobuf:"bytes,5,opt,name=correction_reason,json=correctionReason,proto3" json:"correction_reason,omitempty"`
 	Evidence            []*OutcomeEvidence     `protobuf:"bytes,6,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	InjectionId         string                 `protobuf:"bytes,7,opt,name=injection_id,json=injectionId,proto3" json:"injection_id,omitempty"`
+	TaskExecutionId     string                 `protobuf:"bytes,8,opt,name=task_execution_id,json=taskExecutionId,proto3" json:"task_execution_id,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -207,6 +267,20 @@ func (x *RecordOutcomeRequest) GetEvidence() []*OutcomeEvidence {
 	return nil
 }
 
+func (x *RecordOutcomeRequest) GetInjectionId() string {
+	if x != nil {
+		return x.InjectionId
+	}
+	return ""
+}
+
+func (x *RecordOutcomeRequest) GetTaskExecutionId() string {
+	if x != nil {
+		return x.TaskExecutionId
+	}
+	return ""
+}
+
 type RecordOutcomeResponse struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	OutcomeId         string                 `protobuf:"bytes,1,opt,name=outcome_id,json=outcomeId,proto3" json:"outcome_id,omitempty"`
@@ -215,6 +289,8 @@ type RecordOutcomeResponse struct {
 	Disposition       OutcomeDisposition     `protobuf:"varint,4,opt,name=disposition,proto3,enum=memjev.v1.OutcomeDisposition" json:"disposition,omitempty"`
 	PromotionEligible bool                   `protobuf:"varint,5,opt,name=promotion_eligible,json=promotionEligible,proto3" json:"promotion_eligible,omitempty"`
 	PolicyVersion     string                 `protobuf:"bytes,6,opt,name=policy_version,json=policyVersion,proto3" json:"policy_version,omitempty"`
+	OutcomeCreditId   string                 `protobuf:"bytes,7,opt,name=outcome_credit_id,json=outcomeCreditId,proto3" json:"outcome_credit_id,omitempty"`
+	CreditClass       OutcomeCreditClass     `protobuf:"varint,8,opt,name=credit_class,json=creditClass,proto3,enum=memjev.v1.OutcomeCreditClass" json:"credit_class,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -291,6 +367,20 @@ func (x *RecordOutcomeResponse) GetPolicyVersion() string {
 	return ""
 }
 
+func (x *RecordOutcomeResponse) GetOutcomeCreditId() string {
+	if x != nil {
+		return x.OutcomeCreditId
+	}
+	return ""
+}
+
+func (x *RecordOutcomeResponse) GetCreditClass() OutcomeCreditClass {
+	if x != nil {
+		return x.CreditClass
+	}
+	return OutcomeCreditClass_OUTCOME_CREDIT_CLASS_UNSPECIFIED
+}
+
 var File_memjev_v1_outcome_proto protoreflect.FileDescriptor
 
 const file_memjev_v1_outcome_proto_rawDesc = "" +
@@ -311,14 +401,16 @@ const file_memjev_v1_outcome_proto_rawDesc = "" +
 	"\x10verifier_version\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x0fverifierVersion\x12C\n" +
 	"\vobserved_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"observedAt\x123\n" +
-	"\x06fields\x18\b \x03(\v2\x10.memjev.v1.FieldB\t\xbaH\x06\x92\x01\x03\x10\x80\x01R\x06fields\"\xce\x02\n" +
+	"\x06fields\x18\b \x03(\v2\x10.memjev.v1.FieldB\t\xbaH\x06\x92\x01\x03\x10\x80\x01R\x06fields\"\xaf\x03\n" +
 	"\x14RecordOutcomeRequest\x12$\n" +
 	"\btrace_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18PR\atraceId\x12+\n" +
 	"\fexecution_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vexecutionId\x12*\n" +
 	"\fselection_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18PR\vselectionId\x12;\n" +
 	"\x15supersedes_outcome_id\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x18PR\x13supersedesOutcomeId\x125\n" +
 	"\x11correction_reason\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x10correctionReason\x12C\n" +
-	"\bevidence\x18\x06 \x03(\v2\x1a.memjev.v1.OutcomeEvidenceB\v\xbaH\b\x92\x01\x05\b\x01\x10\x80\x02R\bevidence\"\x97\x02\n" +
+	"\bevidence\x18\x06 \x03(\v2\x1a.memjev.v1.OutcomeEvidenceB\v\xbaH\b\x92\x01\x05\b\x01\x10\x80\x02R\bevidence\x12*\n" +
+	"\finjection_id\x18\a \x01(\tB\a\xbaH\x04r\x02\x18PR\vinjectionId\x123\n" +
+	"\x11task_execution_id\x18\b \x01(\tB\a\xbaH\x04r\x02\x18PR\x0ftaskExecutionId\"\x85\x03\n" +
 	"\x15RecordOutcomeResponse\x12\x1d\n" +
 	"\n" +
 	"outcome_id\x18\x01 \x01(\tR\toutcomeId\x12\x19\n" +
@@ -326,7 +418,16 @@ const file_memjev_v1_outcome_proto_rawDesc = "" +
 	"\x05state\x18\x03 \x01(\x0e2\x17.memjev.v1.OutcomeStateR\x05state\x12?\n" +
 	"\vdisposition\x18\x04 \x01(\x0e2\x1d.memjev.v1.OutcomeDispositionR\vdisposition\x12-\n" +
 	"\x12promotion_eligible\x18\x05 \x01(\bR\x11promotionEligible\x12%\n" +
-	"\x0epolicy_version\x18\x06 \x01(\tR\rpolicyVersion2f\n" +
+	"\x0epolicy_version\x18\x06 \x01(\tR\rpolicyVersion\x12*\n" +
+	"\x11outcome_credit_id\x18\a \x01(\tR\x0foutcomeCreditId\x12@\n" +
+	"\fcredit_class\x18\b \x01(\x0e2\x1d.memjev.v1.OutcomeCreditClassR\vcreditClass*\x8f\x02\n" +
+	"\x12OutcomeCreditClass\x12$\n" +
+	" OUTCOME_CREDIT_CLASS_UNSPECIFIED\x10\x00\x12'\n" +
+	"#OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS\x10\x01\x12+\n" +
+	"'OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS\x10\x02\x12'\n" +
+	"#OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE\x10\x03\x12+\n" +
+	"'OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE\x10\x04\x12'\n" +
+	"#OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE\x10\x052f\n" +
 	"\x0eOutcomeService\x12T\n" +
 	"\rRecordOutcome\x12\x1f.memjev.v1.RecordOutcomeRequest\x1a .memjev.v1.RecordOutcomeResponse\"\x00B\x97\x01\n" +
 	"\rcom.memjev.v1B\fOutcomeProtoP\x01Z3github.com/sauhard74/mem-jev/gen/memjev/v1;memjevv1\xa2\x02\x03MXX\xaa\x02\tMemjev.V1\xca\x02\tMemjev\\V1\xe2\x02\x15Memjev\\V1\\GPBMetadata\xea\x02\n" +
@@ -344,33 +445,36 @@ func file_memjev_v1_outcome_proto_rawDescGZIP() []byte {
 	return file_memjev_v1_outcome_proto_rawDescData
 }
 
+var file_memjev_v1_outcome_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_memjev_v1_outcome_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_memjev_v1_outcome_proto_goTypes = []any{
-	(*OutcomeEvidence)(nil),       // 0: memjev.v1.OutcomeEvidence
-	(*RecordOutcomeRequest)(nil),  // 1: memjev.v1.RecordOutcomeRequest
-	(*RecordOutcomeResponse)(nil), // 2: memjev.v1.RecordOutcomeResponse
-	(EvidenceClass)(0),            // 3: memjev.v1.EvidenceClass
-	(EvidenceVerdict)(0),          // 4: memjev.v1.EvidenceVerdict
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
-	(*Field)(nil),                 // 6: memjev.v1.Field
-	(OutcomeState)(0),             // 7: memjev.v1.OutcomeState
-	(OutcomeDisposition)(0),       // 8: memjev.v1.OutcomeDisposition
+	(OutcomeCreditClass)(0),       // 0: memjev.v1.OutcomeCreditClass
+	(*OutcomeEvidence)(nil),       // 1: memjev.v1.OutcomeEvidence
+	(*RecordOutcomeRequest)(nil),  // 2: memjev.v1.RecordOutcomeRequest
+	(*RecordOutcomeResponse)(nil), // 3: memjev.v1.RecordOutcomeResponse
+	(EvidenceClass)(0),            // 4: memjev.v1.EvidenceClass
+	(EvidenceVerdict)(0),          // 5: memjev.v1.EvidenceVerdict
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(*Field)(nil),                 // 7: memjev.v1.Field
+	(OutcomeState)(0),             // 8: memjev.v1.OutcomeState
+	(OutcomeDisposition)(0),       // 9: memjev.v1.OutcomeDisposition
 }
 var file_memjev_v1_outcome_proto_depIdxs = []int32{
-	3, // 0: memjev.v1.OutcomeEvidence.class:type_name -> memjev.v1.EvidenceClass
-	4, // 1: memjev.v1.OutcomeEvidence.verdict:type_name -> memjev.v1.EvidenceVerdict
-	5, // 2: memjev.v1.OutcomeEvidence.observed_at:type_name -> google.protobuf.Timestamp
-	6, // 3: memjev.v1.OutcomeEvidence.fields:type_name -> memjev.v1.Field
-	0, // 4: memjev.v1.RecordOutcomeRequest.evidence:type_name -> memjev.v1.OutcomeEvidence
-	7, // 5: memjev.v1.RecordOutcomeResponse.state:type_name -> memjev.v1.OutcomeState
-	8, // 6: memjev.v1.RecordOutcomeResponse.disposition:type_name -> memjev.v1.OutcomeDisposition
-	1, // 7: memjev.v1.OutcomeService.RecordOutcome:input_type -> memjev.v1.RecordOutcomeRequest
-	2, // 8: memjev.v1.OutcomeService.RecordOutcome:output_type -> memjev.v1.RecordOutcomeResponse
-	8, // [8:9] is the sub-list for method output_type
-	7, // [7:8] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	4, // 0: memjev.v1.OutcomeEvidence.class:type_name -> memjev.v1.EvidenceClass
+	5, // 1: memjev.v1.OutcomeEvidence.verdict:type_name -> memjev.v1.EvidenceVerdict
+	6, // 2: memjev.v1.OutcomeEvidence.observed_at:type_name -> google.protobuf.Timestamp
+	7, // 3: memjev.v1.OutcomeEvidence.fields:type_name -> memjev.v1.Field
+	1, // 4: memjev.v1.RecordOutcomeRequest.evidence:type_name -> memjev.v1.OutcomeEvidence
+	8, // 5: memjev.v1.RecordOutcomeResponse.state:type_name -> memjev.v1.OutcomeState
+	9, // 6: memjev.v1.RecordOutcomeResponse.disposition:type_name -> memjev.v1.OutcomeDisposition
+	0, // 7: memjev.v1.RecordOutcomeResponse.credit_class:type_name -> memjev.v1.OutcomeCreditClass
+	2, // 8: memjev.v1.OutcomeService.RecordOutcome:input_type -> memjev.v1.RecordOutcomeRequest
+	3, // 9: memjev.v1.OutcomeService.RecordOutcome:output_type -> memjev.v1.RecordOutcomeResponse
+	9, // [9:10] is the sub-list for method output_type
+	8, // [8:9] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_memjev_v1_outcome_proto_init() }
@@ -384,13 +488,14 @@ func file_memjev_v1_outcome_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memjev_v1_outcome_proto_rawDesc), len(file_memjev_v1_outcome_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_memjev_v1_outcome_proto_goTypes,
 		DependencyIndexes: file_memjev_v1_outcome_proto_depIdxs,
+		EnumInfos:         file_memjev_v1_outcome_proto_enumTypes,
 		MessageInfos:      file_memjev_v1_outcome_proto_msgTypes,
 	}.Build()
 	File_memjev_v1_outcome_proto = out.File

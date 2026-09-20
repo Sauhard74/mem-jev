@@ -76,6 +76,19 @@ func TestCompositionMigrationScopesEveryIdentityByTenant(t *testing.T) {
 	}
 }
 
+func TestOutcomeCreditLinkageMigrationPreventsMultipleClaims(t *testing.T) {
+	body, err := dbmigrations.Files.ReadFile("0006_outcome_credit_linkage.surql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(body)
+	for _, fragment := range []string{"injection_id ON TABLE outcome_evidence", "task_execution_id ON TABLE outcome_evidence", "selection_hash ON TABLE outcome_credit", "outcome_credit_injection_unique", "FIELDS tenant_id, injection_id UNIQUE"} {
+		if !strings.Contains(schema, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+}
+
 func tableSection(schema, table string) string {
 	start := strings.Index(schema, "DEFINE TABLE IF NOT EXISTS "+table+" ")
 	if start < 0 {

@@ -29,6 +29,8 @@ type outcomeIdentity struct {
 	TraceID             domain.TraceID           `json:"trace_id"`
 	ExecutionID         string                   `json:"execution_id,omitempty"`
 	SelectionID         string                   `json:"selection_id,omitempty"`
+	InjectionID         string                   `json:"injection_id,omitempty"`
+	TaskExecutionID     string                   `json:"task_execution_id,omitempty"`
 	SupersedesOutcomeID domain.OutcomeID         `json:"supersedes_outcome_id,omitempty"`
 	CorrectionReason    string                   `json:"correction_reason,omitempty"`
 	Evidence            []domain.OutcomeEvidence `json:"evidence"`
@@ -76,6 +78,8 @@ func Canonicalize(tenantID domain.TenantID, request *memjevv1.RecordOutcomeReque
 		TraceID:             traceID,
 		ExecutionID:         normalizeToken(request.GetExecutionId()),
 		SelectionID:         normalizeToken(request.GetSelectionId()),
+		InjectionID:         normalizeToken(request.GetInjectionId()),
+		TaskExecutionID:     normalizeToken(request.GetTaskExecutionId()),
 		SupersedesOutcomeID: domain.OutcomeID(normalizeToken(request.GetSupersedesOutcomeId())),
 		CorrectionReason:    normalizeText(request.GetCorrectionReason()),
 		Evidence:            facts,
@@ -91,6 +95,8 @@ func Canonicalize(tenantID domain.TenantID, request *memjevv1.RecordOutcomeReque
 		TraceID:             traceID,
 		ExecutionID:         identity.ExecutionID,
 		SelectionID:         identity.SelectionID,
+		InjectionID:         identity.InjectionID,
+		TaskExecutionID:     identity.TaskExecutionID,
 		SupersedesOutcomeID: identity.SupersedesOutcomeID,
 		CorrectionReason:    identity.CorrectionReason,
 		Evidence:            facts,
@@ -129,6 +135,7 @@ func VerifyCanonical(outcome domain.CanonicalOutcome) error {
 	identity := outcomeIdentity{
 		TenantID: outcome.TenantID, TraceID: outcome.TraceID, ExecutionID: outcome.ExecutionID,
 		SelectionID: outcome.SelectionID, SupersedesOutcomeID: outcome.SupersedesOutcomeID,
+		InjectionID: outcome.InjectionID, TaskExecutionID: outcome.TaskExecutionID,
 		CorrectionReason: outcome.CorrectionReason, Evidence: facts,
 	}
 	_, identityHash, err := canonical.MarshalAndHash(identity)

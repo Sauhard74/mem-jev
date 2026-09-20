@@ -5,6 +5,7 @@ import (
 
 	"connectrpc.com/connect"
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
+	"github.com/sauhard74/mem-jev/internal/credit"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/security"
@@ -31,7 +32,25 @@ func (h *outcomeHandler) RecordOutcome(ctx context.Context, request *connect.Req
 	return connect.NewResponse(&memjevv1.RecordOutcomeResponse{
 		OutcomeId: string(result.OutcomeID), TraceId: string(result.TraceID), State: outcomeState(result.State),
 		Disposition: outcomeDisposition(result.Disposition), PromotionEligible: result.PromotionEligible, PolicyVersion: result.PolicyVersion,
+		OutcomeCreditId: result.OutcomeCreditID, CreditClass: outcomeCreditClass(result.CreditClass),
 	}), nil
+}
+
+func outcomeCreditClass(value credit.Class) memjevv1.OutcomeCreditClass {
+	switch value {
+	case credit.CausalSuccess:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_CAUSAL_SUCCESS
+	case credit.AssociatedSuccess:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_ASSOCIATED_SUCCESS
+	case credit.CausalFailure:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_CAUSAL_FAILURE
+	case credit.AssociatedFailure:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_ASSOCIATED_FAILURE
+	case credit.Unattributable:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_UNATTRIBUTABLE
+	default:
+		return memjevv1.OutcomeCreditClass_OUTCOME_CREDIT_CLASS_UNSPECIFIED
+	}
 }
 
 func outcomeState(state domain.OutcomeState) memjevv1.OutcomeState {

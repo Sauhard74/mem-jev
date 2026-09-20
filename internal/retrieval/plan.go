@@ -42,7 +42,7 @@ type PlanGap struct {
 }
 
 type PlanArtifact struct {
-	InjectionID, SelectionHash, PlanHash                  string
+	InjectionID, TaskExecutionID, SelectionHash, PlanHash string
 	CompatibilityGraphID, CompatibilityGraphHash          string
 	CompatibilityMatrixHash, CandidateSetHash             string
 	PlannerManifestID, PolicyManifestID, RankerManifestID string
