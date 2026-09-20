@@ -34,6 +34,7 @@ func TestSetupRoutesOTLPSignalsToTheirStandardPaths(t *testing.T) {
 	_, span := StartSpan(context.Background(), "test-span")
 	span.End()
 	RecordIngest(context.Background(), IngestMetrics{ResultCode: "accepted", Latency: time.Millisecond, Events: 1, Bytes: 1})
+	RecordOutcome(context.Background(), OutcomeMetrics{ResultCode: "verified_success", Latency: time.Millisecond, Evidence: 1})
 	RecordHTTPRequest(context.Background(), HTTPMetrics{ResultCode: "400", Latency: time.Millisecond, Bytes: 1})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -51,5 +52,8 @@ func TestSetupRoutesOTLPSignalsToTheirStandardPaths(t *testing.T) {
 	}
 	if !bytes.Contains(payloads["/otlp/v1/metrics"], []byte("memjev.http.requests")) {
 		t.Fatalf("HTTP boundary metric missing from payload")
+	}
+	if !bytes.Contains(payloads["/otlp/v1/metrics"], []byte("memjev.outcome.requests")) {
+		t.Fatalf("outcome metric missing from payload")
 	}
 }

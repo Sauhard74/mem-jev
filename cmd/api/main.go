@@ -24,6 +24,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/config"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
+	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/security"
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
@@ -91,7 +92,7 @@ func run() int {
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
 
-	archives, repository, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
+	archives, ingestRepository, outcomeRepository, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
 	if err != nil {
 		logger.Error("dependency startup failed", "error", err)
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
@@ -99,11 +100,12 @@ func run() int {
 	if closeDatabase != nil {
 		defer closeDatabase()
 	}
-	service := ingest.NewService(archives, repository, ingest.DefaultPolicy())
+	ingestService := ingest.NewService(archives, ingestRepository, ingest.DefaultPolicy())
+	outcomeService := outcome.NewService(outcomeRepository, outcome.DefaultPolicy())
 	info := buildinfo.Info{Version: configuration.Build.Version, Commit: configuration.Build.Commit, BuiltAt: configuration.Build.BuiltAt}
 	server := &http.Server{
 		Addr:              configuration.ListenAddress,
-		Handler:           api.NewHandler(api.Dependencies{Ingest: service, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
+		Handler:           api.NewHandler(api.Dependencies{Ingest: ingestService, Outcome: outcomeService, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
 		ReadHeaderTimeout: configuration.RequestTimeout,
 		ReadTimeout:       configuration.RequestTimeout,
 		WriteTimeout:      configuration.RequestTimeout + time.Second,
@@ -133,26 +135,27 @@ func run() int {
 	return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, exitCode)
 }
 
-func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, func(context.Context) error, func(), error) {
+func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, func(context.Context) error, func(), error) {
 	if configuration.AdapterMode == "memory" {
-		return archive.NewMemoryStore(), storememory.NewIngestRepository(), func(context.Context) error { return nil }, nil, nil
+		repository := storememory.NewIngestRepository()
+		return archive.NewMemoryStore(), repository, repository, func(context.Context) error { return nil }, nil, nil
 	}
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: configuration.Surreal.Endpoint, Namespace: configuration.Surreal.Namespace, Database: configuration.Surreal.Database,
 		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password, AuthScope: storesurreal.AuthScope(configuration.Surreal.AuthScope),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	closeDB := func() { _ = db.Close(context.Background()) }
 	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
 		closeDB()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(configuration.Archive.Region))
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		if configuration.Archive.Endpoint != "" {
@@ -169,7 +172,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	readiness := func(ctx context.Context) error {
 		if _, err := surrealdb.Query[any](ctx, db, "INFO FOR DB", nil); err != nil {
@@ -178,7 +181,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		_, err := s3Client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(configuration.Archive.Bucket)})
 		return err
 	}
-	return archiveStore, storesurreal.NewIngestRepository(db), readiness, closeDB, nil
+	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), readiness, closeDB, nil
 }
 
 func shutdownAndCode(logger *slog.Logger, shutdown observability.Shutdown, timeout time.Duration, code int) int {

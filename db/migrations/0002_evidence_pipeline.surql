@@ -1,4 +1,20 @@
 -- Append-only outcome aggregate. Corrections create a new record linked by supersedes_outcome_id.
+DEFINE TABLE IF NOT EXISTS outcome_receipt SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS receipt_id ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS idempotency_key_hash ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS state ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS promotion_eligible ON TABLE outcome_receipt TYPE bool READONLY;
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE outcome_receipt TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE outcome_receipt TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS outcome_receipt_tenant_idempotency_unique ON TABLE outcome_receipt FIELDS tenant_id, idempotency_key_hash UNIQUE;
+
+DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE outbox_job TYPE option<string> READONLY;
+
 DEFINE TABLE IF NOT EXISTS outcome_evidence SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE outcome_evidence TYPE string READONLY;
 DEFINE FIELD IF NOT EXISTS outcome_id ON TABLE outcome_evidence TYPE string READONLY;

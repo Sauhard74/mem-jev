@@ -23,15 +23,24 @@ type receiptRecord struct {
 	receipt store.IngestReceipt
 }
 
+type outcomeReceiptRecord struct {
+	receipt store.OutcomeReceipt
+}
+
 type IngestRepository struct {
-	mu       sync.RWMutex
-	failure  failurePoint
-	receipts map[string]receiptRecord
-	traces   map[string]string
-	events   map[string]struct{}
-	archives map[string]struct{}
-	outbox   map[string]struct{}
-	now      func() time.Time
+	mu                  sync.RWMutex
+	failure             failurePoint
+	receipts            map[string]receiptRecord
+	traces              map[string]string
+	events              map[string]struct{}
+	archives            map[string]struct{}
+	outbox              map[string]struct{}
+	outcomeReceipts     map[string]outcomeReceiptRecord
+	outcomes            map[string]domain.CanonicalOutcome
+	verificationResults map[string]struct{}
+	auditEvents         map[string]struct{}
+	outcomeOutbox       map[string]struct{}
+	now                 func() time.Time
 }
 
 func NewIngestRepository() *IngestRepository {
@@ -40,14 +49,88 @@ func NewIngestRepository() *IngestRepository {
 
 func newIngestRepository(failure failurePoint) *IngestRepository {
 	return &IngestRepository{
-		failure:  failure,
-		receipts: make(map[string]receiptRecord),
-		traces:   make(map[string]string),
-		events:   make(map[string]struct{}),
-		archives: make(map[string]struct{}),
-		outbox:   make(map[string]struct{}),
-		now:      time.Now,
+		failure:             failure,
+		receipts:            make(map[string]receiptRecord),
+		traces:              make(map[string]string),
+		events:              make(map[string]struct{}),
+		archives:            make(map[string]struct{}),
+		outbox:              make(map[string]struct{}),
+		outcomeReceipts:     make(map[string]outcomeReceiptRecord),
+		outcomes:            make(map[string]domain.CanonicalOutcome),
+		verificationResults: make(map[string]struct{}),
+		auditEvents:         make(map[string]struct{}),
+		outcomeOutbox:       make(map[string]struct{}),
+		now:                 time.Now,
 	}
+}
+
+func (r *IngestRepository) CommitOutcome(ctx context.Context, request store.CommitOutcomeRequest) (store.OutcomeReceipt, error) {
+	if err := ctx.Err(); err != nil {
+		return store.OutcomeReceipt{}, err
+	}
+	if err := store.ValidateOutcomeCommit(request); err != nil {
+		return store.OutcomeReceipt{}, err
+	}
+	receiptKey := tenantKey(request.TenantID, request.IdempotencyKeyHash)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return store.OutcomeReceipt{}, err
+	}
+	if existing, ok := r.outcomeReceipts[receiptKey]; ok {
+		if existing.receipt.ContentHash != request.Outcome.Hash {
+			return store.OutcomeReceipt{}, store.ErrIdempotencyConflict
+		}
+		receipt := existing.receipt
+		receipt.Disposition = store.OutcomeDispositionDuplicate
+		return receipt, nil
+	}
+	if _, exists := r.traces[tenantKey(request.TenantID, string(request.Outcome.TraceID))]; !exists {
+		return store.OutcomeReceipt{}, store.ErrOutcomeTraceNotFound
+	}
+	if request.Outcome.SelectionID != "" {
+		return store.OutcomeReceipt{}, store.ErrOutcomeSelectionNotFound
+	}
+	if request.Outcome.SupersedesOutcomeID != "" {
+		previous, exists := r.outcomes[tenantKey(request.TenantID, string(request.Outcome.SupersedesOutcomeID))]
+		if !exists || previous.TraceID != request.Outcome.TraceID {
+			return store.OutcomeReceipt{}, store.ErrOutcomeSupersessionInvalid
+		}
+	}
+	createdAt := r.now().UTC()
+	receipt := store.OutcomeReceipt{
+		ID: store.OutcomeReceiptID(request.TenantID, request.IdempotencyKeyHash), TenantID: request.TenantID,
+		OutcomeID: request.Outcome.ID, TraceID: request.Outcome.TraceID, ContentHash: request.Outcome.Hash,
+		WorkflowID: store.OutcomeWorkflowID(request.TenantID, request.Outcome.TraceID, request.Outcome.ID),
+		State:      request.Evaluation.State, PromotionEligible: request.Evaluation.PromotionEligible,
+		PolicyVersion: request.Evaluation.PolicyVersion, Disposition: store.OutcomeDispositionAccepted, CreatedAt: createdAt,
+	}
+	outcomeKey := tenantKey(request.TenantID, string(request.Outcome.ID))
+	if existing, exists := r.outcomes[outcomeKey]; exists && existing.Hash != request.Outcome.Hash {
+		return store.OutcomeReceipt{}, store.ErrInvalidOutcomeCommit
+	}
+	r.outcomeReceipts[receiptKey] = outcomeReceiptRecord{receipt: receipt}
+	r.outcomes[outcomeKey] = request.Outcome
+	for _, fact := range request.Outcome.Evidence {
+		r.verificationResults[tenantKey(request.TenantID, string(fact.ID))] = struct{}{}
+	}
+	if len(request.Evaluation.ConflictPredicates) > 0 {
+		r.auditEvents[tenantKey(request.TenantID, store.OutcomeAuditEventID(request.TenantID, request.Outcome.ID))] = struct{}{}
+	}
+	r.outcomeOutbox[tenantKey(request.TenantID, receipt.WorkflowID)] = struct{}{}
+	return receipt, nil
+}
+
+func (r *IngestRepository) OutcomeCounts(ctx context.Context) (store.OutcomeCounts, error) {
+	if err := ctx.Err(); err != nil {
+		return store.OutcomeCounts{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return store.OutcomeCounts{
+		Receipts: len(r.outcomeReceipts), Outcomes: len(r.outcomes), VerificationResults: len(r.verificationResults),
+		AuditEvents: len(r.auditEvents), OutboxJobs: len(r.outcomeOutbox),
+	}, nil
 }
 
 func (r *IngestRepository) Commit(ctx context.Context, request store.CommitIngestRequest) (store.IngestReceipt, error) {

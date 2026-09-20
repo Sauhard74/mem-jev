@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"golang.org/x/text/unicode/norm"
 )
+
+var ErrInvalidCanonicalOutcome = fmt.Errorf("invalid canonical outcome")
 
 const outcomeSchemaVersion = "outcome.v1"
 
@@ -99,6 +102,47 @@ func Canonicalize(tenantID domain.TenantID, request *memjevv1.RecordOutcomeReque
 	outcome.CanonicalJSON = encoded
 	outcome.Hash = hash
 	return outcome, nil
+}
+
+// VerifyCanonical independently recomputes every content-derived identity and
+// the canonical encoding before a storage adapter accepts an outcome.
+func VerifyCanonical(outcome domain.CanonicalOutcome) error {
+	if outcome.SchemaVersion != outcomeSchemaVersion || outcome.TenantID == "" || outcome.TraceID == "" || len(outcome.Evidence) == 0 {
+		return ErrInvalidCanonicalOutcome
+	}
+	facts := make([]domain.OutcomeEvidence, len(outcome.Evidence))
+	for index, source := range outcome.Evidence {
+		fact := source
+		fact.ID = ""
+		_, hash, err := canonical.MarshalAndHash(evidenceIdentity{TenantID: outcome.TenantID, TraceID: outcome.TraceID, Evidence: fact})
+		if err != nil || source.ID != domain.EvidenceID("oe_"+hash) {
+			return ErrInvalidCanonicalOutcome
+		}
+		facts[index] = source
+	}
+	sort.Slice(facts, func(i, j int) bool { return facts[i].ID < facts[j].ID })
+	for index := range facts {
+		if facts[index].ID != outcome.Evidence[index].ID {
+			return ErrInvalidCanonicalOutcome
+		}
+	}
+	identity := outcomeIdentity{
+		TenantID: outcome.TenantID, TraceID: outcome.TraceID, ExecutionID: outcome.ExecutionID,
+		SelectionID: outcome.SelectionID, SupersedesOutcomeID: outcome.SupersedesOutcomeID,
+		CorrectionReason: outcome.CorrectionReason, Evidence: facts,
+	}
+	_, identityHash, err := canonical.MarshalAndHash(identity)
+	if err != nil || outcome.ID != domain.OutcomeID("out_"+identityHash) {
+		return ErrInvalidCanonicalOutcome
+	}
+	copyOfOutcome := outcome
+	copyOfOutcome.Hash = ""
+	copyOfOutcome.CanonicalJSON = nil
+	encoded, hash, err := canonical.MarshalAndHash(copyOfOutcome)
+	if err != nil || hash != outcome.Hash || !bytes.Equal(encoded, outcome.CanonicalJSON) {
+		return ErrInvalidCanonicalOutcome
+	}
+	return nil
 }
 
 func normalizeFields(evidenceIndex int, source []*memjevv1.Field) ([]domain.CanonicalField, error) {

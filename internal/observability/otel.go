@@ -91,6 +91,13 @@ type HTTPMetrics struct {
 	Bytes      int
 }
 
+type OutcomeMetrics struct {
+	ResultCode string
+	Latency    time.Duration
+	Evidence   int
+	Conflict   bool
+}
+
 var (
 	metricsOnce        sync.Once
 	requests           metric.Int64Counter
@@ -103,6 +110,10 @@ var (
 	httpRequests       metric.Int64Counter
 	httpLatency        metric.Float64Histogram
 	httpBytes          metric.Int64Histogram
+	outcomeRequests    metric.Int64Counter
+	outcomeLatency     metric.Float64Histogram
+	outcomeEvidence    metric.Int64Histogram
+	outcomeConflicts   metric.Int64Counter
 )
 
 func initializeMetrics() {
@@ -117,6 +128,21 @@ func initializeMetrics() {
 	httpRequests, _ = meter.Int64Counter("memjev.http.requests")
 	httpLatency, _ = meter.Float64Histogram("memjev.http.request.duration", metric.WithUnit("ms"))
 	httpBytes, _ = meter.Int64Histogram("memjev.http.request.bytes", metric.WithUnit("By"))
+	outcomeRequests, _ = meter.Int64Counter("memjev.outcome.requests")
+	outcomeLatency, _ = meter.Float64Histogram("memjev.outcome.duration", metric.WithUnit("ms"))
+	outcomeEvidence, _ = meter.Int64Histogram("memjev.outcome.evidence")
+	outcomeConflicts, _ = meter.Int64Counter("memjev.outcome.conflicts")
+}
+
+func RecordOutcome(ctx context.Context, facts OutcomeMetrics) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("result.code", facts.ResultCode))
+	outcomeRequests.Add(ctx, 1, options)
+	outcomeLatency.Record(ctx, float64(facts.Latency.Microseconds())/1000, options)
+	outcomeEvidence.Record(ctx, int64(facts.Evidence), options)
+	if facts.Conflict {
+		outcomeConflicts.Add(ctx, 1)
+	}
 }
 
 func RecordHTTPRequest(ctx context.Context, facts HTTPMetrics) {

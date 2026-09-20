@@ -20,6 +20,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/ingest"
+	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/security"
 	"github.com/sauhard74/mem-jev/internal/store"
@@ -362,8 +363,13 @@ func newTestHandler(t *testing.T, repository store.IngestRepository, timeout tim
 	}
 	archives := archive.NewMemoryStore()
 	service := ingest.NewService(archives, repository, ingest.DefaultPolicy())
+	var outcomeService *outcome.Service
+	if outcomeRepository, ok := repository.(store.OutcomeRepository); ok {
+		outcomeService = outcome.NewService(outcomeRepository, outcome.DefaultPolicy())
+	}
 	return NewHandler(Dependencies{
 		Ingest:        service,
+		Outcome:       outcomeService,
 		Authenticator: security.NewBearerAuthenticator(testCredentialResolver()),
 		BuildInfo:     buildinfo.Info{Version: "test", Commit: "abc123", BuiltAt: "2026-09-20T00:00:00Z"},
 		Timeout:       timeout,
@@ -396,7 +402,7 @@ func testPrincipal(consent policy.ConsentMode) security.Principal {
 	return security.Principal{
 		TenantID: domain.TenantID("tenant_a"),
 		Region:   "local",
-		Scopes:   map[string]struct{}{security.ScopeIngestWrite: {}},
+		Scopes:   map[string]struct{}{security.ScopeIngestWrite: {}, security.ScopeOutcomeWrite: {}},
 		Consent:  consent,
 	}
 }

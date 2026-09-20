@@ -13,6 +13,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/observability"
+	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/security"
 )
 
@@ -23,6 +24,7 @@ const (
 
 type Dependencies struct {
 	Ingest        *ingest.Service
+	Outcome       *outcome.Service
 	Authenticator security.Authenticator
 	BuildInfo     buildinfo.Info
 	Readiness     func(context.Context) error
@@ -54,6 +56,15 @@ func NewHandler(dependencies Dependencies) http.Handler {
 	ingestPath, ingestHTTPHandler := memjevv1connect.NewIngestServiceHandler(
 		&ingestHandler{service: dependencies.Ingest}, ingestOptions...)
 	mux.Handle(ingestPath, ingestHTTPHandler)
+	outcomeOptions := append([]connect.HandlerOption{}, commonOptions...)
+	outcomeOptions = append(outcomeOptions, connect.WithInterceptors(
+		errorDetailsInterceptor(),
+		interceptors.NewAuth(dependencies.Authenticator, security.ScopeOutcomeWrite),
+		interceptors.NewIdempotency(),
+	))
+	outcomePath, outcomeHTTPHandler := memjevv1connect.NewOutcomeServiceHandler(
+		&outcomeHandler{service: dependencies.Outcome}, outcomeOptions...)
+	mux.Handle(outcomePath, outcomeHTTPHandler)
 	healthPath, healthHTTPHandler := memjevv1connect.NewHealthServiceHandler(
 		&healthHandler{info: dependencies.BuildInfo, readiness: dependencies.Readiness}, commonOptions...)
 	mux.Handle(healthPath, healthHTTPHandler)

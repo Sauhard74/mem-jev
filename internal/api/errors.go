@@ -16,6 +16,7 @@ import (
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/ingest"
+	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
@@ -124,16 +125,26 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason, retryable = connect.CodeDeadlineExceeded, "deadline_exceeded", true
 	case errors.Is(err, ingest.ErrInvalidCommand), errors.Is(err, ingest.ErrInvalidTrace), errors.Is(err, store.ErrInvalidCommit):
 		code, reason = connect.CodeInvalidArgument, "invalid_request"
+	case errors.Is(err, outcome.ErrInvalidCommand), errors.Is(err, store.ErrInvalidOutcomeCommit):
+		code, reason = connect.CodeInvalidArgument, "invalid_outcome"
+	case errors.Is(err, outcome.ErrSensitiveEvidence):
+		code, reason = connect.CodeInvalidArgument, "sensitive_evidence"
 	case errors.Is(err, ingest.ErrForbiddenField):
 		code, reason = connect.CodeInvalidArgument, "forbidden_field"
 	case errors.Is(err, ingest.ErrValueTooLarge), errors.Is(err, ingest.ErrTraceTooLarge):
 		code, reason = connect.CodeResourceExhausted, "request_too_large"
-	case errors.Is(err, ingest.ErrPermissionDenied), errors.Is(err, policy.ErrConsentDenied):
+	case errors.Is(err, ingest.ErrPermissionDenied), errors.Is(err, outcome.ErrPermissionDenied), errors.Is(err, policy.ErrConsentDenied):
 		code, reason = connect.CodePermissionDenied, "learning_not_permitted"
 	case errors.Is(err, store.ErrIdempotencyConflict):
 		code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
 	case errors.Is(err, store.ErrTraceConflict):
 		code, reason = connect.CodeAlreadyExists, "trace_conflict"
+	case errors.Is(err, store.ErrOutcomeTraceNotFound):
+		code, reason = connect.CodeNotFound, "trace_not_found"
+	case errors.Is(err, store.ErrOutcomeSelectionNotFound):
+		code, reason = connect.CodeNotFound, "selection_not_found"
+	case errors.Is(err, store.ErrOutcomeSupersessionInvalid):
+		code, reason = connect.CodeFailedPrecondition, "invalid_supersession"
 	default:
 		var archiveErr *archive.OpError
 		if errors.As(err, &archiveErr) && archiveErr.Retryable {

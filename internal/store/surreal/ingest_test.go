@@ -22,6 +22,16 @@ func TestCommitContract(t *testing.T) {
 	})
 }
 
+func TestOutcomeCommitContract(t *testing.T) {
+	storetest.RunOutcomeContract(t, func(t *testing.T) (store.IngestRepository, storetest.OutcomeRepository) {
+		db := testinfra.StartSurreal(t, surrealImage)
+		if err := NewMigrator(db).Apply(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		return NewIngestRepository(db), NewOutcomeRepository(db)
+	})
+}
+
 func TestCommitRollsBackAfterEventFailure(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	if err := NewMigrator(db).Apply(context.Background()); err != nil {

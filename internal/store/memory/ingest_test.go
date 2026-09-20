@@ -15,6 +15,13 @@ func TestCommitContract(t *testing.T) {
 	})
 }
 
+func TestOutcomeCommitContract(t *testing.T) {
+	storetest.RunOutcomeContract(t, func(*testing.T) (store.IngestRepository, storetest.OutcomeRepository) {
+		repository := NewIngestRepository()
+		return repository, repository
+	})
+}
+
 func TestCommitRollsBackAfterEventFailure(t *testing.T) {
 	repository := newIngestRepository(failureAfterEvents)
 	_, err := repository.Commit(context.Background(), storetest.ValidCommitRequest(t))

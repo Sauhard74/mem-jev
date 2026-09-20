@@ -7,7 +7,10 @@ import (
 	"github.com/sauhard74/mem-jev/internal/policy"
 )
 
-const ScopeIngestWrite = "ingest:write"
+const (
+	ScopeIngestWrite  = "ingest:write"
+	ScopeOutcomeWrite = "outcomes:write"
+)
 
 type Principal struct {
 	TenantID domain.TenantID
