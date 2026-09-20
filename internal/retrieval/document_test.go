@@ -104,6 +104,27 @@ func TestLegacyDocumentIsReadableButCannotBeRevised(t *testing.T) {
 	}
 }
 
+func TestReviseLifecycleCreatesAuthenticatedImmutableDocument(t *testing.T) {
+	original, err := retrieval.BuildDocument(validDocumentInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisedAt := time.Date(2026, 9, 21, 1, 2, 3, 0, time.UTC)
+	revised, err := retrieval.ReviseLifecycle(original, "quarantined", 20, 2, revisedAt, "lifecycle.v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revised.ID == original.ID || revised.Lifecycle != "quarantined" || revised.VerifiedSuccessCount != 20 || revised.UnsafeOutcomeCount != 2 || revised.ValidationPolicyVersion != "lifecycle.v1" || retrieval.ValidateDocument(revised) != nil {
+		t.Fatalf("revised document = %#v", revised)
+	}
+	if original.Lifecycle != "candidate" || original.VerifiedSuccessCount != 1 {
+		t.Fatalf("original document mutated = %#v", original)
+	}
+	if _, err := retrieval.ReviseLifecycle(original, "unknown", 20, 0, revisedAt, "lifecycle.v1"); err == nil {
+		t.Fatal("invalid lifecycle accepted")
+	}
+}
+
 func validDocumentInput() retrieval.DocumentInput {
 	procedureInterface, err := retrieval.NewProcedureInterface(
 		[]domain.ProcedureRequirement{{ResourceType: "repository", Namespace: "git", IdentityHash: strings.Repeat("a", 64), SchemaVersion: "v1", AccessMode: "read", PredicateIDs: []string{"workspace.exists"}}},

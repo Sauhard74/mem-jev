@@ -112,7 +112,7 @@ func BuildDocument(input DocumentInput) (Document, error) {
 		!sha256Pattern.MatchString(document.EnvironmentScopeHash) || document.Harness.Name == "" ||
 		document.VerificationStrength == 0 || document.VerifiedSuccessCount == 0 || document.ValidationPolicyVersion == "" ||
 		!document.LearnedWithRecallConsent || document.ResidencyRegion == "" || !validDocumentRisk(document.RiskClass) ||
-		!validLifecycle(document.Lifecycle) || input.Interface == nil || ValidateProcedureInterface(*input.Interface) != nil {
+		!validInitialLifecycle(document.Lifecycle) || input.Interface == nil || ValidateProcedureInterface(*input.Interface) != nil {
 		return Document{}, fmt.Errorf("%w: required field missing or invalid", ErrInvalidDocument)
 	}
 	var err error
@@ -181,6 +181,24 @@ func ReviseEvidence(document Document, verifiedSuccessCount, unsafeOutcomeCount 
 	document.VerifiedSuccessCount = verifiedSuccessCount
 	document.UnsafeOutcomeCount = unsafeOutcomeCount
 	document.ValidatedAt = validatedAt.UTC().Format(time.RFC3339Nano)
+	document.ID, document.ContentHash, document.CanonicalJSON = "", "", nil
+	canonicalJSON, hash, err := canonical.MarshalAndHash(document)
+	if err != nil {
+		return Document{}, err
+	}
+	document.ID, document.ContentHash, document.CanonicalJSON = "rdoc_"+hash, hash, canonicalJSON
+	return document, nil
+}
+
+func ReviseLifecycle(document Document, lifecycle string, verifiedSuccessCount, unsafeOutcomeCount uint64, validatedAt time.Time, validationPolicyVersion string) (Document, error) {
+	if err := ValidateDocument(document); err != nil || document.SchemaVersion != documentSchemaVersion || validatedAt.IsZero() || !validLifecycle(token(lifecycle)) || token(validationPolicyVersion) == "" {
+		return Document{}, ErrInvalidDocument
+	}
+	document.Lifecycle = token(lifecycle)
+	document.VerifiedSuccessCount = verifiedSuccessCount
+	document.UnsafeOutcomeCount = unsafeOutcomeCount
+	document.ValidatedAt = validatedAt.UTC().Format(time.RFC3339Nano)
+	document.ValidationPolicyVersion = token(validationPolicyVersion)
 	document.ID, document.ContentHash, document.CanonicalJSON = "", "", nil
 	canonicalJSON, hash, err := canonical.MarshalAndHash(document)
 	if err != nil {
@@ -369,5 +387,9 @@ func validDocumentRisk(value string) bool {
 	return value == "low" || value == "medium" || value == "high" || value == "critical"
 }
 func validLifecycle(value string) bool {
+	return value == "candidate" || value == "trial" || value == "active" || value == "retired" || value == "quarantined"
+}
+
+func validInitialLifecycle(value string) bool {
 	return value == "candidate" || value == "trial" || value == "active"
 }

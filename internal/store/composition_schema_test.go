@@ -89,6 +89,27 @@ func TestOutcomeCreditLinkageMigrationPreventsMultipleClaims(t *testing.T) {
 	}
 }
 
+func TestLifecycleHeadsEnforceSingleChampionAndImmutablePublicationResult(t *testing.T) {
+	body, err := dbmigrations.Files.ReadFile("0007_lifecycle_heads.surql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(body)
+	for _, fragment := range []string{
+		"retrieval_document_id ON TABLE lifecycle_decision TYPE option<string> READONLY",
+		"projection_epoch ON TABLE lifecycle_decision TYPE option<int> READONLY",
+		"DEFINE TABLE IF NOT EXISTS lifecycle_version_head SCHEMAFULL PERMISSIONS NONE",
+		"DEFINE TABLE IF NOT EXISTS lifecycle_champion_head SCHEMAFULL PERMISSIONS NONE",
+		"lifecycle_version_head_unique",
+		"lifecycle_champion_head_unique",
+		"FIELDS tenant_id, procedure_id, lifecycle_policy_manifest_id UNIQUE",
+	} {
+		if !strings.Contains(schema, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+}
+
 func tableSection(schema, table string) string {
 	start := strings.Index(schema, "DEFINE TABLE IF NOT EXISTS "+table+" ")
 	if start < 0 {
