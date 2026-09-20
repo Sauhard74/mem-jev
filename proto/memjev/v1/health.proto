@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+message CheckRequest {}
+
+message CheckResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SERVING = 1;
+    STATUS_NOT_SERVING = 2;
+  }
+
+  Status status = 1;
+  string version = 2;
+  string commit = 3;
+  string built_at = 4;
+}
+
+service HealthService {
+  rpc Check(CheckRequest) returns (CheckResponse) {}
+}

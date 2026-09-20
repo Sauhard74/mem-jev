@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+import "buf/validate/validate.proto";
+
+enum ConsentMode {
+  CONSENT_MODE_UNSPECIFIED = 0;
+  CONSENT_MODE_DENY = 1;
+  CONSENT_MODE_RECALL_ONLY = 2;
+  CONSENT_MODE_LEARN_AND_RECALL = 3;
+}
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_READ = 1;
+  EVENT_KIND_WRITE = 2;
+  EVENT_KIND_SEARCH = 3;
+  EVENT_KIND_EXECUTE = 4;
+  EVENT_KIND_VERIFY = 5;
+  EVENT_KIND_OTHER = 6;
+}
+
+enum ToolResultState {
+  TOOL_RESULT_STATE_UNSPECIFIED = 0;
+  TOOL_RESULT_STATE_SUCCESS = 1;
+  TOOL_RESULT_STATE_FAILURE = 2;
+  TOOL_RESULT_STATE_UNKNOWN = 3;
+}
+
+enum IngestDisposition {
+  INGEST_DISPOSITION_UNSPECIFIED = 0;
+  INGEST_DISPOSITION_ACCEPTED = 1;
+  INGEST_DISPOSITION_DUPLICATE = 2;
+}
+
+message Field {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string string_value = 2 [(buf.validate.field).string.max_len = 65536];
+}
+

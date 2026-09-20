@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "memjev/v1/common.proto";
+
+message ToolResult {
+  ToolResultState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional int32 exit_code = 2;
+  repeated Field evidence = 3 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message TraceEvent {
+  string client_event_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  google.protobuf.Timestamp occurred_at = 2 [(buf.validate.field).required = true];
+  EventKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string tool_name = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string tool_version = 5 [(buf.validate.field).string.max_len = 128];
+  repeated Field fields = 6 [(buf.validate.field).repeated.max_items = 256];
+  ToolResult result = 7;
+}
+
+message IngestTraceRequest {
+  string client_trace_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string harness = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string harness_version = 3 [(buf.validate.field).string.max_len = 128];
+  string task = 4 [(buf.validate.field).string.max_len = 1048576];
+  repeated TraceEvent events = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 5000
+  }];
+  repeated Field environment = 6 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message IngestTraceResponse {
+  string receipt_id = 1;
+  string trace_id = 2;
+  string canonical_hash = 3;
+  IngestDisposition disposition = 4;
+  uint32 accepted_events = 5;
+}
+
+service IngestService {
+  rpc IngestTrace(IngestTraceRequest) returns (IngestTraceResponse) {}
+}
+

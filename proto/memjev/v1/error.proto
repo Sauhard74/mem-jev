@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+message ErrorDetail {
+  string request_id = 1;
+  string reason_code = 2;
+  bool retryable = 3;
+}
+

@@ -5,6 +5,9 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/sauhard74/mem-jev/gen
+  disable:
+    - file_option: go_package_prefix
+      module: buf.build/bufbuild/protovalidate
 plugins:
   - remote: buf.build/protocolbuffers/go:v1.36.11
     out: gen
@@ -16,4 +19,3 @@ plugins:
       - paths=source_relative
 inputs:
   - directory: proto
-
