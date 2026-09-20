@@ -27,8 +27,9 @@ func TestTenantErasureDeletesOnlyTargetAndCommitsHashedReceipt(t *testing.T) {
 	if err = repository.BeginErasure(context.Background(), "tenant_a", receipt.RequestID); err != nil {
 		t.Fatal(err)
 	}
-	if _, writeErr := surrealdb.Query[any](context.Background(), db, `CREATE ONLY tenant CONTENT { tenant_id: "tenant_a", status: "active", created_at: time::now(), schema_version: "tenant.v1" }`, nil); writeErr == nil {
-		t.Fatal("write for fenced tenant succeeded")
+	writeResults, writeErr := surrealdb.Query[any](context.Background(), db, `UPDATE tenant SET status = "inactive" WHERE tenant_id = "tenant_a"`, nil)
+	if writeErr == nil {
+		t.Fatalf("write for fenced tenant succeeded: %#v", writeResults)
 	}
 	winner, err := repository.CommitErasure(context.Background(), "tenant_a", receipt)
 	if err != nil || winner.ContentHash != receipt.ContentHash {

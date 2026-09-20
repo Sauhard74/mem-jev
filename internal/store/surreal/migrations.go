@@ -177,10 +177,14 @@ func (m *Migrator) applyOne(ctx context.Context, migration store.Migration) (err
 			_ = tx.Cancel(context.Background())
 		}
 	}()
-	if _, err = surrealdb.Query[any](ctx, tx, migration.Statements, nil); err != nil {
+	results, queryErr := surrealdb.Query[any](ctx, tx, migration.Statements, nil)
+	if queryErr != nil {
+		return fmt.Errorf("execute migration %d: %w", migration.Version, queryErr)
+	}
+	if err = queryResultError(results); err != nil {
 		return fmt.Errorf("execute migration %d: %w", migration.Version, err)
 	}
-	_, err = surrealdb.Query[any](ctx, tx, `
+	recordResults, recordErr := surrealdb.Query[any](ctx, tx, `
 		CREATE ONLY schema_migration CONTENT {
 			version: $version,
 			name: $name,
@@ -192,11 +196,26 @@ func (m *Migrator) applyOne(ctx context.Context, migration store.Migration) (err
 		"checksum":   migration.Checksum,
 		"applied_at": time.Now().UTC(),
 	})
-	if err != nil {
+	if recordErr != nil {
+		return fmt.Errorf("record migration %d: %w", migration.Version, recordErr)
+	}
+	if err = queryResultError(recordResults); err != nil {
 		return fmt.Errorf("record migration %d: %w", migration.Version, err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit migration %d: %w", migration.Version, err)
+	}
+	return nil
+}
+
+func queryResultError[T any](results *[]surrealdb.QueryResult[T]) error {
+	if results == nil {
+		return errors.New("database returned no query results")
+	}
+	for _, result := range *results {
+		if result.Error != nil {
+			return result.Error
+		}
 	}
 	return nil
 }

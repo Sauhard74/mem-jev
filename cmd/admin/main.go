@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/erasure"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
@@ -26,31 +27,86 @@ func surrealAuthScope() storesurreal.AuthScope {
 	return storesurreal.AuthScopeRoot
 }
 
-func openErasureLedger() (*os.File, error) {
+func journalErasureIntent(request erasure.Request) error {
 	if os.Getenv("MEMJEV_ERASURE_LEDGER_REPLAY") == "true" {
-		return nil, nil
+		return nil
 	}
-	path := os.Getenv("MEMJEV_ERASURE_LEDGER_FILE")
-	if path == "" {
-		return nil, errors.New("erasure ledger path is required")
+	directory := os.Getenv("MEMJEV_ERASURE_LEDGER_DIR")
+	if directory == "" {
+		return errors.New("erasure ledger directory is required")
 	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return errors.New("erasure ledger must be a mode-0700 directory")
+	}
+	target := directory + string(os.PathSeparator) + request.RequestID + ".json"
+	if existing, readErr := os.ReadFile(target); readErr == nil {
+		var stored erasure.Request
+		if json.Unmarshal(existing, &stored) != nil || stored != request {
+			return erasure.ErrConflict
+		}
+		return nil
+	} else if !os.IsNotExist(readErr) {
+		return readErr
+	}
+	temporary, err := os.CreateTemp(directory, ".intent-*")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		_ = file.Close()
-		return nil, errors.New("erasure ledger must be a mode-0600 regular file")
+	temporaryName := temporary.Name()
+	defer func() { _ = os.Remove(temporaryName) }()
+	if err = temporary.Chmod(0o600); err == nil {
+		err = json.NewEncoder(temporary).Encode(request)
 	}
-	return file, nil
+	if err == nil {
+		err = temporary.Sync()
+	}
+	if closeErr := temporary.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Link(temporaryName, target); err != nil {
+		if !os.IsExist(err) {
+			return err
+		}
+		existing, readErr := os.ReadFile(target)
+		var stored erasure.Request
+		if readErr != nil || json.Unmarshal(existing, &stored) != nil || stored != request {
+			return erasure.ErrConflict
+		}
+		return nil
+	}
+	directoryHandle, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	syncErr := directoryHandle.Sync()
+	closeErr := directoryHandle.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 func run() int {
-	if len(os.Args) != 2 || os.Args[1] != "erase-tenant" {
-		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant < request.json")
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant|verify-archive-object")
 		return 2
 	}
+	switch os.Args[1] {
+	case "erase-tenant":
+		return runEraseTenant()
+	case "verify-archive-object":
+		return runVerifyArchiveObject()
+	default:
+		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant|verify-archive-object")
+		return 2
+	}
+}
+
+func runEraseTenant() int {
 	var request erasure.Request
 	decoder := json.NewDecoder(os.Stdin)
 	decoder.DisallowUnknownFields()
@@ -62,13 +118,9 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "erasure request rejected")
 		return 2
 	}
-	ledger, err := openErasureLedger()
-	if err != nil {
+	if err := journalErasureIntent(request); err != nil {
 		fmt.Fprintln(os.Stderr, "erasure ledger unavailable")
 		return 1
-	}
-	if ledger != nil {
-		defer func() { _ = ledger.Close() }()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -85,17 +137,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "erasure schema unavailable")
 		return 1
 	}
-	region, bucket := os.Getenv("MEMJEV_ARCHIVE_REGION"), os.Getenv("MEMJEV_ARCHIVE_BUCKET")
-	awsConfiguration, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
-	if err != nil || bucket == "" {
+	client, bucket, err := buildS3Client(ctx)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "erasure archive unavailable")
 		return 1
 	}
-	client := s3.NewFromConfig(awsConfiguration, func(options *s3.Options) {
-		if endpoint := os.Getenv("MEMJEV_ARCHIVE_ENDPOINT"); endpoint != "" {
-			options.BaseEndpoint, options.UsePathStyle = aws.String(endpoint), true
-		}
-	})
 	archives, err := archive.NewS3Eraser(client, bucket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "erasure archive unavailable")
@@ -111,13 +157,54 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "tenant erasure failed")
 		return 1
 	}
-	if ledger != nil {
-		if err = json.NewEncoder(ledger).Encode(request); err != nil || ledger.Sync() != nil {
-			fmt.Fprintln(os.Stderr, "erasure ledger write failed")
-			return 1
-		}
-	}
 	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"request_id": receipt.RequestID, "tenant_hash": receipt.TenantHash, "completed_at": receipt.CompletedAt, "content_hash": receipt.ContentHash}); err != nil {
+		return 1
+	}
+	return 0
+}
+
+func buildS3Client(ctx context.Context) (*s3.Client, string, error) {
+	region, bucket := os.Getenv("MEMJEV_ARCHIVE_REGION"), os.Getenv("MEMJEV_ARCHIVE_BUCKET")
+	awsConfiguration, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil || bucket == "" || region == "" {
+		return nil, "", errors.New("archive configuration unavailable")
+	}
+	client := s3.NewFromConfig(awsConfiguration, func(options *s3.Options) {
+		if endpoint := os.Getenv("MEMJEV_ARCHIVE_ENDPOINT"); endpoint != "" {
+			options.BaseEndpoint, options.UsePathStyle = aws.String(endpoint), true
+		}
+	})
+	return client, bucket, nil
+}
+
+func runVerifyArchiveObject() int {
+	var request struct {
+		Key archive.Key `json:"key"`
+	}
+	decoder := json.NewDecoder(os.Stdin)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF || request.Key == "" {
+		fmt.Fprintln(os.Stderr, "archive verification request rejected")
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	client, bucket, err := buildS3Client(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "archive verification unavailable")
+		return 1
+	}
+	encryption := types.ServerSideEncryptionAes256
+	if os.Getenv("MEMJEV_ARCHIVE_SSE") == "aws:kms" {
+		encryption = types.ServerSideEncryptionAwsKms
+	}
+	store, err := archive.NewS3Store(client, archive.S3Config{Bucket: bucket, ServerSideEncryption: encryption, KMSKeyID: os.Getenv("MEMJEV_ARCHIVE_KMS_KEY_ID")})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "archive verification unavailable")
+		return 1
+	}
+	if _, err = store.GetBounded(ctx, request.Key, 64<<20); err != nil {
+		fmt.Fprintln(os.Stderr, "archive object verification failed")
 		return 1
 	}
 	return 0

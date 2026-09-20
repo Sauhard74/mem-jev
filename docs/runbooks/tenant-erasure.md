@@ -2,7 +2,7 @@
 
 Tenant erasure is an operator-only workflow. First revoke the tenant credential from the mounted credential document and roll the API replicas so no new request can authenticate. Keep the worker running: the durable database fence created by the command rejects every create or update for that tenant, including writes from already-running workflows.
 
-Set `MEMJEV_ERASURE_LEDGER_FILE` to a mode-0600 regular file on an independently backed-up operator volume. This append-only JSON-lines ledger intentionally contains tenant identifiers and exact confirmations, so it is sensitive recovery material: encrypt it at rest, restrict it to the erasure operator, retain it longer than every data backup, and never include it inside a recovery snapshot.
+Set `MEMJEV_ERASURE_LEDGER_DIR` to a mode-0700 directory on an independently backed-up operator volume. Before destructive work, the command writes one mode-0600 intent file per request using fsync plus an atomic link and directory fsync. The ledger intentionally contains tenant identifiers and exact confirmations, so it is sensitive recovery material: encrypt it at rest, restrict it to the erasure operator, retain it longer than every data backup, and never include it inside a recovery snapshot.
 
 Send the request on standard input so the tenant identifier is never exposed in process arguments:
 

@@ -13,6 +13,9 @@ DEFINE FUNCTION fn::assert_tenant_writable($tenant_id: string) {
     RETURN true;
 };
 
+DEFINE EVENT tenant_erasure_write_fence ON TABLE tenant WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
+DEFINE EVENT tenant_erasure_write_fence ON TABLE consent_policy WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
+DEFINE EVENT tenant_erasure_write_fence ON TABLE policy_bundle WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE trace_run WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE canonical_event WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE ingest_receipt WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
@@ -63,6 +66,7 @@ DEFINE EVENT tenant_erasure_write_fence ON TABLE lifecycle_champion_head WHEN $e
 DEFINE EVENT tenant_erasure_write_fence ON TABLE experiment_manifest WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE promotion_evaluation WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE experiment_tenant_budget_head WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
+DEFINE EVENT tenant_erasure_write_fence ON TABLE experiment_global_budget_head WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE experiment_exposure_counter WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE experiment_assignment WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);
 DEFINE EVENT tenant_erasure_write_fence ON TABLE outcome_credit WHEN $event = 'CREATE' OR $event = 'UPDATE' THEN fn::assert_tenant_writable($after.tenant_id);

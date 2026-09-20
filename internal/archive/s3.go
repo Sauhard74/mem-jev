@@ -96,7 +96,7 @@ func (s *S3Store) verifyExisting(ctx context.Context, key Key, req PutRequest) (
 		output.Metadata["content-sha256"] != req.Hash ||
 		output.Metadata["schema-version"] != req.SchemaVersion ||
 		output.ServerSideEncryption != s.config.ServerSideEncryption ||
-		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) == "") {
+		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) != s.config.KMSKeyID) {
 		return Object{}, fmt.Errorf("%w: key %q failed size or metadata verification", ErrArchiveConflict, key)
 	}
 	return Object{Key: key, Hash: req.Hash, Size: int64(len(req.Body)), Reused: true}, nil
@@ -129,7 +129,7 @@ func (s *S3Store) GetBounded(ctx context.Context, key Key, maximumBytes int64) (
 	}
 	if output.Metadata["content-sha256"] != wantHash || output.Metadata["schema-version"] != wantSchema ||
 		output.ServerSideEncryption != s.config.ServerSideEncryption ||
-		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) == "") {
+		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) != s.config.KMSKeyID) {
 		_ = output.Body.Close()
 		return nil, fmt.Errorf("%w: key %q failed metadata or encryption verification", ErrArchiveConflict, key)
 	}

@@ -282,6 +282,26 @@ func TestS3StoreGetRejectsWrongEncryptionEnvelope(t *testing.T) {
 	}
 }
 
+func TestS3StoreGetRejectsWrongKMSKey(t *testing.T) {
+	t.Parallel()
+	req := canonicalRequest()
+	key, err := KeyFor(req.TenantID, req.SchemaVersion, req.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeS3{getOutput: &s3.GetObjectOutput{
+		Body: io.NopCloser(bytes.NewReader(req.Body)), Metadata: map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+		ServerSideEncryption: types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String("alias/wrong"),
+	}}
+	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAwsKms, KMSKeyID: "alias/required"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetBounded(context.Background(), key, 1<<20); !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("GetBounded() error = %v; want archive conflict", err)
+	}
+}
+
 func TestNewS3StoreRejectsUnsafeEncryptionConfiguration(t *testing.T) {
 	t.Parallel()
 

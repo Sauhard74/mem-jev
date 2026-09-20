@@ -32,4 +32,4 @@ jev-smoke:
 	go run ./cmd/jev-smoke -key-file "$${MEMJEV_JEV_API_KEY_FILE}" -model "$${MEMJEV_JEV_MODEL}"
 
 production-preflight:
-	./scripts/production-preflight.sh
+	bash -c 'source ./scripts/load-production-env.sh; load_production_env "$${MEMJEV_PRODUCTION_ENV_FILE:-.env.production}"; ./scripts/production-preflight.sh'
