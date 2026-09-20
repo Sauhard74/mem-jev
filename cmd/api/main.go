@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,7 +32,40 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	os.Exit(run())
+}
+
+func healthcheck() int {
+	address := os.Getenv("MEMJEV_LISTEN_ADDR")
+	if address == "" {
+		address = ":8080"
+	}
+	if strings.HasPrefix(address, ":") {
+		address = "127.0.0.1" + address
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/memjev.v1.HealthService/Check", bytes.NewBufferString("{}"))
+	if err != nil {
+		return 1
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return 1
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	decodeErr := json.NewDecoder(response.Body).Decode(&body)
+	closeErr := response.Body.Close()
+	if response.StatusCode != http.StatusOK || decodeErr != nil || closeErr != nil || body.Status != "STATUS_SERVING" {
+		return 1
+	}
+	return 0
 }
 
 func run() int {

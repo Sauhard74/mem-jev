@@ -1,0 +1,8 @@
+.git
+.github
+.superpowers
+.env.local
+.runtime
+tools
+docs
+**/*_test.go

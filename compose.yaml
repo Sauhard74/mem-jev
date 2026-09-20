@@ -1,0 +1,99 @@
+name: memjev
+
+services:
+  surreal:
+    image: surrealdb/surrealdb:v3.2.4
+    command: ["start", "--log", "warn", "--bind", "0.0.0.0:8000", "--user", "${SURREAL_USER:?}", "--pass", "${SURREAL_PASS:?}", "surrealkv:/home/nonroot/database"]
+    ports: ["127.0.0.1:${SURREAL_PORT:-18000}:8000"]
+    volumes: ["surreal-data:/home/nonroot"]
+    networks: ["private", "host-access"]
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://127.0.0.1:8000"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?}"
+      MINIO_KMS_SECRET_KEY: "${MINIO_KMS_SECRET_KEY:?}"
+    ports: ["127.0.0.1:${MINIO_PORT:-19000}:9000"]
+    volumes: ["minio-data:/data"]
+    networks: ["private", "host-access"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio: {condition: service_healthy}
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?}"
+      MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/$$MEMJEV_ARCHIVE_BUCKET"]
+    networks: ["private"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      args:
+        VERSION: "${MEMJEV_BUILD_VERSION:-dev}"
+        REVISION: "${MEMJEV_BUILD_COMMIT:-local}"
+        BUILT_AT: "${MEMJEV_BUILD_AT:-unknown}"
+    depends_on:
+      surreal: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    environment:
+      MEMJEV_ENVIRONMENT: development
+      MEMJEV_ADAPTER_MODE: surreal-s3
+      MEMJEV_LISTEN_ADDR: ":8080"
+      MEMJEV_SHUTDOWN_TIMEOUT: 10s
+      MEMJEV_CREDENTIALS_FILE: /run/secrets/credentials.json
+      MEMJEV_SURREAL_ENDPOINT: ws://surreal:8000
+      MEMJEV_SURREAL_NAMESPACE: memjev
+      MEMJEV_SURREAL_DATABASE: memjev
+      MEMJEV_SURREAL_USER: "${SURREAL_USER:?}"
+      MEMJEV_SURREAL_PASSWORD: "${SURREAL_PASS:?}"
+      MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
+      MEMJEV_ARCHIVE_REGION: us-east-1
+      MEMJEV_ARCHIVE_ENDPOINT: http://minio:9000
+      MEMJEV_ARCHIVE_SSE: AES256
+      MEMJEV_BUILD_VERSION: "${MEMJEV_BUILD_VERSION:-dev}"
+      MEMJEV_BUILD_COMMIT: "${MEMJEV_BUILD_COMMIT:-local}"
+      MEMJEV_BUILD_AT: "${MEMJEV_BUILD_AT:-unknown}"
+      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:?}"
+      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?}"
+      AWS_EC2_METADATA_DISABLED: "true"
+    ports: ["127.0.0.1:${MEMJEV_API_PORT:-18080}:8080"]
+    volumes: ["${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"]
+    networks: ["private", "host-access"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "/memjev-api", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+networks:
+  private:
+    internal: true
+  host-access:
+
+volumes:
+  surreal-data:
+  minio-data:
