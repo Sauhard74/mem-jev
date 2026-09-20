@@ -110,6 +110,28 @@ func TestLifecycleHeadsEnforceSingleChampionAndImmutablePublicationResult(t *tes
 	}
 }
 
+func TestExperimentReservationMigrationSerializesBudgetChecks(t *testing.T) {
+	body, err := dbmigrations.Files.ReadFile("0008_experiment_reservations.surql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(body)
+	for _, fragment := range []string{
+		"challenger ON TABLE experiment_assignment TYPE option<bool> READONLY",
+		"window_start ON TABLE experiment_assignment TYPE option<datetime> READONLY",
+		"DEFINE TABLE IF NOT EXISTS experiment_tenant_budget_head SCHEMAFULL PERMISSIONS NONE",
+		"DEFINE TABLE IF NOT EXISTS experiment_global_budget_head SCHEMAFULL PERMISSIONS NONE",
+		"experiment_tenant_budget_head_unique",
+		"experiment_global_budget_head_unique",
+		"exposure_count ON TABLE experiment_tenant_budget_head TYPE int ASSERT $value >= 0",
+		"unsafe_count ON TABLE experiment_global_budget_head TYPE int ASSERT $value >= 0",
+	} {
+		if !strings.Contains(schema, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+}
+
 func tableSection(schema, table string) string {
 	start := strings.Index(schema, "DEFINE TABLE IF NOT EXISTS "+table+" ")
 	if start < 0 {
