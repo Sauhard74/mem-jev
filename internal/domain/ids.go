@@ -5,3 +5,5 @@ type TraceID string
 type EventID string
 type ReceiptID string
 type ArchiveKey string
+type OutcomeID string
+type EvidenceID string
