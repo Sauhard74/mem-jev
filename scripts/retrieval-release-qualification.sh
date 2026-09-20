@@ -21,7 +21,7 @@ if (( duration_minutes < 30 )); then
   exit 2
 fi
 
-go run ./tests/qualification -minimum-events 10000000 -minimum-retrieval-documents 1000000 -minimum-tenants 2
+go run ./tests/qualification -minimum-events 10000000 -minimum-retrieval-documents 1000000 -minimum-tenants 2 -minimum-vector-documents 1000000 -require-vector
 
 memory_samples=$(mktemp)
 sampler_pid=
@@ -43,7 +43,7 @@ sample_memory() {
 
 sample_memory &
 sampler_pid=$!
-go run ./tests/load -endpoint "$MEMJEV_E2E_API_URL" -token "$MEMJEV_E2E_TOKEN" -other-token "$MEMJEV_E2E_OTHER_TOKEN" -rps 100 -duration "$duration" -concurrency 256
+go run ./tests/load -endpoint "$MEMJEV_E2E_API_URL" -token "$MEMJEV_E2E_TOKEN" -other-token "$MEMJEV_E2E_OTHER_TOKEN" -rps 100 -duration "$duration" -concurrency 256 -require-vector
 kill "$sampler_pid" >/dev/null 2>&1 || true
 wait "$sampler_pid" >/dev/null 2>&1 || true
 sampler_pid=

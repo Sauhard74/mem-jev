@@ -34,6 +34,7 @@ func main() {
 	rate := flag.Int("rps", 100, "target requests per second")
 	duration := flag.Duration("duration", 60*time.Second, "test duration")
 	concurrency := flag.Int("concurrency", 64, "maximum in-flight requests")
+	requireVector := flag.Bool("require-vector", false, "require the vector channel to execute successfully on every retrieval path")
 	flag.Parse()
 	if *token == "" || *otherToken == "" || *rate <= 0 || *duration <= 0 || *concurrency <= 0 {
 		fmt.Fprintln(os.Stderr, "two tenant tokens, positive rps, duration, and concurrency are required")
@@ -48,12 +49,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warmup retrieval failed: response=%v error=%v\n", warmupResponse, err)
 		os.Exit(1)
 	}
+	if *requireVector && !healthyVectorProvenance(warmupResponse.Msg.GetProvenance()) {
+		fmt.Fprintf(os.Stderr, "warmup retrieval did not execute a healthy vector channel: provenance=%v\n", warmupResponse.Msg.GetProvenance())
+		os.Exit(1)
+	}
 	warmupRunID := warmupResponse.Msg.GetRetrievalRunId()
 	warmupEpoch := warmupResponse.Msg.GetProvenance().GetProjectionEpoch()
 	otherWarmup := loadRetrieveRequest(*otherToken, -1, time.Now(), nil)
 	otherWarmupResponse, err := client.Retrieve(context.Background(), otherWarmup)
 	if err != nil || otherWarmupResponse.Msg.GetDisposition() != memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED || len(otherWarmupResponse.Msg.GetCandidates()) != 1 || otherWarmupResponse.Msg.GetCandidates()[0].GetProcedureVersionId() != "pv_retrieval_other" {
 		fmt.Fprintf(os.Stderr, "second-tenant warmup failed: response=%v error=%v\n", otherWarmupResponse, err)
+		os.Exit(1)
+	}
+	if *requireVector && !healthyVectorProvenance(otherWarmupResponse.Msg.GetProvenance()) {
+		fmt.Fprintf(os.Stderr, "second-tenant warmup did not execute a healthy vector channel: provenance=%v\n", otherWarmupResponse.Msg.GetProvenance())
 		os.Exit(1)
 	}
 	otherEpoch := otherWarmupResponse.Msg.GetProvenance().GetProjectionEpoch()
@@ -92,7 +101,7 @@ func main() {
 					request := loadRetrieveRequest(*otherToken, id, scheduled, nil)
 					var response *connect.Response[memjevv1.RetrieveResponse]
 					response, err = client.Retrieve(ctx, request)
-					valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED && len(response.Msg.GetCandidates()) == 1 && response.Msg.GetCandidates()[0].GetProcedureVersionId() == "pv_retrieval_other" && response.Msg.GetProvenance().GetProjectionEpoch() == otherEpoch
+					valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED && len(response.Msg.GetCandidates()) == 1 && response.Msg.GetCandidates()[0].GetProcedureVersionId() == "pv_retrieval_other" && response.Msg.GetProvenance().GetProjectionEpoch() == otherEpoch && (!*requireVector || healthyVectorProvenance(response.Msg.GetProvenance()))
 					if valid {
 						otherTenant.Add(1)
 					}
@@ -103,7 +112,7 @@ func main() {
 						request.Header().Set("Authorization", "Bearer "+*token)
 						var response *connect.Response[memjevv1.ExplainRetrievalResponse]
 						response, err = client.ExplainRetrieval(ctx, request)
-						valid = err == nil && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch && len(response.Msg.GetCandidates()) > 0
+						valid = err == nil && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch && len(response.Msg.GetCandidates()) > 0 && (!*requireVector || healthyVectorProvenance(response.Msg.GetProvenance()))
 						if valid {
 							explained.Add(1)
 						}
@@ -111,7 +120,7 @@ func main() {
 						request := loadRetrieveRequest(*token, id, scheduled, []string{"filesystem.write"})
 						var response *connect.Response[memjevv1.RetrieveResponse]
 						response, err = client.Retrieve(ctx, request)
-						valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_ABSTAINED && response.Msg.GetAbstentionCode() == "no_eligible_candidates" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch
+						valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_ABSTAINED && response.Msg.GetAbstentionCode() == "no_eligible_candidates" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch && (!*requireVector || healthyVectorProvenance(response.Msg.GetProvenance()))
 						if valid {
 							abstained.Add(1)
 						}
@@ -119,7 +128,7 @@ func main() {
 						request := loadRetrieveRequest(*token, id, scheduled, nil)
 						var response *connect.Response[memjevv1.RetrieveResponse]
 						response, err = client.Retrieve(ctx, request)
-						valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED && len(response.Msg.GetCandidates()) >= 1 && response.Msg.GetCandidates()[0].GetProcedureVersionId() == "pv_retrieval_e2e" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch
+						valid = err == nil && response.Msg.GetDisposition() == memjevv1.RetrievalDisposition_RETRIEVAL_DISPOSITION_SELECTED && len(response.Msg.GetCandidates()) >= 1 && response.Msg.GetCandidates()[0].GetProcedureVersionId() == "pv_retrieval_e2e" && response.Msg.GetProvenance().GetProjectionEpoch() == warmupEpoch && (!*requireVector || healthyVectorProvenance(response.Msg.GetProvenance()))
 						if valid {
 							selected.Add(1)
 						}
@@ -147,6 +156,18 @@ func main() {
 	if result.Failures > 0 || result.OtherTenant == 0 || result.P95Millis > 250 || result.AchievedRPS < float64(*rate)*0.95 {
 		os.Exit(1)
 	}
+}
+
+func healthyVectorProvenance(provenance *memjevv1.RetrievalProvenance) bool {
+	if provenance == nil || len(provenance.GetIndexManifestIds()) != 5 {
+		return false
+	}
+	for _, degraded := range provenance.GetDegradedChannels() {
+		if degraded == "vector" || len(degraded) > len("vector:") && degraded[:len("vector:")] == "vector:" {
+			return false
+		}
+	}
+	return true
 }
 
 func loadRetrieveRequest(token string, id int64, scheduled time.Time, forbidden []string) *connect.Request[memjevv1.RetrieveRequest] {
