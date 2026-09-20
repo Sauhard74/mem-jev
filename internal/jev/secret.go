@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var ErrSecretUnavailable = errors.New("Jev secret unavailable")
+var ErrSecretUnavailable = errors.New("jev secret unavailable")
 
 type SecretSource interface {
 	Token() (string, error)

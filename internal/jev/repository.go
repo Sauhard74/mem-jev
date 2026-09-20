@@ -15,7 +15,7 @@ import (
 
 const judgmentSchemaV1 = "jev-judgment.v1"
 
-var ErrJudgmentNotFound = errors.New("Jev judgment not found")
+var ErrJudgmentNotFound = errors.New("jev judgment not found")
 
 type JudgmentRecordInput struct {
 	KeyInput      JudgmentKeyInput

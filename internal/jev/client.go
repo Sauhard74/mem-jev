@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -290,15 +289,4 @@ func decodeStrict(body []byte, target any) error {
 		return errors.New("trailing JSON")
 	}
 	return nil
-}
-
-// sortedAnswerIDs is retained as a small testable helper for future response
-// formats whose map iteration must never affect persistence.
-func sortedAnswerIDs(answers map[string]json.RawMessage) []string {
-	ids := make([]string, 0, len(answers))
-	for id := range answers {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }
