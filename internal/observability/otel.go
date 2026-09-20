@@ -3,6 +3,9 @@ package observability
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"path"
 	"sync"
 	"time"
 
@@ -35,11 +38,19 @@ func Setup(ctx context.Context, config TelemetryConfig) (Shutdown, error) {
 	if err != nil {
 		return nil, err
 	}
-	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(config.Endpoint))
+	traceEndpoint, err := signalEndpoint(config.Endpoint, "v1/traces")
 	if err != nil {
 		return nil, err
 	}
-	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(config.Endpoint))
+	metricEndpoint, err := signalEndpoint(config.Endpoint, "v1/metrics")
+	if err != nil {
+		return nil, err
+	}
+	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(traceEndpoint))
+	if err != nil {
+		return nil, err
+	}
+	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(metricEndpoint))
 	if err != nil {
 		_ = traceExporter.Shutdown(ctx)
 		return nil, err
@@ -51,6 +62,15 @@ func Setup(ctx context.Context, config TelemetryConfig) (Shutdown, error) {
 	return func(ctx context.Context) error {
 		return errors.Join(metricProvider.Shutdown(ctx), traceProvider.Shutdown(ctx))
 	}, nil
+}
+
+func signalEndpoint(base, signalPath string) (string, error) {
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("invalid OTLP base endpoint")
+	}
+	parsed.Path = path.Join(parsed.Path, signalPath)
+	return parsed.String(), nil
 }
 
 func StartSpan(ctx context.Context, name string) (context.Context, trace.Span) {
@@ -65,6 +85,12 @@ type IngestMetrics struct {
 	ArchiveReuse bool
 }
 
+type HTTPMetrics struct {
+	ResultCode string
+	Latency    time.Duration
+	Bytes      int
+}
+
 var (
 	metricsOnce        sync.Once
 	requests           metric.Int64Counter
@@ -74,6 +100,9 @@ var (
 	archiveReuse       metric.Int64Counter
 	transactionRetries metric.Int64Counter
 	outboxCreated      metric.Int64Counter
+	httpRequests       metric.Int64Counter
+	httpLatency        metric.Float64Histogram
+	httpBytes          metric.Int64Histogram
 )
 
 func initializeMetrics() {
@@ -85,6 +114,17 @@ func initializeMetrics() {
 	archiveReuse, _ = meter.Int64Counter("memjev.archive.reuse")
 	transactionRetries, _ = meter.Int64Counter("memjev.transaction.retries")
 	outboxCreated, _ = meter.Int64Counter("memjev.outbox.created")
+	httpRequests, _ = meter.Int64Counter("memjev.http.requests")
+	httpLatency, _ = meter.Float64Histogram("memjev.http.request.duration", metric.WithUnit("ms"))
+	httpBytes, _ = meter.Int64Histogram("memjev.http.request.bytes", metric.WithUnit("By"))
+}
+
+func RecordHTTPRequest(ctx context.Context, facts HTTPMetrics) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("result.code", facts.ResultCode))
+	httpRequests.Add(ctx, 1, options)
+	httpLatency.Record(ctx, float64(facts.Latency.Microseconds())/1000, options)
+	httpBytes.Record(ctx, int64(facts.Bytes), options)
 }
 
 func RecordIngest(ctx context.Context, facts IngestMetrics) {

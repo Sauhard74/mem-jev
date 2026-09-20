@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -59,6 +60,45 @@ func RunIngestContract(t *testing.T, factory Factory) {
 		conflict.Archive = archive.Object{Key: key, Hash: conflict.Batch.Hash, Size: int64(len(conflict.Batch.CanonicalJSON))}
 		if _, err = repository.Commit(context.Background(), conflict); !errors.Is(err, store.ErrIdempotencyConflict) {
 			t.Fatalf("error = %v, want %v", err, store.ErrIdempotencyConflict)
+		}
+		AssertCounts(t, repository, store.AggregateCounts{Receipts: 1, Traces: 1, Events: 2, Archives: 1, OutboxJobs: 1})
+	})
+
+	t.Run("same content with a new idempotency key reuses aggregate", func(t *testing.T) {
+		repository := factory(t)
+		request := ValidCommitRequest(t)
+		if _, err := repository.Commit(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+		request.IdempotencyKeyHash = strings.Repeat("c", 64)
+		second, err := repository.Commit(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second.Disposition != store.DispositionAccepted {
+			t.Fatalf("disposition = %q, want accepted for a new key", second.Disposition)
+		}
+		AssertCounts(t, repository, store.AggregateCounts{Receipts: 2, Traces: 1, Events: 2, Archives: 1, OutboxJobs: 1})
+	})
+
+	t.Run("same trace identity with changed content conflicts", func(t *testing.T) {
+		repository := factory(t)
+		request := ValidCommitRequest(t)
+		if _, err := repository.Commit(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+		changed := request
+		changed.IdempotencyKeyHash = strings.Repeat("d", 64)
+		changed.Batch.CanonicalJSON = []byte(`{"canonical":"changed"}`)
+		sum := sha256.Sum256(changed.Batch.CanonicalJSON)
+		changed.Batch.Hash = hex.EncodeToString(sum[:])
+		key, err := archive.KeyFor(changed.TenantID, changed.Batch.SchemaVersion, changed.Batch.Hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed.Archive = archive.Object{Key: key, Hash: changed.Batch.Hash, Size: int64(len(changed.Batch.CanonicalJSON))}
+		if _, err = repository.Commit(context.Background(), changed); !errors.Is(err, store.ErrTraceConflict) {
+			t.Fatalf("error = %v, want %v", err, store.ErrTraceConflict)
 		}
 		AssertCounts(t, repository, store.AggregateCounts{Receipts: 1, Traces: 1, Events: 2, Archives: 1, OutboxJobs: 1})
 	})

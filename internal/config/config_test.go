@@ -24,7 +24,7 @@ func TestLoadDevelopmentMemoryConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ShutdownTimeout != 15*time.Second || got.ListenAddress != "127.0.0.1:0" {
+	if got.ShutdownTimeout != 15*time.Second || got.RequestTimeout != 10*time.Second || got.ListenAddress != "127.0.0.1:0" {
 		t.Fatalf("config = %#v", got)
 	}
 }
@@ -38,6 +38,41 @@ func TestLoadProductionRequiresTLSAndDurableAdapters(t *testing.T) {
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("error = %v, want %v", err, ErrInvalidConfig)
 	}
+}
+
+func TestLoadProductionRejectsRootSurrealAuthentication(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "root")
+	if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("error = %v, want %v", err, ErrInvalidConfig)
+	}
+}
+
+func TestLoadProductionAcceptsDatabaseScopedSurrealAuthentication(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Surreal.AuthScope != "database" {
+		t.Fatalf("auth scope = %q", got.Surreal.AuthScope)
+	}
+}
+
+func setValidDurableEnvironment(t *testing.T) {
+	t.Helper()
+	clearKnownEnvironment(t)
+	t.Setenv("MEMJEV_ENVIRONMENT", "production")
+	t.Setenv("MEMJEV_ADAPTER_MODE", "surreal-s3")
+	t.Setenv("MEMJEV_CREDENTIALS_FILE", "/run/secrets/credentials.json")
+	t.Setenv("MEMJEV_SURREAL_ENDPOINT", "wss://database.example.test")
+	t.Setenv("MEMJEV_SURREAL_NAMESPACE", "tenant")
+	t.Setenv("MEMJEV_SURREAL_DATABASE", "memjev")
+	t.Setenv("MEMJEV_SURREAL_USER", "app")
+	t.Setenv("MEMJEV_SURREAL_PASSWORD", "secret")
+	t.Setenv("MEMJEV_ARCHIVE_BUCKET", "archive")
+	t.Setenv("MEMJEV_ARCHIVE_REGION", "us-east-1")
 }
 
 func clearKnownEnvironment(t *testing.T) {

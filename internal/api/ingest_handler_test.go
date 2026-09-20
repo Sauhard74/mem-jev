@@ -25,6 +25,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -133,6 +134,103 @@ func TestIngestHTTPRejectsOversizedAndMalformedBodies(t *testing.T) {
 	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIngestHTTPDecodeErrorsNeverEchoSubmittedValues(t *testing.T) {
+	server := httptest.NewServer(newTestHandler(t, nil, 0))
+	defer server.Close()
+	const sensitive = "SENSITIVE_SENTINEL_7284"
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "timestamp", body: `{"clientTraceId":"trace","harness":"test","events":[{"clientEventId":"event","occurredAt":"` + sensitive + `","kind":"EVENT_KIND_EXECUTE","toolName":"shell"}]}`},
+		{name: "number", body: `{"clientTraceId":"trace","harness":"test","events":[{"clientEventId":"event","occurredAt":"1970-01-01T00:00:01Z","kind":"EVENT_KIND_EXECUTE","toolName":"shell","result":{"state":"TOOL_RESULT_STATE_SUCCESS","exitCode":"` + sensitive + `"}}]}`},
+		{name: "enum", body: `{"clientTraceId":"trace","harness":"test","events":[{"clientEventId":"event","occurredAt":"1970-01-01T00:00:01Z","kind":"` + sensitive + `","toolName":"shell"}]}`},
+		{name: "message", body: `{"clientTraceId":"trace","harness":"test","events":"` + sensitive + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := doRawRequest(t, server.Client(), server.URL, []byte(tt.body))
+			defer func() {
+				if err := response.Body.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusBadRequest || bytes.Contains(body, []byte(sensitive)) {
+				t.Fatalf("status=%d body=%s", response.StatusCode, body)
+			}
+			if !bytes.Contains(body, []byte(`"details"`)) || !bytes.Contains(body, []byte(`"reasonCode":"invalid_request"`)) {
+				t.Fatalf("body lacks structured safe error: %s", body)
+			}
+		})
+	}
+}
+
+func TestIngestHTTPRejectsUnknownJSONAndProtobufFields(t *testing.T) {
+	server := httptest.NewServer(newTestHandler(t, nil, 0))
+	defer server.Close()
+
+	jsonBody, err := protojson.Marshal(minimalTrace())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonBody = append(jsonBody[:len(jsonBody)-1], []byte(`,"unknownSentinel":"must-reject"}`)...)
+	response := doRawRequest(t, server.Client(), server.URL, jsonBody)
+	if response.StatusCode != http.StatusBadRequest {
+		payload, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		t.Fatalf("unknown JSON status=%d body=%s", response.StatusCode, payload)
+	}
+	_ = response.Body.Close()
+	charsetRequest, err := http.NewRequest(http.MethodPost, server.URL+memjevv1connect.IngestServiceIngestTraceProcedure, bytes.NewReader(jsonBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	charsetRequest.Header.Set("Content-Type", "application/json; charset=utf-8")
+	charsetRequest.Header.Set("Authorization", "Bearer "+testToken)
+	charsetRequest.Header.Set("Idempotency-Key", testIdempotency)
+	response, err = server.Client().Do(charsetRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		payload, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		t.Fatalf("unknown charset JSON status=%d body=%s", response.StatusCode, payload)
+	}
+	_ = response.Body.Close()
+
+	protoBody, err := proto.Marshal(minimalTrace())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Field 2047, wire type 2, one-byte payload. It is unknown to IngestTraceRequest.
+	protoBody = append(protoBody, 0xfa, 0x7f, 0x01, 'x')
+	request, err := http.NewRequest(http.MethodPost, server.URL+memjevv1connect.IngestServiceIngestTraceProcedure, bytes.NewReader(protoBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/proto")
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Idempotency-Key", testIdempotency)
+	response, err = server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if response.StatusCode != http.StatusBadRequest {
+		payload, _ := io.ReadAll(response.Body)
+		t.Fatalf("unknown protobuf status=%d body=%s", response.StatusCode, payload)
 	}
 }
 

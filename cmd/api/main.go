@@ -103,8 +103,10 @@ func run() int {
 	info := buildinfo.Info{Version: configuration.Build.Version, Commit: configuration.Build.Commit, BuiltAt: configuration.Build.BuiltAt}
 	server := &http.Server{
 		Addr:              configuration.ListenAddress,
-		Handler:           api.NewHandler(api.Dependencies{Ingest: service, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness}),
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           api.NewHandler(api.Dependencies{Ingest: service, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
+		ReadHeaderTimeout: configuration.RequestTimeout,
+		ReadTimeout:       configuration.RequestTimeout,
+		WriteTimeout:      configuration.RequestTimeout + time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	serveErrors := make(chan error, 1)
@@ -137,7 +139,7 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	}
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: configuration.Surreal.Endpoint, Namespace: configuration.Surreal.Namespace, Database: configuration.Surreal.Database,
-		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password,
+		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password, AuthScope: storesurreal.AuthScope(configuration.Surreal.AuthScope),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, err

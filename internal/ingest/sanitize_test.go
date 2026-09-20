@@ -43,6 +43,43 @@ func TestSanitizeRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestSanitizeRejectsSecretsInEveryPersistedIdentity(t *testing.T) {
+	const secret = "sk-live-AbCdEfGhIjKlMnOpQrStUvWx"
+	tests := []struct {
+		name   string
+		mutate func(*memjevv1.IngestTraceRequest)
+	}{
+		{name: "client trace ID", mutate: func(request *memjevv1.IngestTraceRequest) { request.ClientTraceId = secret }},
+		{name: "harness", mutate: func(request *memjevv1.IngestTraceRequest) { request.Harness = secret }},
+		{name: "harness version", mutate: func(request *memjevv1.IngestTraceRequest) { request.HarnessVersion = secret }},
+		{name: "client event ID", mutate: func(request *memjevv1.IngestTraceRequest) { request.Events[0].ClientEventId = secret }},
+		{name: "tool name", mutate: func(request *memjevv1.IngestTraceRequest) { request.Events[0].ToolName = secret }},
+		{name: "tool version", mutate: func(request *memjevv1.IngestTraceRequest) { request.Events[0].ToolVersion = secret }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := traceWithField("command", "true")
+			tt.mutate(request)
+			_, _, err := Sanitize(request, DefaultPolicy())
+			if !errors.Is(err, ErrInvalidTrace) {
+				t.Fatalf("error = %v, want ErrInvalidTrace", err)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("error leaked secret: %v", err)
+			}
+		})
+	}
+}
+
+func TestSanitizeRejectsControlCharactersInPersistedIdentity(t *testing.T) {
+	request := traceWithField("command", "true")
+	request.Events[0].ToolName = "sh\x00ell"
+	_, _, err := Sanitize(request, DefaultPolicy())
+	if !errors.Is(err, ErrInvalidTrace) {
+		t.Fatalf("error = %v, want ErrInvalidTrace", err)
+	}
+}
+
 func TestSanitizeNormalizesControlsAndLineEndings(t *testing.T) {
 	req := traceWithField("assertion", "first\r\nsecond\x00\x1f\u0085third\tfourth")
 	clean, _, err := Sanitize(req, DefaultPolicy())

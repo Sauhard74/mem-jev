@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"connectrpc.com/connect"
@@ -10,6 +12,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/api/interceptors"
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/ingest"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/security"
 )
 
@@ -24,6 +27,7 @@ type Dependencies struct {
 	BuildInfo     buildinfo.Info
 	Readiness     func(context.Context) error
 	Timeout       time.Duration
+	Logger        *slog.Logger
 }
 
 func NewHandler(dependencies Dependencies) http.Handler {
@@ -34,6 +38,9 @@ func NewHandler(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	commonOptions := []connect.HandlerOption{
 		connect.WithReadMaxBytes(maxRequestBytes),
+		connect.WithCodec(strictJSONCodec{name: "json"}),
+		connect.WithCodec(strictJSONCodec{name: "json; charset=utf-8"}),
+		connect.WithCodec(strictProtoCodec{}),
 		connect.WithRecover(func(ctx context.Context, _ connect.Spec, _ http.Header, _ any) error {
 			return safeConnectError(ctx, connect.CodeInternal, "internal_error", false)
 		}),
@@ -51,8 +58,56 @@ func NewHandler(dependencies Dependencies) http.Handler {
 		&healthHandler{info: dependencies.BuildInfo, readiness: dependencies.Readiness}, commonOptions...)
 	mux.Handle(healthPath, healthHTTPHandler)
 
-	handler := requestContextMiddleware(mux, timeout)
+	handler := safeTransportErrors(mux, commonOptions...)
+	if dependencies.Logger != nil {
+		handler = requestLoggingMiddleware(handler, dependencies.Logger)
+	}
+	handler = requestContextMiddleware(handler, timeout)
 	return http.MaxBytesHandler(handler, maxRequestBytes)
+}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func requestLoggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		startedAt := time.Now()
+		observed := &statusResponseWriter{ResponseWriter: response}
+		next.ServeHTTP(observed, request)
+		status := observed.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		requestBytes := int(request.ContentLength)
+		if requestBytes < 0 {
+			requestBytes = 0
+		}
+		observability.LogRequest(request.Context(), logger, observability.RequestFacts{
+			RequestID: requestIDFromContext(request.Context()), ResultCode: strconv.Itoa(status),
+			Bytes: requestBytes, LatencyMilliseconds: time.Since(startedAt).Milliseconds(),
+		})
+		observability.RecordHTTPRequest(request.Context(), observability.HTTPMetrics{
+			ResultCode: strconv.Itoa(status), Bytes: requestBytes, Latency: time.Since(startedAt),
+		})
+	})
 }
 
 func requestContextMiddleware(next http.Handler, timeout time.Duration) http.Handler {

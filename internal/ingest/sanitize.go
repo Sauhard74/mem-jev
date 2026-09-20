@@ -47,6 +47,9 @@ func Sanitize(request *memjevv1.IngestTraceRequest, policy SanitizerPolicy) (*me
 	if err := validateFieldLimits(request, policy); err != nil {
 		return nil, report, err
 	}
+	if err := validatePersistedIdentities(request); err != nil {
+		return nil, report, err
+	}
 
 	clean, ok := proto.Clone(request).(*memjevv1.IngestTraceRequest)
 	if !ok {
@@ -67,6 +70,34 @@ func Sanitize(request *memjevv1.IngestTraceRequest, policy SanitizerPolicy) (*me
 		}
 	}
 	return clean, report, nil
+}
+
+func validatePersistedIdentities(request *memjevv1.IngestTraceRequest) error {
+	identities := []struct {
+		location string
+		value    string
+	}{
+		{location: "client_trace_id", value: request.GetClientTraceId()},
+		{location: "harness", value: request.GetHarness()},
+		{location: "harness_version", value: request.GetHarnessVersion()},
+	}
+	for eventIndex, event := range request.GetEvents() {
+		if event == nil {
+			continue
+		}
+		identities = append(identities,
+			struct{ location, value string }{location: fmt.Sprintf("events[%d].client_event_id", eventIndex), value: event.GetClientEventId()},
+			struct{ location, value string }{location: fmt.Sprintf("events[%d].tool_name", eventIndex), value: event.GetToolName()},
+			struct{ location, value string }{location: fmt.Sprintf("events[%d].tool_version", eventIndex), value: event.GetToolVersion()},
+		)
+	}
+	for _, identity := range identities {
+		report := SanitizationReport{ReasonCounts: make(map[string]int)}
+		if sanitizeValue(identity.value, &report) != identity.value {
+			return &SanitizationError{Reason: ErrInvalidTrace, Location: identity.location}
+		}
+	}
+	return nil
 }
 
 func validateFieldLimits(request *memjevv1.IngestTraceRequest, policy SanitizerPolicy) error {

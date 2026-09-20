@@ -30,6 +30,25 @@ func TestFoundationMigrationIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestOpenAuthenticatesDatabaseScopedCredentials(t *testing.T) {
+	instance := testinfra.StartSurrealInstance(t, surrealImage)
+	if _, err := surrealdb.Query[any](context.Background(), instance.DB,
+		`DEFINE USER app_user ON DATABASE PASSWORD 'app_password' ROLES OWNER`, nil); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(context.Background(), Config{
+		Endpoint: instance.Endpoint, Namespace: instance.Namespace, Database: instance.Database,
+		Username: "app_user", Password: "app_password", AuthScope: AuthScopeDatabase,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close(context.Background()) })
+	if _, err := surrealdb.Query[any](context.Background(), db, "INFO FOR DB", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFoundationSchemaRejectsMissingTenant(t *testing.T) {
 	db := testinfra.StartSurreal(t, surrealImage)
 	if err := NewMigrator(db).Apply(context.Background()); err != nil {

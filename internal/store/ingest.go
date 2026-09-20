@@ -17,6 +17,7 @@ import (
 var (
 	ErrInvalidCommit       = errors.New("invalid ingest commit")
 	ErrIdempotencyConflict = errors.New("idempotency key was reused with different content")
+	ErrTraceConflict       = errors.New("trace identity was reused with different content")
 )
 
 type IngestDisposition string
@@ -54,6 +55,18 @@ type AggregateCounts struct {
 	Archives   int
 	OutboxJobs int
 }
+
+type OpError struct {
+	Operation string
+	Retryable bool
+	Err       error
+}
+
+func (e *OpError) Error() string {
+	return fmt.Sprintf("store %s: %v", e.Operation, e.Err)
+}
+
+func (e *OpError) Unwrap() error { return e.Err }
 
 var lowercaseSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 

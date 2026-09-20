@@ -14,7 +14,19 @@ import (
 	surrealdb "github.com/surrealdb/surrealdb.go"
 )
 
+type SurrealInstance struct {
+	DB        *surrealdb.DB
+	Endpoint  string
+	Namespace string
+	Database  string
+}
+
 func StartSurreal(t *testing.T, image string) *surrealdb.DB {
+	t.Helper()
+	return StartSurrealInstance(t, image).DB
+}
+
+func StartSurrealInstance(t *testing.T, image string) SurrealInstance {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -72,7 +84,8 @@ func StartSurreal(t *testing.T, image string) *surrealdb.DB {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	db, err := surrealdb.FromEndpointURLString(ctx, "ws://"+address)
+	endpoint := "ws://" + address
+	db, err := surrealdb.FromEndpointURLString(ctx, endpoint)
 	if err != nil {
 		t.Fatalf("connect to SurrealDB: %v", err)
 	}
@@ -85,8 +98,9 @@ func StartSurreal(t *testing.T, image string) *surrealdb.DB {
 		t.Fatalf("sign in to SurrealDB: %v", err)
 	}
 	namespace := fmt.Sprintf("test_%d", time.Now().UnixNano())
-	if err = db.Use(ctx, namespace, "memjev"); err != nil {
+	const database = "memjev"
+	if err = db.Use(ctx, namespace, database); err != nil {
 		t.Fatalf("select SurrealDB namespace/database: %v", err)
 	}
-	return db
+	return SurrealInstance{DB: db, Endpoint: endpoint, Namespace: namespace, Database: database}
 }

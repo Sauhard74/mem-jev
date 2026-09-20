@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +19,77 @@ import (
 	"github.com/sauhard74/mem-jev/internal/policy"
 	"github.com/sauhard74/mem-jev/internal/store"
 )
+
+type bufferedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newBufferedResponse() *bufferedResponse    { return &bufferedResponse{header: make(http.Header)} }
+func (r *bufferedResponse) Header() http.Header { return r.header }
+func (r *bufferedResponse) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+}
+func (r *bufferedResponse) Write(body []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.body.Write(body)
+}
+
+func safeTransportErrors(next http.Handler, options ...connect.HandlerOption) http.Handler {
+	errorWriter := connect.NewErrorWriter(options...)
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		buffered := newBufferedResponse()
+		next.ServeHTTP(buffered, request)
+		status := buffered.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		if mustReplaceUnstructuredError(status, buffered.body.Bytes()) && errorWriter.IsSupported(request) {
+			copyHeaders(response.Header(), buffered.header)
+			response.Header().Del("Content-Length")
+			response.Header().Del("Content-Encoding")
+			code, reason, retryable := safeTransportClassification(status)
+			_ = errorWriter.Write(response, request, safeConnectError(request.Context(), code, reason, retryable))
+			return
+		}
+		copyHeaders(response.Header(), buffered.header)
+		response.WriteHeader(status)
+		_, _ = response.Write(buffered.body.Bytes())
+	})
+}
+
+func mustReplaceUnstructuredError(status int, body []byte) bool {
+	return !hasStructuredError(body) && (status == http.StatusBadRequest || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError)
+}
+
+func safeTransportClassification(status int) (connect.Code, string, bool) {
+	switch status {
+	case http.StatusTooManyRequests:
+		return connect.CodeResourceExhausted, "request_too_large", false
+	case http.StatusBadRequest:
+		return connect.CodeInvalidArgument, "invalid_request", false
+	default:
+		return connect.CodeInternal, "internal_error", false
+	}
+}
+
+func hasStructuredError(body []byte) bool {
+	var wire struct {
+		Details []json.RawMessage `json:"details"`
+	}
+	return json.Unmarshal(body, &wire) == nil && len(wire.Details) > 0
+}
+
+func copyHeaders(destination, source http.Header) {
+	for key, values := range source {
+		destination[key] = append([]string(nil), values...)
+	}
+}
 
 type requestIDContextKey struct{}
 
@@ -50,16 +124,24 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason, retryable = connect.CodeDeadlineExceeded, "deadline_exceeded", true
 	case errors.Is(err, ingest.ErrInvalidCommand), errors.Is(err, ingest.ErrInvalidTrace), errors.Is(err, store.ErrInvalidCommit):
 		code, reason = connect.CodeInvalidArgument, "invalid_request"
+	case errors.Is(err, ingest.ErrForbiddenField):
+		code, reason = connect.CodeInvalidArgument, "forbidden_field"
 	case errors.Is(err, ingest.ErrValueTooLarge), errors.Is(err, ingest.ErrTraceTooLarge):
 		code, reason = connect.CodeResourceExhausted, "request_too_large"
 	case errors.Is(err, ingest.ErrPermissionDenied), errors.Is(err, policy.ErrConsentDenied):
 		code, reason = connect.CodePermissionDenied, "learning_not_permitted"
 	case errors.Is(err, store.ErrIdempotencyConflict):
 		code, reason = connect.CodeAlreadyExists, "idempotency_conflict"
+	case errors.Is(err, store.ErrTraceConflict):
+		code, reason = connect.CodeAlreadyExists, "trace_conflict"
 	default:
 		var archiveErr *archive.OpError
 		if errors.As(err, &archiveErr) && archiveErr.Retryable {
 			code, reason, retryable = connect.CodeUnavailable, "archive_unavailable", true
+		}
+		var storeErr *store.OpError
+		if errors.As(err, &storeErr) && storeErr.Retryable {
+			code, reason, retryable = connect.CodeUnavailable, "database_unavailable", true
 		}
 	}
 	return safeConnectError(ctx, code, reason, retryable)
@@ -110,9 +192,25 @@ func errorDetailsInterceptor() connect.Interceptor {
 			if err == nil {
 				return response, nil
 			}
+			var connectErr *connect.Error
+			if errors.As(err, &connectErr) && hasMemjevErrorDetail(connectErr) {
+				return nil, err
+			}
 			code := connect.CodeOf(err)
 			reason, retryable := reasonForCode(code)
 			return nil, safeConnectError(ctx, code, reason, retryable)
 		}
 	})
+}
+
+func hasMemjevErrorDetail(connectErr *connect.Error) bool {
+	for _, detail := range connectErr.Details() {
+		value, err := detail.Value()
+		if err == nil {
+			if _, ok := value.(*memjevv1.ErrorDetail); ok {
+				return true
+			}
+		}
+	}
+	return false
 }

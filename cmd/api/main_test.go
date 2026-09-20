@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,6 +56,7 @@ func TestMemoryAPIStartsReadyAndShutsDownOnSignal(t *testing.T) {
 		"MEMJEV_LISTEN_ADDR="+address,
 		"MEMJEV_CREDENTIALS_FILE="+credentialsPath,
 		"MEMJEV_SHUTDOWN_TIMEOUT=2s",
+		"MEMJEV_REQUEST_TIMEOUT=200ms",
 	)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
@@ -79,6 +81,22 @@ func TestMemoryAPIStartsReadyAndShutsDownOnSignal(t *testing.T) {
 			t.Fatalf("API did not become ready: %v", checkErr)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	connection, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{", memjevv1connect.IngestServiceIngestTraceProcedure, address); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(connection).ReadString('\n'); err != nil {
+		t.Fatalf("server did not bound incomplete request body: %v", err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if err := command.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)

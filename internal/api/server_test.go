@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,10 +16,43 @@ import (
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/ingest"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/security"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func TestRequestBoundaryLogsSuccessAndMalformedFailureWithoutSubmittedContent(t *testing.T) {
+	logs := new(bytes.Buffer)
+	logger := observability.NewJSONLogger(logs)
+	repository := storememory.NewIngestRepository()
+	service := ingest.NewService(archive.NewMemoryStore(), repository, ingest.DefaultPolicy())
+	server := httptest.NewServer(NewHandler(Dependencies{
+		Ingest: service, Authenticator: security.NewBearerAuthenticator(testCredentialResolver()),
+		BuildInfo: buildinfo.Info{Version: "test"}, Logger: logger,
+	}))
+	defer server.Close()
+
+	valid := validHTTPRequest(t, server.URL, minimalTrace())
+	response, err := server.Client().Do(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validRequestID := response.Header.Get("X-Request-ID")
+	_ = response.Body.Close()
+	const sensitive = "SENSITIVE_LOG_SENTINEL_7284"
+	malformed := doRawRequest(t, server.Client(), server.URL, []byte(`{"events":"`+sensitive+`"}`))
+	malformedRequestID := malformed.Header.Get("X-Request-ID")
+	_ = malformed.Body.Close()
+
+	logged := logs.String()
+	if strings.Count(logged, "request completed") != 2 || !strings.Contains(logged, validRequestID) || !strings.Contains(logged, malformedRequestID) {
+		t.Fatalf("request logs = %s", logged)
+	}
+	if strings.Contains(logged, sensitive) || strings.Contains(logged, "safe task") || strings.Contains(strings.ToLower(logged), "authorization") {
+		t.Fatalf("unsafe request log = %s", logged)
+	}
+}
 
 func TestHealthAndSecurityHeaders(t *testing.T) {
 	server := httptest.NewServer(newTestHandler(t, nil, 0))

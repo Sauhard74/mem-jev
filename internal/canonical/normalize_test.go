@@ -10,6 +10,7 @@ import (
 
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -61,6 +62,38 @@ func TestBuildRejectsDuplicateFieldNames(t *testing.T) {
 	_, err := Build(domain.TenantID("tenant_a"), req)
 	if err == nil || !strings.Contains(err.Error(), "events[0].fields.path") {
 		t.Fatalf("Build() error = %v; want duplicate canonical field", err)
+	}
+}
+
+func TestBuildRejectsDuplicateNormalizedEventIdentifiers(t *testing.T) {
+	req := requestWithFields(nil)
+	second := proto.Clone(req.Events[0]).(*memjevv1.TraceEvent)
+	second.ClientEventId = " event-1 "
+	req.Events = append(req.Events, second)
+	_, err := Build(domain.TenantID("tenant_a"), req)
+	if err == nil || !strings.Contains(err.Error(), "client_event_id") {
+		t.Fatalf("Build() error = %v; want normalized duplicate rejection", err)
+	}
+}
+
+func TestBuildRejectsWhitespaceOnlyRequiredIdentifiers(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*memjevv1.IngestTraceRequest)
+	}{
+		{name: "client trace", mutate: func(request *memjevv1.IngestTraceRequest) { request.ClientTraceId = " \t " }},
+		{name: "harness", mutate: func(request *memjevv1.IngestTraceRequest) { request.Harness = " \t " }},
+		{name: "client event", mutate: func(request *memjevv1.IngestTraceRequest) { request.Events[0].ClientEventId = " \t " }},
+		{name: "tool name", mutate: func(request *memjevv1.IngestTraceRequest) { request.Events[0].ToolName = " \t " }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := requestWithFields(nil)
+			tt.mutate(req)
+			if _, err := Build(domain.TenantID("tenant_a"), req); err == nil {
+				t.Fatal("Build() accepted whitespace-only required identity")
+			}
+		})
 	}
 }
 

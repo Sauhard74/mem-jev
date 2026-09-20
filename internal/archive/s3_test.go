@@ -146,8 +146,9 @@ func TestS3StoreTreatsVerifiedPreconditionFailureAsReuse(t *testing.T) {
 	fake := &fakeS3{
 		putErr: &smithy.GenericAPIError{Code: "PreconditionFailed", Message: "exists"},
 		headOutput: &s3.HeadObjectOutput{
-			ContentLength: aws.Int64(int64(len(req.Body))),
-			Metadata:      map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+			ContentLength:        aws.Int64(int64(len(req.Body))),
+			Metadata:             map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+			ServerSideEncryption: types.ServerSideEncryptionAes256,
 		},
 	}
 	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAes256})
@@ -164,6 +165,25 @@ func TestS3StoreTreatsVerifiedPreconditionFailureAsReuse(t *testing.T) {
 	}
 	if aws.ToString(fake.headInput.Key) != string(object.Key) {
 		t.Fatalf("head key = %q, want %q", aws.ToString(fake.headInput.Key), object.Key)
+	}
+}
+
+func TestS3StoreRejectsExistingObjectWithWrongEncryption(t *testing.T) {
+	t.Parallel()
+	req := canonicalRequest()
+	fake := &fakeS3{
+		putErr: &smithy.GenericAPIError{Code: "PreconditionFailed", Message: "exists"},
+		headOutput: &s3.HeadObjectOutput{
+			ContentLength: aws.Int64(int64(len(req.Body))),
+			Metadata:      map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
+		},
+	}
+	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAes256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PutCanonical(context.Background(), req); !errors.Is(err, ErrArchiveConflict) {
+		t.Fatalf("error = %v, want %v", err, ErrArchiveConflict)
 	}
 }
 

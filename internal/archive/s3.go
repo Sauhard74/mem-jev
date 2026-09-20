@@ -94,7 +94,9 @@ func (s *S3Store) verifyExisting(ctx context.Context, key Key, req PutRequest) (
 	}
 	if output == nil || aws.ToInt64(output.ContentLength) != int64(len(req.Body)) ||
 		output.Metadata["content-sha256"] != req.Hash ||
-		output.Metadata["schema-version"] != req.SchemaVersion {
+		output.Metadata["schema-version"] != req.SchemaVersion ||
+		output.ServerSideEncryption != s.config.ServerSideEncryption ||
+		(s.config.ServerSideEncryption == types.ServerSideEncryptionAwsKms && aws.ToString(output.SSEKMSKeyId) == "") {
 		return Object{}, fmt.Errorf("%w: key %q failed size or metadata verification", ErrArchiveConflict, key)
 	}
 	return Object{Key: key, Hash: req.Hash, Size: int64(len(req.Body)), Reused: true}, nil

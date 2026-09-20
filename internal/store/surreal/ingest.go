@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/store"
@@ -57,20 +58,30 @@ func (r *IngestRepository) Commit(ctx context.Context, request store.CommitInges
 		lastErr = err
 		resolved, found, lookupErr := r.findReceipt(ctx, request.TenantID, request.IdempotencyKeyHash)
 		if lookupErr != nil {
-			return store.IngestReceipt{}, fmt.Errorf("resolve failed ingest commit: %w", lookupErr)
+			return store.IngestReceipt{}, databaseFailure("resolve failed ingest commit", lookupErr)
 		}
 		if found {
 			return resolveExisting(resolved, request.Batch.Hash)
 		}
 		if !surrealdb.IsTransactionConflict(err) {
-			return store.IngestReceipt{}, err
+			return store.IngestReceipt{}, databaseFailure("commit ingest ledger", err)
 		}
 		observability.RecordTransactionRetry(ctx)
 		if err := waitForRetry(ctx, attempt); err != nil {
 			return store.IngestReceipt{}, err
 		}
 	}
-	return store.IngestReceipt{}, fmt.Errorf("ingest commit exceeded conflict retries: %w", lastErr)
+	return store.IngestReceipt{}, &store.OpError{Operation: "commit ingest ledger after conflict retries", Retryable: true, Err: lastErr}
+}
+
+func databaseFailure(operation string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, store.ErrIdempotencyConflict) || errors.Is(err, store.ErrTraceConflict) || errors.Is(err, store.ErrInvalidCommit) {
+		return err
+	}
+	retryable := !surrealdb.IsParseError(err) && !surrealdb.IsDeserialization(err) &&
+		!surrealdb.IsNotAllowed(err) && !surrealdb.IsInvalidAuth(err)
+	return &store.OpError{Operation: operation, Retryable: retryable, Err: err}
 }
 
 func (r *IngestRepository) commitOnce(ctx context.Context, request store.CommitIngestRequest) (_ store.IngestReceipt, err error) {
@@ -94,6 +105,16 @@ func (r *IngestRepository) commitOnce(ctx context.Context, request store.CommitI
 		}
 		return resolveExisting(existing, request.Batch.Hash)
 	}
+	existingArchiveKey, traceFound, err := findTraceArchiveKey(ctx, tx, request.TenantID, request.Batch.Trace.ID)
+	if err != nil {
+		return store.IngestReceipt{}, fmt.Errorf("find trace run: %w", err)
+	}
+	if traceFound && existingArchiveKey != request.Archive.Key {
+		if cancelErr := tx.Cancel(ctx); cancelErr != nil {
+			return store.IngestReceipt{}, fmt.Errorf("cancel conflicting trace transaction: %w", cancelErr)
+		}
+		return store.IngestReceipt{}, store.ErrTraceConflict
+	}
 
 	createdAt := r.now().UTC()
 	receipt := store.IngestReceipt{
@@ -107,6 +128,12 @@ func (r *IngestRepository) commitOnce(ctx context.Context, request store.CommitI
 	}
 	if err := createReceipt(ctx, tx, request, receipt); err != nil {
 		return store.IngestReceipt{}, err
+	}
+	if traceFound {
+		if err := tx.Commit(ctx); err != nil {
+			return store.IngestReceipt{}, fmt.Errorf("commit aggregate reuse receipt: %w", err)
+		}
+		return receipt, nil
 	}
 	if err := createTrace(ctx, tx, request, createdAt); err != nil {
 		return store.IngestReceipt{}, err
@@ -130,6 +157,30 @@ func (r *IngestRepository) commitOnce(ctx context.Context, request store.CommitI
 	}
 	observability.RecordOutboxCreated(ctx)
 	return receipt, nil
+}
+
+type traceArchiveRow struct {
+	ArchiveKey string `json:"archive_key"`
+}
+
+func findTraceArchiveKey[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender S, tenantID domain.TenantID, traceID domain.TraceID) (archive.Key, bool, error) {
+	results, err := surrealdb.Query[[]traceArchiveRow](ctx, sender, `
+		SELECT archive_key
+		FROM trace_run
+		WHERE tenant_id = $tenant_id AND trace_id = $trace_id
+		LIMIT 1`, map[string]any{
+		"tenant_id": string(tenantID),
+		"trace_id":  string(traceID),
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return "", false, nil
+	}
+	return archive.Key((*results)[0].Result[0].ArchiveKey), true, nil
 }
 
 type receiptRow struct {

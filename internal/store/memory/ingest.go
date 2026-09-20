@@ -27,7 +27,7 @@ type IngestRepository struct {
 	mu       sync.RWMutex
 	failure  failurePoint
 	receipts map[string]receiptRecord
-	traces   map[string]struct{}
+	traces   map[string]string
 	events   map[string]struct{}
 	archives map[string]struct{}
 	outbox   map[string]struct{}
@@ -42,7 +42,7 @@ func newIngestRepository(failure failurePoint) *IngestRepository {
 	return &IngestRepository{
 		failure:  failure,
 		receipts: make(map[string]receiptRecord),
-		traces:   make(map[string]struct{}),
+		traces:   make(map[string]string),
 		events:   make(map[string]struct{}),
 		archives: make(map[string]struct{}),
 		outbox:   make(map[string]struct{}),
@@ -72,6 +72,10 @@ func (r *IngestRepository) Commit(ctx context.Context, request store.CommitInges
 		receipt.Disposition = store.DispositionDuplicate
 		return receipt, nil
 	}
+	traceKey := tenantKey(request.TenantID, string(request.Batch.Trace.ID))
+	if contentHash, exists := r.traces[traceKey]; exists && contentHash != request.Batch.Hash {
+		return store.IngestReceipt{}, store.ErrTraceConflict
+	}
 
 	receipt := store.IngestReceipt{
 		ID:          store.ReceiptID(request.TenantID, request.IdempotencyKeyHash),
@@ -87,7 +91,7 @@ func (r *IngestRepository) Commit(ctx context.Context, request store.CommitInges
 	}
 
 	r.receipts[key] = receiptRecord{receipt: receipt}
-	r.traces[tenantKey(request.TenantID, string(request.Batch.Trace.ID))] = struct{}{}
+	r.traces[traceKey] = request.Batch.Hash
 	for _, event := range request.Batch.Events {
 		r.events[tenantKey(request.TenantID, string(event.ID))] = struct{}{}
 	}

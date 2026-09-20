@@ -17,7 +17,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/gen/memjev/v1/memjevv1connect"
 	"github.com/sauhard74/mem-jev/internal/archive"
@@ -50,13 +49,6 @@ func TestDurableIdempotentIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	s3Client := openS3(t, ctx)
-	directArchive, err := archive.NewS3Store(s3Client, archive.S3Config{Bucket: requiredEnv(t, "MEMJEV_E2E_S3_BUCKET"), ServerSideEncryption: types.ServerSideEncryptionAes256})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = directArchive.PutCanonical(ctx, archive.PutRequest{TenantID: "tenant_e2e", SchemaVersion: wantBatch.SchemaVersion, Hash: wantBatch.Hash, Body: wantBatch.CanonicalJSON}); err != nil {
-		t.Fatalf("direct archive write: %T %v", err, err)
-	}
 	client := memjevv1connect.NewIngestServiceClient(httpClient(), requiredEnv(t, "MEMJEV_E2E_API_URL"))
 	first := callIngest(t, ctx, client, requestMessage)
 	second := callIngest(t, ctx, client, requestMessage)
@@ -67,7 +59,11 @@ func TestDurableIdempotentIngest(t *testing.T) {
 	}
 
 	db := openSurreal(t, ctx)
-	defer db.Close(context.Background())
+	defer func() {
+		if err := db.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
 	persisted := make([]byte, 0)
 	for table, want := range map[string]int{"ingest_receipt": 1, "trace_run": 1, "canonical_event": len(wantBatch.Events), "archive_object": 1, "outbox_job": 1} {
 		rows, queryErr := surrealdb.Query[[]map[string]any](ctx, db, "SELECT * FROM "+table, nil)
@@ -107,6 +103,9 @@ func TestDurableIdempotentIngest(t *testing.T) {
 	metadata, _ := json.Marshal(head.Metadata)
 	if bytes.Contains(metadata, []byte(secret)) || len(head.Metadata) != 2 {
 		t.Fatalf("unsafe metadata: %#v", head.Metadata)
+	}
+	if head.ServerSideEncryption != "AES256" {
+		t.Fatalf("server-side encryption = %q, want AES256", head.ServerSideEncryption)
 	}
 }
 

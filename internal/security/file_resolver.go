@@ -1,6 +1,7 @@
 package security
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,7 +55,8 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 	}
 	resolver := &FileCredentialResolver{principals: make(map[string]Principal, len(document.Credentials))}
 	for _, entry := range document.Credentials {
-		if len(entry.CredentialSHA256) != 64 || entry.TenantID == "" || entry.Region == "" || entry.Consent == "" {
+		decodedHash, decodeHashErr := hex.DecodeString(entry.CredentialSHA256)
+		if decodeHashErr != nil || len(decodedHash) != 32 || entry.TenantID == "" || entry.Region == "" || !validConsent(entry.Consent) {
 			return nil, errors.New("credential file contains an invalid entry")
 		}
 		hash := strings.ToLower(entry.CredentialSHA256)
@@ -71,6 +73,10 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 		resolver.principals[hash] = Principal{TenantID: entry.TenantID, Region: entry.Region, Scopes: scopes, Consent: entry.Consent}
 	}
 	return resolver, nil
+}
+
+func validConsent(mode policy.ConsentMode) bool {
+	return mode == policy.Deny || mode == policy.RecallOnly || mode == policy.LearnAndRecall
 }
 
 func (r *FileCredentialResolver) ResolveCredentialHash(hash string) (Principal, error) {

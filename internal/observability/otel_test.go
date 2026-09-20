@@ -1,0 +1,55 @@
+package observability
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestSetupRoutesOTLPSignalsToTheirStandardPaths(t *testing.T) {
+	var mu sync.Mutex
+	requests := make(map[string]int)
+	payloads := make(map[string][]byte)
+	collector := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		mu.Lock()
+		requests[request.URL.Path]++
+		payloads[request.URL.Path] = append(payloads[request.URL.Path], body...)
+		mu.Unlock()
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer collector.Close()
+
+	shutdown, err := Setup(context.Background(), TelemetryConfig{
+		Endpoint: collector.URL + "/otlp", ServiceName: "test", ServiceVersion: "test", Environment: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, span := StartSpan(context.Background(), "test-span")
+	span.End()
+	RecordIngest(context.Background(), IngestMetrics{ResultCode: "accepted", Latency: time.Millisecond, Events: 1, Bytes: 1})
+	RecordHTTPRequest(context.Background(), HTTPMetrics{ResultCode: "400", Latency: time.Millisecond, Bytes: 1})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if requests["/otlp/v1/traces"] == 0 || requests["/otlp/v1/metrics"] == 0 {
+		t.Fatalf("collector requests = %#v", requests)
+	}
+	if requests["/otlp"] != 0 || requests["/"] != 0 {
+		t.Fatalf("signals used unspecialized endpoint: %#v", requests)
+	}
+	if !bytes.Contains(payloads["/otlp/v1/metrics"], []byte("memjev.http.requests")) {
+		t.Fatalf("HTTP boundary metric missing from payload")
+	}
+}

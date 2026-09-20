@@ -44,6 +44,17 @@ services:
     networks: ["private"]
     restart: "no"
 
+  credential-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["cp /source/credentials.json /target/credentials.json && chown 65532:65532 /target/credentials.json && chmod 0400 /target/credentials.json"]
+    volumes:
+      - "${MEMJEV_CREDENTIALS_FILE_HOST:?}:/source/credentials.json:ro"
+      - "api-credentials:/target"
+    networks: ["private"]
+    restart: "no"
+
   api:
     build:
       context: .
@@ -54,17 +65,20 @@ services:
     depends_on:
       surreal: {condition: service_healthy}
       minio-init: {condition: service_completed_successfully}
+      credential-init: {condition: service_completed_successfully}
     environment:
       MEMJEV_ENVIRONMENT: development
       MEMJEV_ADAPTER_MODE: surreal-s3
       MEMJEV_LISTEN_ADDR: ":8080"
       MEMJEV_SHUTDOWN_TIMEOUT: 10s
+      MEMJEV_REQUEST_TIMEOUT: 10s
       MEMJEV_CREDENTIALS_FILE: /run/secrets/credentials.json
       MEMJEV_SURREAL_ENDPOINT: ws://surreal:8000
       MEMJEV_SURREAL_NAMESPACE: memjev
       MEMJEV_SURREAL_DATABASE: memjev
       MEMJEV_SURREAL_USER: "${SURREAL_USER:?}"
       MEMJEV_SURREAL_PASSWORD: "${SURREAL_PASS:?}"
+      MEMJEV_SURREAL_AUTH_SCOPE: root
       MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
       MEMJEV_ARCHIVE_REGION: us-east-1
       MEMJEV_ARCHIVE_ENDPOINT: http://minio:9000
@@ -76,7 +90,7 @@ services:
       AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?}"
       AWS_EC2_METADATA_DISABLED: "true"
     ports: ["127.0.0.1:${MEMJEV_API_PORT:-18080}:8080"]
-    volumes: ["${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"]
+    volumes: ["api-credentials:/run/secrets:ro"]
     networks: ["private", "host-access"]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
@@ -97,3 +111,4 @@ networks:
 volumes:
   surreal-data:
   minio-data:
+  api-credentials:
