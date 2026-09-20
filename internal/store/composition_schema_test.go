@@ -132,6 +132,32 @@ func TestExperimentReservationMigrationSerializesBudgetChecks(t *testing.T) {
 	}
 }
 
+func TestCompatibilityAndMaintenanceMigrationIsDurableAndFenced(t *testing.T) {
+	body, err := dbmigrations.Files.ReadFile("0009_compatibility_jobs.surql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(body)
+	for _, fragment := range []string{
+		"DEFINE TABLE IF NOT EXISTS compatibility_graph_projection SCHEMAFULL PERMISSIONS NONE",
+		"compatibility_graph_projection_key_unique",
+		"canonical_graph ON TABLE compatibility_graph_projection TYPE string READONLY",
+		"DEFINE TABLE IF NOT EXISTS maintenance_job SCHEMAFULL PERMISSIONS NONE",
+		"fencing_token ON TABLE maintenance_job TYPE int ASSERT $value >= 0",
+		"maintenance_job_idempotency_unique",
+		"maintenance_job_ready",
+		"maintenance_job_lease",
+		"DEFINE TABLE IF NOT EXISTS derived_projection_snapshot SCHEMAFULL PERMISSIONS NONE",
+		"derived_projection_snapshot_epoch",
+		"DEFINE TABLE IF NOT EXISTS derived_activation_permit SCHEMAFULL PERMISSIONS NONE",
+		"derived_activation_permit_epoch_unique",
+	} {
+		if !strings.Contains(schema, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+}
+
 func tableSection(schema, table string) string {
 	start := strings.Index(schema, "DEFINE TABLE IF NOT EXISTS "+table+" ")
 	if start < 0 {

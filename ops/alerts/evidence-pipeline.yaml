@@ -43,3 +43,33 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: More than 10 percent of outcomes contain strong conflicts
+      - alert: MemjevMaintenanceDeadLetter
+        expr: increase(memjev_maintenance_dead_letters_total[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: A composition or lifecycle maintenance job entered dead letter
+      - alert: MemjevMaintenanceBacklogHigh
+        expr: max by (job_kind) (memjev_maintenance_backlog) > 10000
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: A maintenance job kind has more than 10,000 pending records
+      - alert: MemjevMaintenanceOldestPendingHigh
+        expr: max by (job_kind) (memjev_maintenance_oldest_pending_seconds) > 900
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: Composition or lifecycle projections are more than 15 minutes behind
+      - alert: MemjevLifecycleUnsafeRollback
+        expr: increase(memjev_lifecycle_transitions_total{next_state=~"retired|quarantined",reason_code=~".*unsafe.*"}[5m]) > 0
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: An active procedure was rolled back after unsafe causal evidence
+      - alert: MemjevExperimentBudgetExhausted
+        expr: sum by (scope) (rate(memjev_experiment_budget_rejections_total[15m])) > 0.1
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: Challenger traffic is persistently falling back because a safety or exposure budget is exhausted

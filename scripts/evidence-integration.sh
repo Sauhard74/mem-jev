@@ -24,5 +24,5 @@ for _ in $(seq 1 60); do
 done
 curl --fail --silent --show-error "http://127.0.0.1:${MEMJEV_WORKER_HEALTH_PORT}/readyz" >/dev/null
 go test -race -tags=e2e ./tests/e2e -run TestWorkerRecoversExpiredLeaseAfterRestart -count=1 -v
-go test -race -tags=e2e ./tests/e2e -run TestEvidencePipelineProductionCases -count=1 -v
+go test -race -tags=e2e ./tests/e2e -run 'Test(EvidencePipelineProductionCases|MaintenanceWorkerPublishesAuthenticatedCompatibilityGraph)$' -count=1 -v
 printf '%s\n' 'evidence pipeline gate: PASS'

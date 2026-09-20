@@ -260,8 +260,10 @@ func (r *OutboxRepository) transitionOnce(
 	return tx.Commit(ctx)
 }
 
-func databaseNow(ctx context.Context, tx *surrealdb.Transaction) (time.Time, error) {
-	results, err := surrealdb.Query[time.Time](ctx, tx, `RETURN time::now()`, nil)
+func databaseNow[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender S) (time.Time, error) {
+	results, err := surrealdb.Query[time.Time](ctx, sender, `RETURN time::now()`, nil)
 	if err != nil || results == nil || len(*results) == 0 {
 		return time.Time{}, err
 	}

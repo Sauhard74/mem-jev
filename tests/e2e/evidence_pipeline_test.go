@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -18,12 +19,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	memjevv1 "github.com/sauhard74/mem-jev/gen/memjev/v1"
 	"github.com/sauhard74/mem-jev/gen/memjev/v1/memjevv1connect"
+	"github.com/sauhard74/mem-jev/internal/composition"
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/maintenance"
 	"github.com/sauhard74/mem-jev/internal/projection"
 	"github.com/sauhard74/mem-jev/internal/rebuild"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store"
 	storememory "github.com/sauhard74/mem-jev/internal/store/memory"
+	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
 	"github.com/sauhard74/mem-jev/internal/synthesis"
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
 	memworkflow "github.com/sauhard74/mem-jev/internal/workflow"
@@ -34,13 +38,17 @@ import (
 func TestEvidencePipelineProductionCases(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	// Use a unique, low-entropy decimal suffix. Persisted identities are
+	// deliberately rejected when they look like credentials, so hexadecimal
+	// randomness is the wrong shape for an otherwise harmless test identity.
+	runID := fmt.Sprintf("%d", time.Now().UnixNano())
 	db := openSurreal(t, ctx)
 	defer func() { _ = db.Close(context.Background()) }()
 	seedWriterContract(t, ctx, db)
 
 	t.Run("verified success trims failure and publishes scoped negative path", func(t *testing.T) {
-		traceID := ingestPipelineTrace(t, ctx, "qualified", "writer", true)
-		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-success", satisfiedEvidence("success"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
+		traceID := ingestPipelineTrace(t, ctx, "qualified-"+runID, "writer", true)
+		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-success-"+runID, satisfiedEvidence("success"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		if !outcome.Msg.GetPromotionEligible() || outcome.Msg.GetState() != memjevv1.OutcomeState_OUTCOME_STATE_VERIFIED_SUCCESS {
 			t.Fatalf("outcome = %#v", outcome.Msg)
 		}
@@ -56,7 +64,7 @@ func TestEvidencePipelineProductionCases(t *testing.T) {
 		}
 		before := canonicalProjection(t, ctx, db, manifest["procedure_version_id"])
 		assertByteIdenticalRebuild(t, ctx, db, traceID, outcome.Msg.GetOutcomeId(), fmt.Sprint(manifest["procedure_version_id"]), before)
-		duplicate := recordPipelineOutcome(t, ctx, traceID, "qualified-success", satisfiedEvidence("success"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
+		duplicate := recordPipelineOutcome(t, ctx, traceID, "qualified-success-"+runID, satisfiedEvidence("success"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		if duplicate.Msg.GetOutcomeId() != outcome.Msg.GetOutcomeId() || duplicate.Msg.GetDisposition() != memjevv1.OutcomeDisposition_OUTCOME_DISPOSITION_DUPLICATE {
 			t.Fatalf("duplicate = %#v", duplicate.Msg)
 		}
@@ -74,21 +82,21 @@ func TestEvidencePipelineProductionCases(t *testing.T) {
 	})
 
 	t.Run("contradictory evidence and unknown tools abstain", func(t *testing.T) {
-		traceID := ingestPipelineTrace(t, ctx, "conflict", "writer", false)
+		traceID := ingestPipelineTrace(t, ctx, "conflict-"+runID, "writer", false)
 		facts := satisfiedEvidence("conflict")
 		facts = append(facts, &memjevv1.OutcomeEvidence{
 			ClientEvidenceId: "conflict-failure", Class: memjevv1.EvidenceClass_EVIDENCE_CLASS_GOAL_PREDICATE,
 			Verdict: memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_FAILED, PredicateId: "goal", VerifierId: "ci",
 			ObservedAt: timestamppb.New(time.Unix(4, 0).UTC()),
 		})
-		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-conflict", facts, requiredEnv(t, "MEMJEV_E2E_TOKEN"))
+		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-conflict-"+runID, facts, requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		row := waitForRow(t, ctx, db, "synthesis_manifest", "tenant_id = $tenant AND outcome_id = $outcome", map[string]any{"tenant": "tenant_e2e", "outcome": outcome.Msg.GetOutcomeId()})
 		if row["status"] != "abstained" || row["abstention_code"] != "outcome_not_verified" {
 			t.Fatalf("conflict manifest = %#v", row)
 		}
 
-		unknownTrace := ingestPipelineTrace(t, ctx, "opaque", "unregistered-tool", false)
-		unknownOutcome := recordPipelineOutcome(t, ctx, unknownTrace, "qualified-opaque", satisfiedEvidence("opaque"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
+		unknownTrace := ingestPipelineTrace(t, ctx, "opaque-"+runID, "unregistered-tool", false)
+		unknownOutcome := recordPipelineOutcome(t, ctx, unknownTrace, "qualified-opaque-"+runID, satisfiedEvidence("opaque"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		row = waitForRow(t, ctx, db, "synthesis_manifest", "tenant_id = $tenant AND outcome_id = $outcome", map[string]any{"tenant": "tenant_e2e", "outcome": unknownOutcome.Msg.GetOutcomeId()})
 		if row["status"] != "abstained" || row["abstention_code"] != "opaque_tool" {
 			t.Fatalf("opaque manifest = %#v", row)
@@ -96,18 +104,18 @@ func TestEvidencePipelineProductionCases(t *testing.T) {
 	})
 
 	t.Run("tenant isolation denies foreign outcome", func(t *testing.T) {
-		traceID := ingestPipelineTrace(t, ctx, "isolation", "writer", false)
+		traceID := ingestPipelineTrace(t, ctx, "isolation-"+runID, "writer", false)
 		client := memjevv1connect.NewOutcomeServiceClient(http.DefaultClient, requiredEnv(t, "MEMJEV_E2E_API_URL"))
 		request := connect.NewRequest(&memjevv1.RecordOutcomeRequest{TraceId: traceID, Evidence: satisfiedEvidence("foreign")})
 		request.Header().Set("Authorization", "Bearer "+requiredEnv(t, "MEMJEV_E2E_OTHER_TOKEN"))
-		request.Header().Set("Idempotency-Key", "qualified-foreign-outcome")
+		request.Header().Set("Idempotency-Key", "qualified-foreign-outcome-"+runID)
 		if _, err := client.RecordOutcome(ctx, request); connect.CodeOf(err) != connect.CodeNotFound {
 			t.Fatalf("foreign outcome error = %v", err)
 		}
 	})
 
 	t.Run("corrupted encrypted archive is quarantined", func(t *testing.T) {
-		traceID := ingestPipelineTrace(t, ctx, "corrupt", "writer", false)
+		traceID := ingestPipelineTrace(t, ctx, "corrupt-"+runID, "writer", false)
 		row := waitForRow(t, ctx, db, "trace_run", "tenant_id = $tenant AND trace_id = $trace", map[string]any{"tenant": "tenant_e2e", "trace": traceID})
 		key := fmt.Sprint(row["archive_key"])
 		parts := strings.Split(key, "/")
@@ -123,7 +131,7 @@ func TestEvidencePipelineProductionCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-corrupt", satisfiedEvidence("corrupt"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
+		outcome := recordPipelineOutcome(t, ctx, traceID, "qualified-corrupt-"+runID, satisfiedEvidence("corrupt"), requiredEnv(t, "MEMJEV_E2E_TOKEN"))
 		audit := waitForRow(t, ctx, db, "audit_event", "tenant_id = $tenant AND subject_id = $subject AND event_type = 'pipeline_quarantine'", map[string]any{
 			"tenant": "tenant_e2e", "subject": store.OutcomeWorkflowID("tenant_e2e", domain.TraceID(traceID), domain.OutcomeID(outcome.Msg.GetOutcomeId())),
 		})
@@ -141,12 +149,13 @@ func TestPrepareExpiredLeaseForWorkerRecovery(t *testing.T) {
 	db := openSurreal(t, ctx)
 	defer func() { _ = db.Close(context.Background()) }()
 	workflowID := store.WorkflowID("tenant_e2e", domain.TraceID(traceID))
-	row := waitForRow(t, ctx, db, "outbox_job", "tenant_id = $tenant AND workflow_id = $workflow AND state = 'pending'", map[string]any{"tenant": "tenant_e2e", "workflow": workflowID})
-	if fmt.Sprint(row["attempt_count"]) != "0" {
-		t.Fatalf("new recovery job = %#v", row)
-	}
+	// The fixture intentionally uses a stable idempotency identity so this gate
+	// can be rerun against a persistent qualification database. The prior job may
+	// therefore already be completed; force that exact durable job into an
+	// expired lease instead of relying on a clean database or scheduler timing.
+	waitForRow(t, ctx, db, "outbox_job", "tenant_id = $tenant AND workflow_id = $workflow", map[string]any{"tenant": "tenant_e2e", "workflow": workflowID})
 	_, err := surrealdb.Query[any](ctx, db, `UPDATE outbox_job SET state = "leased", lease_owner = "crashed-worker",
-		lease_generation = 1, lease_expires_at = time::now() - 2s, attempt_count = 1
+		lease_generation += 1, lease_expires_at = time::now() - 2s, attempt_count += 1
 		WHERE tenant_id = $tenant AND workflow_id = $workflow`, map[string]any{"tenant": "tenant_e2e", "workflow": workflowID})
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +179,63 @@ func TestWorkerRecoversExpiredLeaseAfterRestart(t *testing.T) {
 	}
 }
 
+func TestMaintenanceWorkerPublishesAuthenticatedCompatibilityGraph(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db := openSurreal(t, ctx)
+	defer func() { _ = db.Close(context.Background()) }()
+	matrix, err := composition.BuildCompatibilityMatrix(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := uint64(time.Now().UnixNano())
+	graph, err := composition.BuildCompatibilityGraph(composition.GraphRequest{
+		TenantID: "tenant_e2e", ProjectionEpoch: epoch, PlannerManifestID: "planner.e2e.v1", PolicyManifestID: "policy.e2e.v1", Matrix: matrix,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := maintenance.NewCompatibilityPayload(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := maintenance.NewSpec("tenant_e2e", maintenance.CompatibilityProjection, graph.ContentHash, payload, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storesurreal.NewMaintenanceRepository(db).Enqueue(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	job := waitForRow(t, ctx, db, "maintenance_job", "tenant_id = $tenant AND maintenance_job_id = $job AND state = 'completed'", map[string]any{"tenant": "tenant_e2e", "job": spec.ID})
+	if fmt.Sprint(job["attempt_count"]) != "1" {
+		t.Fatalf("maintenance job was not exactly-once in the healthy path: %#v", job)
+	}
+	projection := waitForRow(t, ctx, db, "compatibility_graph_projection", "tenant_id = $tenant AND compatibility_graph_id = $graph", map[string]any{"tenant": "tenant_e2e", "graph": graph.ID})
+	if projection["content_hash"] != graph.ContentHash || fmt.Sprint(projection["edge_count"]) != "0" {
+		t.Fatalf("compatibility projection = %#v", projection)
+	}
+	snapshot, err := rebuild.BuildDerivedSnapshot(rebuild.DerivedInput{TenantID: "tenant_e2e", ProjectionEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuildPayload, err := maintenance.NewRebuildPayload(snapshot, snapshot, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuildSpec, err := maintenance.NewSpec("tenant_e2e", maintenance.ProjectionRebuild, snapshot.ContentHash, rebuildPayload, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storesurreal.NewMaintenanceRepository(db).Enqueue(ctx, rebuildSpec); err != nil {
+		t.Fatal(err)
+	}
+	waitForRow(t, ctx, db, "maintenance_job", "tenant_id = $tenant AND maintenance_job_id = $job AND state = 'completed'", map[string]any{"tenant": "tenant_e2e", "job": rebuildSpec.ID})
+	permit := waitForRow(t, ctx, db, "derived_activation_permit", "tenant_id = $tenant AND projection_epoch = $epoch", map[string]any{"tenant": "tenant_e2e", "epoch": epoch})
+	if permit["stored_snapshot_id"] != snapshot.ID || permit["rebuilt_snapshot_id"] != snapshot.ID {
+		t.Fatalf("activation permit = %#v", permit)
+	}
+}
+
 func seedWriterContract(t *testing.T, ctx context.Context, db *surrealdb.DB) {
 	t.Helper()
 	manifest, err := toolcontract.Canonicalize(toolcontract.Manifest{
@@ -185,6 +251,19 @@ func seedWriterContract(t *testing.T, ctx context.Context, db *surrealdb.DB) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	type contractHashRow struct {
+		ContentHash string `json:"content_hash"`
+	}
+	existing, err := surrealdb.Query[[]contractHashRow](ctx, db, `SELECT content_hash FROM tool_contract_version WHERE tenant_id = $tenant AND contract_version_id = $id LIMIT 1`, map[string]any{"tenant": "tenant_e2e", "id": manifest.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if existing != nil && len(*existing) > 0 && len((*existing)[0].Result) > 0 {
+		if (*existing)[0].Result[0].ContentHash != manifest.ContentHash {
+			t.Fatalf("stored tool contract conflicts with fixture: %#v", (*existing)[0].Result[0])
+		}
+		return
 	}
 	encoded, _ := json.Marshal(manifest)
 	var stored map[string]any
@@ -213,7 +292,19 @@ func ingestPipelineTrace(t *testing.T, ctx context.Context, suffix, tool string,
 	request.Header().Set("Idempotency-Key", "qualified-ingest-"+suffix)
 	response, err := client.IngestTrace(ctx, request)
 	if err != nil {
-		t.Fatal(err)
+		var details []any
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			for _, detail := range connectErr.Details() {
+				value, detailErr := detail.Value()
+				if typed, ok := value.(*memjevv1.ErrorDetail); ok {
+					details = append(details, map[string]any{"request_id": typed.GetRequestId(), "reason_code": typed.GetReasonCode(), "retryable": typed.GetRetryable(), "decode_error": detailErr})
+					continue
+				}
+				details = append(details, []any{value, detailErr})
+			}
+		}
+		t.Fatalf("ingest failed: %v details=%#v suffix=%q", err, details, suffix)
 	}
 	return response.Msg.GetTraceId()
 }

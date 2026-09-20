@@ -12,6 +12,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/experiment"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 )
@@ -39,6 +40,9 @@ func (r *ExperimentRepository) Reserve(ctx context.Context, request experiment.A
 	for attempt := 0; attempt < attempts; attempt++ {
 		reservation, err := r.reserveOnce(ctx, request, candidate)
 		if err == nil {
+			if reservation.Disposition == experiment.DispositionReserved {
+				recordExperimentBudgetFallback(ctx, reservation.Assignment)
+			}
 			return reservation, nil
 		}
 		lastErr = err
@@ -61,6 +65,26 @@ func (r *ExperimentRepository) Reserve(ctx context.Context, request experiment.A
 		}
 	}
 	return experiment.Reservation{}, databaseFailure("reserve experiment assignment after conflict retries", lastErr)
+}
+
+func recordExperimentBudgetFallback(ctx context.Context, assignment experiment.Assignment) {
+	if assignment.Challenger {
+		return
+	}
+	for _, reason := range assignment.ReasonCodes {
+		scope := ""
+		switch reason {
+		case experiment.ReasonTenantExposureCap, experiment.ReasonTenantUnsafeCeiling:
+			scope = "tenant"
+		case experiment.ReasonGlobalExposureCap, experiment.ReasonGlobalUnsafeCeiling:
+			scope = "global"
+		case experiment.ReasonConcurrentTrialCap:
+			scope = "concurrent_trials"
+		}
+		if scope != "" {
+			observability.RecordExperimentBudgetRejection(ctx, scope)
+		}
+	}
 }
 
 func (r *ExperimentRepository) reserveOnce(ctx context.Context, request experiment.AssignmentRequest, candidate experiment.Assignment) (_ experiment.Reservation, err error) {
@@ -200,8 +224,10 @@ type experimentBudget struct {
 	Unsafe   uint64 `json:"unsafe_count"`
 }
 
-func readExperimentBudget(ctx context.Context, tx *surrealdb.Transaction, id models.RecordID) (experimentBudget, error) {
-	rows, err := surrealdb.Query[[]experimentBudget](ctx, tx, `SELECT exposure_count, unsafe_count FROM $id`, map[string]any{"id": id})
+func readExperimentBudget[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender S, id models.RecordID) (experimentBudget, error) {
+	rows, err := surrealdb.Query[[]experimentBudget](ctx, sender, `SELECT exposure_count, unsafe_count FROM $id`, map[string]any{"id": id})
 	if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
 		return experimentBudget{}, err
 	}

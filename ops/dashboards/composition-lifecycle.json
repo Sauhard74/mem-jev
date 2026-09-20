@@ -1,0 +1,78 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "max by (job_kind) (memjev_maintenance_backlog)", "legendFormat": "{{job_kind}}", "refId": "A"}],
+      "title": "Maintenance backlog by kind",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "max by (job_kind) (memjev_maintenance_oldest_pending_seconds)", "legendFormat": "{{job_kind}}", "refId": "A"}],
+      "title": "Oldest pending maintenance job",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "sum by (job_kind) (rate(memjev_maintenance_failures_total[5m]))", "legendFormat": "failure {{job_kind}}", "refId": "A"},
+        {"expr": "sum by (job_kind) (rate(memjev_maintenance_dead_letters_total[5m]))", "legendFormat": "dead {{job_kind}}", "refId": "B"}
+      ],
+      "title": "Maintenance failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "sum by (prior_state, next_state, reason_code) (rate(memjev_lifecycle_transitions_total[15m]))", "legendFormat": "{{prior_state}} -> {{next_state}} {{reason_code}}", "refId": "A"}],
+      "title": "Lifecycle transitions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "sum by (scope) (rate(memjev_experiment_budget_rejections_total[15m]))", "legendFormat": "{{scope}}", "refId": "A"}],
+      "title": "Experiment budget fallbacks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${prometheus}"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "sum by (component) (increase(memjev_projection_rebuild_mismatches_total[1h]))", "legendFormat": "{{component}}", "refId": "A"}],
+      "title": "Projection rebuild mismatches",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["memjev", "composition", "lifecycle"],
+  "templating": {"list": [{"name": "prometheus", "type": "datasource", "query": "prometheus", "current": {}}]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "utc",
+  "title": "MemJev composition and lifecycle",
+  "uid": "memjev-composition-lifecycle",
+  "version": 1
+}

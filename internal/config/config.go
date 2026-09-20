@@ -337,7 +337,7 @@ func validate(config Config, requireAPICredentials bool) error {
 
 func validateWorker(config Config) error {
 	if config.AdapterMode != "surreal-s3" || config.Worker.ID == "" || config.Worker.HealthAddress == "" ||
-		config.Worker.BatchSize > 100 || config.Worker.LeaseDuration < time.Second || config.Worker.StageRetention < time.Hour ||
+		config.Worker.BatchSize > 100 || config.Worker.MaximumAttempts > 100 || config.Worker.LeaseDuration < time.Second || config.Worker.StageRetention < time.Hour ||
 		config.Temporal.Address == "" || config.Temporal.Namespace == "" || config.Temporal.TaskQueue == "" ||
 		(config.Temporal.TLSCertFile == "") != (config.Temporal.TLSKeyFile == "") {
 		return fieldError("worker configuration")

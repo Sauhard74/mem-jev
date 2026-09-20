@@ -155,6 +155,15 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 		if err := createOutcomeCredit(ctx, tx, *request.Credit); err != nil {
 			return store.OutcomeReceipt{}, err
 		}
+		// Until a separate signed safety verdict exists, causal failure is the
+		// conservative unsafe signal. Update experiment safety budgets in the
+		// same transaction as the unique credit row so retries cannot double
+		// count and a challenger failure cannot be served before it is budgeted.
+		if request.Credit.Class == credit.CausalFailure {
+			if err := incrementExperimentUnsafeBudget(ctx, tx, *request.Credit, createdAt); err != nil {
+				return store.OutcomeReceipt{}, err
+			}
+		}
 	}
 	if err := createOutcomeOutbox(ctx, tx, request, receipt, createdAt); err != nil {
 		return store.OutcomeReceipt{}, err
@@ -164,6 +173,47 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 	}
 	observability.RecordOutboxCreated(ctx)
 	return receipt, nil
+}
+
+func incrementExperimentUnsafeBudget(ctx context.Context, tx *surrealdb.Transaction, value credit.Record, updatedAt time.Time) error {
+	type assignmentLink struct {
+		AssignmentID *string `json:"experiment_assignment_id"`
+	}
+	links, err := surrealdb.Query[[]assignmentLink](ctx, tx, `SELECT experiment_assignment_id FROM selection_record WHERE tenant_id = $tenant_id AND injection_id = $injection_id LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "injection_id": value.InjectionID})
+	if err != nil || links == nil || len(*links) == 0 || len((*links)[0].Result) == 0 || (*links)[0].Result[0].AssignmentID == nil {
+		return err
+	}
+	type assignmentWindow struct {
+		Challenger  bool      `json:"challenger"`
+		WindowStart time.Time `json:"window_start"`
+	}
+	assignments, err := surrealdb.Query[[]assignmentWindow](ctx, tx, `SELECT challenger, window_start FROM experiment_assignment WHERE tenant_id = $tenant_id AND experiment_assignment_id = $assignment_id LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "assignment_id": *(*links)[0].Result[0].AssignmentID})
+	if err != nil {
+		return err
+	}
+	if assignments == nil || len(*assignments) == 0 || len((*assignments)[0].Result) == 0 || !(*assignments)[0].Result[0].Challenger {
+		return nil
+	}
+	windowStart := (*assignments)[0].Result[0].WindowStart
+	tenantID := experimentBudgetID("experiment_tenant_budget_head", string(value.TenantID), windowStart)
+	globalID := experimentBudgetID("experiment_global_budget_head", "_global", windowStart)
+	tenantBudget, err := readExperimentBudget(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	globalBudget, err := readExperimentBudget(ctx, tx, globalID)
+	if err != nil {
+		return err
+	}
+	if tenantBudget.Unsafe == ^uint64(0) || globalBudget.Unsafe == ^uint64(0) {
+		return store.ErrInvalidOutcomeCommit
+	}
+	tenantBudget.Unsafe++
+	globalBudget.Unsafe++
+	if err := writeExperimentBudget(ctx, tx, tenantID, string(value.TenantID), windowStart, tenantBudget, updatedAt, "experiment-tenant-budget-head.v1"); err != nil {
+		return err
+	}
+	return writeExperimentBudget(ctx, tx, globalID, "_global", windowStart, globalBudget, updatedAt, "experiment-global-budget-head.v1")
 }
 
 type outcomeReceiptRow struct {

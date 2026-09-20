@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/config"
+	"github.com/sauhard74/mem-jev/internal/maintenance"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/rebuild"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
@@ -156,10 +157,32 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 		logger.Error("outbox relay configuration rejected", "error", err)
 		return 1
 	}
+	maintenanceRunner, err := maintenance.NewRunner(
+		storesurreal.NewMaintenanceRepository(db),
+		map[maintenance.Kind]maintenance.Handler{
+			maintenance.CompatibilityProjection: maintenance.CompatibilityHandler{Publisher: storesurreal.NewCompositionRepository(db)},
+			maintenance.LifecycleEvaluation:     maintenance.LifecycleHandler{Publisher: storesurreal.NewLifecycleRepository(db)},
+			maintenance.LifecycleRollback:       maintenance.LifecycleHandler{Publisher: storesurreal.NewLifecycleRepository(db), Rollback: true},
+			maintenance.TransientExpiry:         maintenance.TransientExpiryHandler{Expirer: storesurreal.NewMaintenanceRepository(db)},
+			maintenance.ProjectionRebuild:       maintenance.ProjectionRebuildHandler{Publisher: storesurreal.NewRebuildRepository(db)},
+			maintenance.ExposureAggregation:     maintenance.ExposureAggregationHandler{Auditor: storesurreal.NewMaintenanceRepository(db)},
+		},
+		maintenance.RunnerConfig{
+			WorkerID: configuration.Worker.ID + ":maintenance", BatchSize: configuration.Worker.BatchSize,
+			LeaseDuration: configuration.Worker.LeaseDuration, PollInterval: configuration.Worker.PollInterval,
+			MaximumAttempts: uint32(configuration.Worker.MaximumAttempts), MaximumBackoff: configuration.Worker.MaxBackoff,
+		},
+	)
+	if err != nil {
+		logger.Error("maintenance worker configuration rejected", "error", err)
+		return 1
+	}
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
 	relayErrors := make(chan error, 1)
 	go func() { relayErrors <- relay.Run(workerCtx) }()
+	maintenanceErrors := make(chan error, 1)
+	go func() { maintenanceErrors <- maintenanceRunner.Run(workerCtx) }()
 	var ready atomic.Bool
 	ready.Store(true)
 	healthServer := newHealthServer(configuration.Worker.HealthAddress, &ready, db, temporalClient)
@@ -172,6 +195,11 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 	case relayErr := <-relayErrors:
 		if !errors.Is(relayErr, context.Canceled) {
 			logger.Error("outbox relay failed", "error", relayErr)
+			exitCode = 1
+		}
+	case maintenanceErr := <-maintenanceErrors:
+		if !errors.Is(maintenanceErr, context.Canceled) {
+			logger.Error("maintenance worker failed", "error", maintenanceErr)
 			exitCode = 1
 		}
 	case healthErr := <-healthErrors:

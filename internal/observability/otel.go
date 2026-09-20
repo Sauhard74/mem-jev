@@ -140,6 +140,12 @@ var (
 	retrievalSnapshotAge        metric.Float64Histogram
 	retrievalRankerRequests     metric.Int64Counter
 	retrievalVectorStaleness    metric.Float64Histogram
+	maintenanceBacklog          metric.Int64Gauge
+	maintenanceOldestPending    metric.Float64Gauge
+	maintenanceFailures         metric.Int64Counter
+	maintenanceDeadLetters      metric.Int64Counter
+	lifecycleTransitions        metric.Int64Counter
+	experimentBudgetRejections  metric.Int64Counter
 )
 
 func initializeMetrics() {
@@ -177,6 +183,38 @@ func initializeMetrics() {
 	retrievalSnapshotAge, _ = meter.Float64Histogram("memjev.retrieval.snapshot_age", metric.WithUnit("s"))
 	retrievalRankerRequests, _ = meter.Int64Counter("memjev.retrieval.ranker_requests")
 	retrievalVectorStaleness, _ = meter.Float64Histogram("memjev.retrieval.vector_staleness", metric.WithUnit("s"))
+	maintenanceBacklog, _ = meter.Int64Gauge("memjev.maintenance.backlog")
+	maintenanceOldestPending, _ = meter.Float64Gauge("memjev.maintenance.oldest_pending", metric.WithUnit("s"))
+	maintenanceFailures, _ = meter.Int64Counter("memjev.maintenance.failures")
+	maintenanceDeadLetters, _ = meter.Int64Counter("memjev.maintenance.dead_letters")
+	lifecycleTransitions, _ = meter.Int64Counter("memjev.lifecycle.transitions")
+	experimentBudgetRejections, _ = meter.Int64Counter("memjev.experiment.budget_rejections")
+}
+
+func RecordMaintenanceQueue(ctx context.Context, kind string, pending int64, oldest time.Duration) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("job.kind", kind))
+	maintenanceBacklog.Record(ctx, pending, options)
+	maintenanceOldestPending.Record(ctx, oldest.Seconds(), options)
+}
+
+func RecordMaintenanceFailure(ctx context.Context, kind string, deadLetter bool) {
+	metricsOnce.Do(initializeMetrics)
+	options := metric.WithAttributes(attribute.String("job.kind", kind))
+	maintenanceFailures.Add(ctx, 1, options)
+	if deadLetter {
+		maintenanceDeadLetters.Add(ctx, 1, options)
+	}
+}
+
+func RecordLifecycleTransition(ctx context.Context, prior, next, reason string) {
+	metricsOnce.Do(initializeMetrics)
+	lifecycleTransitions.Add(ctx, 1, metric.WithAttributes(attribute.String("prior.state", prior), attribute.String("next.state", next), attribute.String("reason.code", reason)))
+}
+
+func RecordExperimentBudgetRejection(ctx context.Context, scope string) {
+	metricsOnce.Do(initializeMetrics)
+	experimentBudgetRejections.Add(ctx, 1, metric.WithAttributes(attribute.String("scope", scope)))
 }
 
 func RecordRetrieval(ctx context.Context, facts RetrievalMetrics) {

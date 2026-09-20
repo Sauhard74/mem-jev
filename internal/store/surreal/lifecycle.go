@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/lifecycle"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/projection"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	surrealdb "github.com/surrealdb/surrealdb.go"
@@ -36,6 +38,9 @@ func (r *LifecycleRepository) Commit(ctx context.Context, value lifecycle.Public
 	for attempt := 0; attempt < attempts; attempt++ {
 		receipt, err := r.commitOnce(ctx, value)
 		if err == nil {
+			if value.Decision.NextState != value.Decision.PriorState {
+				observability.RecordLifecycleTransition(ctx, string(value.Decision.PriorState), string(value.Decision.NextState), strings.Join(value.Decision.ReasonCodes, ","))
+			}
 			return receipt, nil
 		}
 		lastErr = err
