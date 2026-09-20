@@ -1,0 +1,96 @@
+name: memjev-production
+
+services:
+  api:
+    image: "${MEMJEV_API_IMAGE:?immutable API image required}"
+    environment:
+      MEMJEV_ENVIRONMENT: production
+      MEMJEV_ADAPTER_MODE: surreal-s3
+      MEMJEV_LISTEN_ADDR: ":8080"
+      MEMJEV_CREDENTIALS_FILE: /run/secrets/credentials.json
+      MEMJEV_SURREAL_ENDPOINT: "${MEMJEV_SURREAL_ENDPOINT:?}"
+      MEMJEV_SURREAL_NAMESPACE: "${MEMJEV_SURREAL_NAMESPACE:?}"
+      MEMJEV_SURREAL_DATABASE: "${MEMJEV_SURREAL_DATABASE:?}"
+      MEMJEV_SURREAL_USER: "${MEMJEV_SURREAL_USER:?}"
+      MEMJEV_SURREAL_PASSWORD: "${MEMJEV_SURREAL_PASSWORD:?}"
+      MEMJEV_SURREAL_AUTH_SCOPE: "${MEMJEV_SURREAL_AUTH_SCOPE:-root}"
+      MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
+      MEMJEV_ARCHIVE_REGION: "${MEMJEV_ARCHIVE_REGION:?}"
+      MEMJEV_ARCHIVE_ENDPOINT: "${MEMJEV_ARCHIVE_ENDPOINT:-}"
+      MEMJEV_ARCHIVE_SSE: "${MEMJEV_ARCHIVE_SSE:-aws:kms}"
+      MEMJEV_ARCHIVE_KMS_KEY_ID: "${MEMJEV_ARCHIVE_KMS_KEY_ID:-}"
+      MEMJEV_RETRIEVAL_QUERY_KEY_ID: "${MEMJEV_RETRIEVAL_QUERY_KEY_ID:?}"
+      MEMJEV_RETRIEVAL_QUERY_KEY_BASE64: "${MEMJEV_RETRIEVAL_QUERY_KEY_BASE64:?}"
+      MEMJEV_OTLP_ENDPOINT: "${MEMJEV_OTLP_ENDPOINT:?}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?}"
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes: ["${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"]
+    networks: [private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, /memjev-api, healthcheck]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  worker:
+    image: "${MEMJEV_WORKER_IMAGE:?immutable worker image required}"
+    entrypoint: [/memjev-worker]
+    environment:
+      MEMJEV_ENVIRONMENT: production
+      MEMJEV_ADAPTER_MODE: surreal-s3
+      MEMJEV_SURREAL_ENDPOINT: "${MEMJEV_SURREAL_ENDPOINT:?}"
+      MEMJEV_SURREAL_NAMESPACE: "${MEMJEV_SURREAL_NAMESPACE:?}"
+      MEMJEV_SURREAL_DATABASE: "${MEMJEV_SURREAL_DATABASE:?}"
+      MEMJEV_SURREAL_USER: "${MEMJEV_SURREAL_USER:?}"
+      MEMJEV_SURREAL_PASSWORD: "${MEMJEV_SURREAL_PASSWORD:?}"
+      MEMJEV_SURREAL_AUTH_SCOPE: "${MEMJEV_SURREAL_AUTH_SCOPE:-root}"
+      MEMJEV_ARCHIVE_BUCKET: "${MEMJEV_ARCHIVE_BUCKET:?}"
+      MEMJEV_ARCHIVE_REGION: "${MEMJEV_ARCHIVE_REGION:?}"
+      MEMJEV_ARCHIVE_ENDPOINT: "${MEMJEV_ARCHIVE_ENDPOINT:-}"
+      MEMJEV_ARCHIVE_SSE: "${MEMJEV_ARCHIVE_SSE:-aws:kms}"
+      MEMJEV_ARCHIVE_KMS_KEY_ID: "${MEMJEV_ARCHIVE_KMS_KEY_ID:-}"
+      MEMJEV_TEMPORAL_ADDRESS: "${MEMJEV_TEMPORAL_ADDRESS:?}"
+      MEMJEV_TEMPORAL_NAMESPACE: "${MEMJEV_TEMPORAL_NAMESPACE:?}"
+      MEMJEV_TEMPORAL_TASK_QUEUE: "${MEMJEV_TEMPORAL_TASK_QUEUE:-memjev-synthesis}"
+      MEMJEV_OTLP_ENDPOINT: "${MEMJEV_OTLP_ENDPOINT:?}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?}"
+      AWS_EC2_METADATA_DISABLED: "true"
+    networks: [private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  caddy:
+    image: "${MEMJEV_CADDY_IMAGE:?immutable Caddy image required}"
+    environment: {MEMJEV_DOMAIN: "${MEMJEV_DOMAIN:?}"}
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports: ["80:80", "443:443", "443:443/udp"]
+    networks: [private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    depends_on: {api: {condition: service_healthy}}
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+networks:
+  private: {}
+volumes:
+  caddy-data: {}
+  caddy-config: {}
