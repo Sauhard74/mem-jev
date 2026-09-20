@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/store"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 )
@@ -64,6 +65,7 @@ func (r *IngestRepository) Commit(ctx context.Context, request store.CommitInges
 		if !surrealdb.IsTransactionConflict(err) {
 			return store.IngestReceipt{}, err
 		}
+		observability.RecordTransactionRetry(ctx)
 		if err := waitForRetry(ctx, attempt); err != nil {
 			return store.IngestReceipt{}, err
 		}
@@ -126,6 +128,7 @@ func (r *IngestRepository) commitOnce(ctx context.Context, request store.CommitI
 	if err := tx.Commit(ctx); err != nil {
 		return store.IngestReceipt{}, fmt.Errorf("commit ingest transaction: %w", err)
 	}
+	observability.RecordOutboxCreated(ctx)
 	return receipt, nil
 }
 
