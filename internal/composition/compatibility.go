@@ -49,15 +49,7 @@ func BuildCompatibilityGraphContext(ctx context.Context, request GraphRequest) (
 		seenVersions[candidate.ProcedureVersionID] = struct{}{}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ProcedureVersionID < candidates[j].ProcedureVersionID })
-	candidateIdentity := make([]struct {
-		VersionID     string `json:"procedure_version_id"`
-		InterfaceHash string `json:"interface_hash"`
-		Lifecycle     string `json:"lifecycle"`
-	}, len(candidates))
-	for index, candidate := range candidates {
-		candidateIdentity[index].VersionID, candidateIdentity[index].InterfaceHash, candidateIdentity[index].Lifecycle = candidate.ProcedureVersionID, candidate.Interface.ContentHash, candidate.Lifecycle
-	}
-	_, candidateSetHash, err := canonical.MarshalAndHash(candidateIdentity)
+	candidateSetHash, err := buildCandidateSetHash(candidates)
 	if err != nil {
 		return CompatibilityGraph{}, err
 	}
@@ -120,6 +112,22 @@ func BuildCompatibilityGraphContext(ctx context.Context, request GraphRequest) (
 	}
 	graph.ID, graph.ContentHash, graph.CanonicalJSON = "cgraph_"+hash, hash, canonicalJSON
 	return graph, nil
+}
+
+func buildCandidateSetHash(candidates []Candidate) (string, error) {
+	ordered := append([]Candidate(nil), candidates...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ProcedureVersionID < ordered[j].ProcedureVersionID })
+	candidateIdentity := make([]struct {
+		VersionID         string `json:"procedure_version_id"`
+		InterfaceHash     string `json:"interface_hash"`
+		Lifecycle         string `json:"lifecycle"`
+		PlanningFactsHash string `json:"planning_facts_hash"`
+	}, len(ordered))
+	for index, candidate := range ordered {
+		candidateIdentity[index].VersionID, candidateIdentity[index].InterfaceHash, candidateIdentity[index].Lifecycle, candidateIdentity[index].PlanningFactsHash = candidate.ProcedureVersionID, candidate.Interface.ContentHash, candidate.Lifecycle, candidate.PlanningFactsHash
+	}
+	_, hash, err := canonical.MarshalAndHash(candidateIdentity)
+	return hash, err
 }
 
 func BuildCompatibilityMatrix(source []SchemaCompatibility) (CompatibilityMatrix, error) {

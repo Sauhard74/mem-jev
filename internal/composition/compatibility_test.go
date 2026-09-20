@@ -206,7 +206,11 @@ func candidate(t *testing.T, tenant, version, lifecycle string, requirements []d
 	if err != nil {
 		t.Fatal(err)
 	}
-	return composition.Candidate{TenantID: domain.TenantID(tenant), ProcedureVersionID: version, Lifecycle: lifecycle, Interface: procedureInterface}
+	factsHash, err := composition.BuildPlanningFactsHash(composition.PlanningFacts{ProcedureVersionID: version, InterfaceHash: procedureInterface.ContentHash, Lifecycle: lifecycle, PolicyManifestID: "policy_1", EvidenceStrength: 1, ObservedEndToEnd: true, RiskCost: 1, ToolCost: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return composition.Candidate{TenantID: domain.TenantID(tenant), ProcedureVersionID: version, Lifecycle: lifecycle, Interface: procedureInterface, PlanningFactsHash: factsHash}
 }
 
 func matrix(t *testing.T, rules []composition.SchemaCompatibility) composition.CompatibilityMatrix {

@@ -2,14 +2,18 @@ package composition
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 )
+
+const maximumCompatibilityGraphEdges = 100_000
 
 var (
 	ErrInvalidCompatibilityInput = errors.New("invalid compatibility input")
@@ -47,6 +51,35 @@ type Candidate struct {
 	ProcedureVersionID string
 	Lifecycle          string
 	Interface          domain.ProcedureInterface
+	PlanningFactsHash  string
+}
+
+type PlanningFacts struct {
+	ProcedureVersionID string   `json:"procedure_version_id"`
+	InterfaceHash      string   `json:"interface_hash"`
+	Lifecycle          string   `json:"lifecycle"`
+	PolicyManifestID   string   `json:"policy_manifest_id"`
+	GoalPredicateIDs   []string `json:"goal_predicate_ids,omitempty"`
+	EvidenceStrength   int64    `json:"evidence_strength"`
+	ObservedEndToEnd   bool     `json:"observed_end_to_end"`
+	RiskCost           uint32   `json:"risk_cost"`
+	ToolCost           uint32   `json:"tool_cost"`
+}
+
+func BuildPlanningFactsHash(facts PlanningFacts) (string, error) {
+	facts.ProcedureVersionID = strings.TrimSpace(facts.ProcedureVersionID)
+	facts.Lifecycle = strings.TrimSpace(facts.Lifecycle)
+	facts.PolicyManifestID = strings.TrimSpace(facts.PolicyManifestID)
+	facts.GoalPredicateIDs = append([]string(nil), facts.GoalPredicateIDs...)
+	for index := range facts.GoalPredicateIDs {
+		facts.GoalPredicateIDs[index] = strings.TrimSpace(facts.GoalPredicateIDs[index])
+	}
+	sort.Strings(facts.GoalPredicateIDs)
+	if !safeIdentity(facts.ProcedureVersionID) || !sha256Pattern.MatchString(facts.InterfaceHash) || !safeIdentity(facts.Lifecycle) || !safeIdentity(facts.PolicyManifestID) || facts.EvidenceStrength < 0 || facts.ToolCost == 0 || !strictSorted(facts.GoalPredicateIDs) {
+		return "", ErrInvalidCompatibilityInput
+	}
+	_, hash, err := canonical.MarshalAndHash(facts)
+	return hash, err
 }
 
 type CompatibilityEdge struct {
@@ -118,8 +151,24 @@ func sameCompatibilityRules(left, right []SchemaCompatibility) bool {
 }
 
 func ValidateCompatibilityGraph(graph CompatibilityGraph) error {
+	return validateCompatibilityGraph(context.Background(), graph, nil)
+}
+
+func validateCompatibilityGraph(ctx context.Context, graph CompatibilityGraph, charge func(uint64) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if graph.SchemaVersion != "compatibility-graph.v1" || graph.ID != "cgraph_"+graph.ContentHash || !sha256Pattern.MatchString(graph.ContentHash) {
 		return ErrInvalidCompatibilityInput
+	}
+	if len(graph.Edges) > maximumCompatibilityGraphEdges {
+		return ErrInvalidCompatibilityInput
+	}
+	if charge != nil {
+		// Canonical graph authentication is linear in the number of edges.
+		if err := charge(uint64(len(graph.Edges)) + 1); err != nil {
+			return err
+		}
 	}
 	copyOfGraph := graph
 	copyOfGraph.ID, copyOfGraph.ContentHash, copyOfGraph.CanonicalJSON = "", "", nil
@@ -127,11 +176,25 @@ func ValidateCompatibilityGraph(graph CompatibilityGraph) error {
 	if err != nil || hash != graph.ContentHash || !bytes.Equal(canonicalJSON, graph.CanonicalJSON) {
 		return ErrInvalidCompatibilityInput
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 	if graph.TenantID == "" || graph.ProjectionEpoch == 0 || graph.PlannerManifestID == "" || graph.PolicyManifestID == "" || !sha256Pattern.MatchString(graph.MatrixHash) || !sha256Pattern.MatchString(graph.CandidateSetHash) {
 		return ErrInvalidCompatibilityInput
 	}
+	if charge != nil {
+		// Structural validation performs a second complete edge scan.
+		if err = charge(uint64(len(graph.Edges))); err != nil {
+			return err
+		}
+	}
 	seenPairs := make(map[string]struct{}, len(graph.Edges))
 	for index, edge := range graph.Edges {
+		if index%256 == 0 {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+		}
 		pair := edge.SourceVersionID + "\x00" + edge.TargetVersionID
 		_, duplicate := seenPairs[pair]
 		if duplicate || validateCompatibilityEdge(edge, graph) != nil || index > 0 && graph.Edges[index-1].ID >= edge.ID {
@@ -180,7 +243,7 @@ func strictPrefixed(values []string, prefix string) bool {
 }
 
 func validCandidate(candidate Candidate, tenantID domain.TenantID) bool {
-	if candidate.TenantID != tenantID || !safeIdentity(string(candidate.TenantID)) || !safeIdentity(candidate.ProcedureVersionID) ||
+	if candidate.TenantID != tenantID || !safeIdentity(string(candidate.TenantID)) || !safeIdentity(candidate.ProcedureVersionID) || !sha256Pattern.MatchString(candidate.PlanningFactsHash) ||
 		(candidate.Lifecycle != "candidate" && candidate.Lifecycle != "trial" && candidate.Lifecycle != "active") || retrieval.ValidateProcedureInterface(candidate.Interface) != nil {
 		return false
 	}

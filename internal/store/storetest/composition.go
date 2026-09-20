@@ -87,12 +87,20 @@ func validCompatibilityGraph(t *testing.T, tenant string, epoch uint64, plannerM
 	if err != nil {
 		t.Fatal(err)
 	}
+	sourceFacts, err := composition.BuildPlanningFactsHash(composition.PlanningFacts{ProcedureVersionID: sourceVersion, InterfaceHash: sourceInterface.ContentHash, Lifecycle: "active", PolicyManifestID: policyManifestID, EvidenceStrength: 1, ObservedEndToEnd: true, RiskCost: 1, ToolCost: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetFacts, err := composition.BuildPlanningFactsHash(composition.PlanningFacts{ProcedureVersionID: targetVersion, InterfaceHash: targetInterface.ContentHash, Lifecycle: "candidate", PolicyManifestID: policyManifestID, EvidenceStrength: 1, ObservedEndToEnd: true, RiskCost: 1, ToolCost: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	graph, err := composition.BuildCompatibilityGraph(composition.GraphRequest{
 		TenantID: domain.TenantID(tenant), ProjectionEpoch: epoch, PlannerManifestID: plannerManifestID, PolicyManifestID: policyManifestID,
 		Matrix: matrix,
 		Candidates: []composition.Candidate{
-			{TenantID: domain.TenantID(tenant), ProcedureVersionID: sourceVersion, Lifecycle: "active", Interface: sourceInterface},
-			{TenantID: domain.TenantID(tenant), ProcedureVersionID: targetVersion, Lifecycle: "candidate", Interface: targetInterface},
+			{TenantID: domain.TenantID(tenant), ProcedureVersionID: sourceVersion, Lifecycle: "active", Interface: sourceInterface, PlanningFactsHash: sourceFacts},
+			{TenantID: domain.TenantID(tenant), ProcedureVersionID: targetVersion, Lifecycle: "candidate", Interface: targetInterface, PlanningFactsHash: targetFacts},
 		},
 	})
 	if err != nil {
