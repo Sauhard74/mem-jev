@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +18,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/erasure"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
+	"golang.org/x/sys/unix"
 )
 
 func main() { os.Exit(run()) }
@@ -35,19 +38,49 @@ func journalErasureIntent(request erasure.Request) error {
 	if directory == "" {
 		return errors.New("erasure ledger directory is required")
 	}
-	info, err := os.Lstat(directory)
+	directoryHandle, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = directoryHandle.Close() }()
+	info, err := directoryHandle.Stat()
 	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return errors.New("erasure ledger must be a mode-0700 directory")
 	}
-	target := directory + string(os.PathSeparator) + request.RequestID + ".json"
+	if err = unix.Flock(int(directoryHandle.Fd()), unix.LOCK_EX); err != nil {
+		return err
+	}
+	defer func() { _ = unix.Flock(int(directoryHandle.Fd()), unix.LOCK_UN) }()
+	tenantHash, err := erasure.TenantHash(request.TenantID)
+	if err != nil {
+		return err
+	}
+	target := directory + string(os.PathSeparator) + tenantHash + ".json"
 	if existing, readErr := os.ReadFile(target); readErr == nil {
 		var stored erasure.Request
 		if json.Unmarshal(existing, &stored) != nil || stored != request {
 			return erasure.ErrConflict
 		}
-		return nil
+		return directoryHandle.Sync()
 	} else if !os.IsNotExist(readErr) {
 		return readErr
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		encoded, readErr := os.ReadFile(filepath.Join(directory, entry.Name()))
+		var stored erasure.Request
+		if readErr != nil || json.Unmarshal(encoded, &stored) != nil {
+			return errors.New("erasure ledger contains an invalid intent")
+		}
+		if stored.RequestID == request.RequestID {
+			return erasure.ErrConflict
+		}
 	}
 	temporary, err := os.CreateTemp(directory, ".intent-*")
 	if err != nil {
@@ -76,18 +109,9 @@ func journalErasureIntent(request erasure.Request) error {
 		if readErr != nil || json.Unmarshal(existing, &stored) != nil || stored != request {
 			return erasure.ErrConflict
 		}
-		return nil
+		return directoryHandle.Sync()
 	}
-	directoryHandle, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	syncErr := directoryHandle.Sync()
-	closeErr := directoryHandle.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	return directoryHandle.Sync()
 }
 
 func run() int {

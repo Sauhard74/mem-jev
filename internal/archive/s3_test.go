@@ -61,6 +61,8 @@ func canonicalRequest() PutRequest {
 	}
 }
 
+const testKMSKeyARN = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
+
 func TestS3StoreConstructsConditionalEncryptedPut(t *testing.T) {
 	t.Parallel()
 
@@ -68,7 +70,7 @@ func TestS3StoreConstructsConditionalEncryptedPut(t *testing.T) {
 	store, err := NewS3Store(fake, S3Config{
 		Bucket:               "canonical-bucket",
 		ServerSideEncryption: types.ServerSideEncryptionAwsKms,
-		KMSKeyID:             "alias/mem-jev",
+		KMSKeyID:             testKMSKeyARN,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +96,7 @@ func TestS3StoreConstructsConditionalEncryptedPut(t *testing.T) {
 	if fake.putInput.ServerSideEncryption != types.ServerSideEncryptionAwsKms {
 		t.Fatalf("encryption = %q", fake.putInput.ServerSideEncryption)
 	}
-	if got := aws.ToString(fake.putInput.SSEKMSKeyId); got != "alias/mem-jev" {
+	if got := aws.ToString(fake.putInput.SSEKMSKeyId); got != testKMSKeyARN {
 		t.Fatalf("KMS key = %q", got)
 	}
 	if got := aws.ToString(fake.putInput.ContentType); got != "application/json" {
@@ -293,7 +295,7 @@ func TestS3StoreGetRejectsWrongKMSKey(t *testing.T) {
 		Body: io.NopCloser(bytes.NewReader(req.Body)), Metadata: map[string]string{"content-sha256": req.Hash, "schema-version": req.SchemaVersion},
 		ServerSideEncryption: types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String("alias/wrong"),
 	}}
-	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAwsKms, KMSKeyID: "alias/required"})
+	store, err := NewS3Store(fake, S3Config{Bucket: "bucket", ServerSideEncryption: types.ServerSideEncryptionAwsKms, KMSKeyID: testKMSKeyARN})
 	if err != nil {
 		t.Fatal(err)
 	}

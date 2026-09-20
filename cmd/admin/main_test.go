@@ -23,7 +23,11 @@ func TestJournalErasureIntentIsDurableAndIdempotent(t *testing.T) {
 	if err := journalErasureIntent(request); err != nil {
 		t.Fatalf("idempotent journal: %v", err)
 	}
-	path := filepath.Join(directory, request.RequestID+".json")
+	tenantHash, err := erasure.TenantHash(request.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, tenantHash+".json")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("journal info=%v err=%v", info, err)
@@ -41,6 +45,12 @@ func TestJournalErasureIntentIsDurableAndIdempotent(t *testing.T) {
 	conflict.Confirmation = "erase:tenant_b:" + conflict.RequestID
 	if err = journalErasureIntent(conflict); !errors.Is(err, erasure.ErrConflict) {
 		t.Fatalf("conflicting journal error = %v", err)
+	}
+	secondRequest := request
+	secondRequest.RequestID = "erase_01JZZZZZ1234567890"
+	secondRequest.Confirmation = "erase:tenant_a:" + secondRequest.RequestID
+	if err = journalErasureIntent(secondRequest); !errors.Is(err, erasure.ErrConflict) {
+		t.Fatalf("second request for tenant error = %v", err)
 	}
 }
 

@@ -12,6 +12,9 @@ done
 [[ "$MEMJEV_SURREAL_AUTH_SCOPE" == database || "$MEMJEV_SURREAL_AUTH_SCOPE" == namespace ]] || { echo "production SurrealDB auth must not be root scoped" >&2; exit 2; }
 [[ "$MEMJEV_PREVIOUS_SCHEMA_MAX_VERSION" =~ ^[0-9]+$ && "$MEMJEV_PREVIOUS_SCHEMA_MAX_VERSION" -ge 14 ]] || { echo "rollback image must support schema version 14" >&2; exit 2; }
 [[ "$MEMJEV_JEV_MODEL" =~ ^jev-[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "MEMJEV_JEV_MODEL must be pinned" >&2; exit 2; }
+if [[ "${MEMJEV_ARCHIVE_SSE:-aws:kms}" == aws:kms ]]; then
+  [[ "${MEMJEV_ARCHIVE_KMS_KEY_ID:-}" =~ ^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$ ]] || { echo "MEMJEV_ARCHIVE_KMS_KEY_ID must be an immutable key ARN" >&2; exit 2; }
+fi
 for secret_file in "$MEMJEV_CREDENTIALS_FILE_HOST" "$MEMJEV_JEV_API_KEY_HOST_FILE"; do
   [[ -f "$secret_file" ]] || { echo "required secret file is missing" >&2; exit 2; }
   mode=$(stat -f '%Lp' "$secret_file" 2>/dev/null || stat -c '%a' "$secret_file")

@@ -10,6 +10,11 @@ required=(MEMJEV_BACKUP_AGE_IDENTITY_FILE MEMJEV_RESTORE_ARCHIVE_TARGET MEMJEV_R
 for name in "${required[@]}"; do
   [[ -n "${!name:-}" ]] || { printf '%s is required\n' "$name" >&2; exit 2; }
 done
+attestation="empty:$MEMJEV_SURREAL_NAMESPACE:$MEMJEV_SURREAL_DATABASE:$MEMJEV_RESTORE_ARCHIVE_TARGET:$MEMJEV_TEMPORAL_POSTGRES_DATABASE"
+if [[ "${MEMJEV_RESTORE_EMPTY_TARGET_ATTESTATION:-}" != "$attestation" ]]; then
+  echo "empty-target attestation rejected" >&2
+  exit 2
+fi
 [[ -x "$MEMJEV_ADMIN_BINARY" ]] || { echo "admin binary is not executable" >&2; exit 2; }
 [[ -d "$MEMJEV_ERASURE_LEDGER_DIR" ]] || { echo "independent erasure ledger is missing" >&2; exit 2; }
 ledger_mode=$(stat -f '%Lp' "$MEMJEV_ERASURE_LEDGER_DIR" 2>/dev/null || stat -c '%a' "$MEMJEV_ERASURE_LEDGER_DIR")
@@ -20,11 +25,6 @@ archive_path=${archive_target#*/}
 [[ "$archive_alias" != "$archive_target" && "$archive_path" == "$MEMJEV_RESTORE_ARCHIVE_BUCKET" ]] || { echo "archive restore target must be the exact recovery bucket" >&2; exit 2; }
 alias_endpoint=$(mc alias export "$archive_alias" | jq -er '.url') || { echo "archive restore alias is unavailable" >&2; exit 2; }
 [[ "${alias_endpoint%/}" == "${MEMJEV_RESTORE_ARCHIVE_ENDPOINT%/}" ]] || { echo "archive restore endpoint mismatch" >&2; exit 2; }
-attestation="empty:$MEMJEV_SURREAL_NAMESPACE:$MEMJEV_SURREAL_DATABASE:$MEMJEV_RESTORE_ARCHIVE_TARGET:$MEMJEV_TEMPORAL_POSTGRES_DATABASE"
-if [[ "${MEMJEV_RESTORE_EMPTY_TARGET_ATTESTATION:-}" != "$attestation" ]]; then
-  echo "empty-target attestation rejected" >&2
-  exit 2
-fi
 for command in surreal mc psql age tar jq curl; do
   command -v "$command" >/dev/null || { printf '%s is required\n' "$command" >&2; exit 2; }
 done
@@ -43,6 +43,14 @@ fi
 [[ -z "$archive_listing" ]] || { echo "archive restore target is not empty" >&2; exit 1; }
 table_count=$(psql -X -Atqc "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')" "$MEMJEV_TEMPORAL_POSTGRES_DATABASE")
 [[ "$table_count" == 0 ]] || { echo "PostgreSQL restore target is not empty" >&2; exit 1; }
+archive_manifest="$work/archive-files.list"
+if ! find "$work/archive" -type f -print0 | sort -z > "$archive_manifest"; then
+  echo "backup archive enumeration failed" >&2; exit 1
+fi
+ledger_manifest="$work/erasure-intents.list"
+if ! find "$MEMJEV_ERASURE_LEDGER_DIR" -maxdepth 1 -type f -name '*.json' -print0 | sort -z > "$ledger_manifest"; then
+  echo "erasure ledger enumeration failed" >&2; exit 1
+fi
 
 surreal import --log error --endpoint "$MEMJEV_SURREAL_ENDPOINT" --namespace "$MEMJEV_SURREAL_NAMESPACE" --database "$MEMJEV_SURREAL_DATABASE" "$work/surreal.surql"
 while IFS= read -r -d '' object; do
@@ -60,11 +68,11 @@ while IFS= read -r -d '' object; do
   fi
   mc cp --quiet --attr "schema-version=$schema;content-sha256=$hash" "${encryption[@]}" "$object" "$destination"
   jq -nc --arg key "$relative" '{key:$key}' | env MEMJEV_ARCHIVE_ENDPOINT="$MEMJEV_RESTORE_ARCHIVE_ENDPOINT" MEMJEV_ARCHIVE_BUCKET="$MEMJEV_RESTORE_ARCHIVE_BUCKET" MEMJEV_ARCHIVE_REGION="$MEMJEV_RESTORE_ARCHIVE_REGION" MEMJEV_ARCHIVE_SSE="$MEMJEV_RESTORE_ARCHIVE_SSE" MEMJEV_ARCHIVE_KMS_KEY_ID="${MEMJEV_RESTORE_ARCHIVE_KMS_KEY_ID:-}" "$MEMJEV_ADMIN_BINARY" verify-archive-object
-done < <(find "$work/archive" -type f -print0)
+done < "$archive_manifest"
 psql -X -v ON_ERROR_STOP=1 --single-transaction --file "$work/temporal.sql" "$MEMJEV_TEMPORAL_POSTGRES_DATABASE"
 while IFS= read -r -d '' erasure_intent; do
   env MEMJEV_ERASURE_LEDGER_REPLAY=true MEMJEV_ARCHIVE_ENDPOINT="$MEMJEV_RESTORE_ARCHIVE_ENDPOINT" MEMJEV_ARCHIVE_BUCKET="$MEMJEV_RESTORE_ARCHIVE_BUCKET" MEMJEV_ARCHIVE_REGION="$MEMJEV_RESTORE_ARCHIVE_REGION" MEMJEV_ARCHIVE_SSE="$MEMJEV_RESTORE_ARCHIVE_SSE" MEMJEV_ARCHIVE_KMS_KEY_ID="${MEMJEV_RESTORE_ARCHIVE_KMS_KEY_ID:-}" "$MEMJEV_ADMIN_BINARY" erase-tenant < "$erasure_intent" >/dev/null
-done < <(find "$MEMJEV_ERASURE_LEDGER_DIR" -maxdepth 1 -type f -name 'erase_*.json' -print0 | sort -z)
+done < "$ledger_manifest"
 
 post_info=$(printf 'INFO FOR DB;\n' | surreal sql --hide-welcome --json --endpoint "$MEMJEV_SURREAL_ENDPOINT" --namespace "$MEMJEV_SURREAL_NAMESPACE" --database "$MEMJEV_SURREAL_DATABASE")
 printf '%s' "$post_info" | jq -e 'type == "array" and length == 1 and (.[0].tables | type == "object") and (.[0].tables | length) > 0' >/dev/null || { echo "SurrealDB restore verification failed" >&2; exit 1; }

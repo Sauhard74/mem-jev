@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -34,6 +35,8 @@ type S3Store struct {
 	config S3Config
 }
 
+var kmsKeyARNPattern = regexp.MustCompile(`^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$`)
+
 func NewS3Store(client S3API, config S3Config) (*S3Store, error) {
 	if client == nil || strings.TrimSpace(config.Bucket) == "" {
 		return nil, ErrInvalidRequest
@@ -44,7 +47,7 @@ func NewS3Store(client S3API, config S3Config) (*S3Store, error) {
 			return nil, ErrInvalidRequest
 		}
 	case types.ServerSideEncryptionAwsKms:
-		if strings.TrimSpace(config.KMSKeyID) == "" {
+		if !kmsKeyARNPattern.MatchString(config.KMSKeyID) {
 			return nil, ErrInvalidRequest
 		}
 	default:
