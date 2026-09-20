@@ -1,0 +1,92 @@
+DEFINE TABLE IF NOT EXISTS schema_migration SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS version ON TABLE schema_migration TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS name ON TABLE schema_migration TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS checksum ON TABLE schema_migration TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS applied_at ON TABLE schema_migration TYPE datetime READONLY;
+DEFINE INDEX IF NOT EXISTS schema_migration_version_unique ON TABLE schema_migration FIELDS version UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS tenant SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE tenant TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS status ON TABLE tenant TYPE string;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE tenant TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE tenant TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS tenant_id_unique ON TABLE tenant FIELDS tenant_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS consent_policy SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE consent_policy TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS mode ON TABLE consent_policy TYPE string;
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE consent_policy TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE consent_policy TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE consent_policy TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE consent_policy TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS consent_policy_tenant_version_unique ON TABLE consent_policy FIELDS tenant_id, policy_version UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS trace_run SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE trace_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE trace_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS event_count ON TABLE trace_run TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS archive_key ON TABLE trace_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE trace_run TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE trace_run TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE trace_run TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS trace_run_tenant_trace_unique ON TABLE trace_run FIELDS tenant_id, trace_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS canonical_event SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE canonical_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE canonical_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS event_id ON TABLE canonical_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS sequence ON TABLE canonical_event TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS kind ON TABLE canonical_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS tool_name ON TABLE canonical_event TYPE option<string> READONLY;
+DEFINE FIELD IF NOT EXISTS exit_code ON TABLE canonical_event TYPE option<int> READONLY;
+DEFINE FIELD IF NOT EXISTS payload ON TABLE canonical_event TYPE object FLEXIBLE READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE canonical_event TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE canonical_event TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE canonical_event TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS canonical_event_tenant_event_unique ON TABLE canonical_event FIELDS tenant_id, event_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS canonical_event_trace_sequence ON TABLE canonical_event FIELDS tenant_id, trace_id, sequence;
+
+DEFINE TABLE IF NOT EXISTS ingest_receipt SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS receipt_id ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS idempotency_key_hash ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS disposition ON TABLE ingest_receipt TYPE string;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE ingest_receipt TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE ingest_receipt TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS ingest_receipt_tenant_idempotency_unique ON TABLE ingest_receipt FIELDS tenant_id, idempotency_key_hash UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS archive_object SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE archive_object TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS archive_key ON TABLE archive_object TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS byte_size ON TABLE archive_object TYPE int READONLY;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE archive_object TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE archive_object TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE archive_object TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS archive_object_tenant_key_unique ON TABLE archive_object FIELDS tenant_id, archive_key UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS outbox_job SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE outbox_job TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS workflow_id ON TABLE outbox_job TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS trace_id ON TABLE outbox_job TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS job_type ON TABLE outbox_job TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS state ON TABLE outbox_job TYPE string;
+DEFINE FIELD IF NOT EXISTS attempt_count ON TABLE outbox_job TYPE int;
+DEFINE FIELD IF NOT EXISTS available_at ON TABLE outbox_job TYPE datetime;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE outbox_job TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE outbox_job TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE outbox_job TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS outbox_job_tenant_workflow_unique ON TABLE outbox_job FIELDS tenant_id, workflow_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS outbox_job_ready ON TABLE outbox_job FIELDS state, available_at;
+
+DEFINE TABLE IF NOT EXISTS policy_bundle SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS tenant_id ON TABLE policy_bundle TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS policy_version ON TABLE policy_bundle TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS bundle_uri ON TABLE policy_bundle TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS signature ON TABLE policy_bundle TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS active ON TABLE policy_bundle TYPE bool;
+DEFINE FIELD IF NOT EXISTS created_at ON TABLE policy_bundle TYPE datetime READONLY;
+DEFINE FIELD IF NOT EXISTS schema_version ON TABLE policy_bundle TYPE string READONLY;
+DEFINE FIELD IF NOT EXISTS content_hash ON TABLE policy_bundle TYPE string READONLY;
+DEFINE INDEX IF NOT EXISTS policy_bundle_tenant_version_unique ON TABLE policy_bundle FIELDS tenant_id, policy_version UNIQUE;
