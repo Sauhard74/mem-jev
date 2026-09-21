@@ -17,7 +17,7 @@ if [[ "${MEMJEV_RESTORE_EMPTY_TARGET_ATTESTATION:-}" != "$attestation" ]]; then
 fi
 [[ -x "$MEMJEV_ADMIN_BINARY" ]] || { echo "admin binary is not executable" >&2; exit 2; }
 [[ -d "$MEMJEV_ERASURE_LEDGER_DIR" ]] || { echo "independent erasure ledger is missing" >&2; exit 2; }
-ledger_mode=$(stat -f '%Lp' "$MEMJEV_ERASURE_LEDGER_DIR" 2>/dev/null || stat -c '%a' "$MEMJEV_ERASURE_LEDGER_DIR")
+ledger_mode=$(stat -c '%a' "$MEMJEV_ERASURE_LEDGER_DIR" 2>/dev/null || stat -f '%Lp' "$MEMJEV_ERASURE_LEDGER_DIR")
 [[ "$ledger_mode" == 700 ]] || { echo "erasure ledger permissions must be 0700" >&2; exit 2; }
 archive_target=${MEMJEV_RESTORE_ARCHIVE_TARGET%/}
 archive_alias=${archive_target%%/*}

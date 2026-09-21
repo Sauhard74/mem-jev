@@ -17,7 +17,7 @@ if [[ "${MEMJEV_ARCHIVE_SSE:-aws:kms}" == aws:kms ]]; then
 fi
 for secret_file in "$MEMJEV_CREDENTIALS_FILE_HOST" "$MEMJEV_JEV_API_KEY_HOST_FILE"; do
   [[ -f "$secret_file" ]] || { echo "required secret file is missing" >&2; exit 2; }
-  mode=$(stat -f '%Lp' "$secret_file" 2>/dev/null || stat -c '%a' "$secret_file")
+  mode=$(stat -c '%a' "$secret_file" 2>/dev/null || stat -f '%Lp' "$secret_file")
   [[ "$mode" == 600 || "$mode" == 400 ]] || { echo "secret file permissions must be 0600 or 0400" >&2; exit 2; }
 done
 echo "production preflight: PASS"
