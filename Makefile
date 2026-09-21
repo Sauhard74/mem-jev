@@ -1,8 +1,21 @@
-.PHONY: generate test lint security verify jev-smoke production-preflight
+.PHONY: setup quickstart dev-down onboarding-test generate test lint security verify jev-smoke production-preflight
 
 BUF := go run github.com/bufbuild/buf/cmd/buf@v1.47.2
 GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+setup:
+	./scripts/setup.sh
+
+quickstart:
+	./scripts/quickstart.sh
+
+dev-down:
+	docker compose --env-file .env.local down
+
+onboarding-test:
+	./scripts/tests/onboarding_test.sh
+	./scripts/tests/quickstart_test.sh
 
 generate:
 	$(BUF) generate

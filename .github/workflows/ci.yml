@@ -26,6 +26,8 @@ jobs:
           cache: true
       - name: Verify generated code, contracts, tests, and static analysis
         run: make verify
+      - name: Verify setup and agent quickstart
+        run: make onboarding-test
       - name: Validate executable alert rules
         run: ./scripts/check-alert-rules.sh
       - name: Validate backup, restore, deployment, and rollback controls

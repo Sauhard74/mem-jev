@@ -4,6 +4,41 @@ memJev is a hosted, multi-tenant procedural-memory service for agents. It record
 
 The honest product boundary is deliberate: this is procedural reuse and bounded composition, not general learning. Compared with a fuzzy trace cache, memJev adds verified outcome evidence, negative paths, tool/resource compatibility, hard eligibility gates, multi-procedure composition, immutable revisions, abstention, exact decision replay, and tenant isolation.
 
+## Five-minute quickstart
+
+Requirements: Go 1.25 or newer, Docker with Compose v2, OpenSSL, curl, and Python 3.
+
+```sh
+git clone https://github.com/Sauhard74/mem-jev.git
+cd mem-jev
+make quickstart
+```
+
+`make quickstart` generates mode-0600 development credentials, starts the complete local stack, waits for it to become healthy, and demonstrates the agent-facing lifecycle: retrieve a plan, ingest the resulting trace, and submit independently verified outcome evidence. It preserves an existing `.env.local`; it does not rotate credentials on every run.
+
+A brand-new corpus has no eligible procedure and may have no active retrieval configuration. In that state, retrieval safely abstains or is unavailable and the example continues without recalled guidance. Ingest and outcome evidence are still recorded. Production tenants need versioned tool contracts and retrieval manifests provisioned before recall is enabled.
+
+Useful local commands:
+
+```sh
+make setup          # create credentials and start the stack
+make quickstart     # run the complete public API lifecycle
+make onboarding-test
+make dev-down       # stop containers but keep local volumes
+```
+
+To run the compiling Go integration example:
+
+```sh
+set -a
+source .env.local
+set +a
+MEMJEV_URL="$MEMJEV_E2E_API_URL" MEMJEV_TOKEN="$MEMJEV_E2E_TOKEN" \
+  go run ./examples/go-agent "write a hello file"
+```
+
+The framework-specific seam is `executeAgent`: give the returned plan to the agent as advisory context, capture its ordered tool events, and replace the example verifier with an independent task verifier. See [Integrate an agent](docs/agent-integration.md) and the [HTTP API walkthrough](docs/api-quickstart.md).
+
 ## Architecture
 
 ```text
@@ -39,7 +74,7 @@ Jev is never an eligibility or availability dependency. It runs only after hard 
 - Jev single-flight, per-tenant/global token buckets, bounded concurrency, circuit breaking, hard deadlines, and deterministic fallback.
 - Connect/Protobuf public APIs, strict JSON, bounded bodies, idempotency, safe errors, OpenTelemetry, executable Prometheus alerts, and locked-down distroless containers.
 
-## Local qualification
+## Development and qualification
 
 Requirements: Go 1.26.8, Docker with Compose v2, OpenSSL, curl, and Python 3.
 
@@ -50,6 +85,8 @@ make verify
 ```
 
 The integration gate builds a clean stack, replays all migrations, exercises durable ingest and synthesis, tests deterministic five-channel retrieval and vector quarantine, restarts the worker to prove recovery, validates tenant isolation, and runs a mixed selected/abstained/explanation load probe at 100 scheduled RPS.
+
+This is the release qualification path, not the normal installation command. Use `make setup` for everyday development.
 
 Direct TypeSafe access is opt-in and uses a mounted mode-0600 file—never a key environment variable:
 
@@ -63,6 +100,9 @@ See [Jev operations](docs/runbooks/jev.md) before enabling tenant traffic. The l
 
 ## Documentation
 
+- [Agent integration guide](docs/agent-integration.md)
+- [HTTP API walkthrough](docs/api-quickstart.md)
+- [Local development and release qualification](docs/runbooks/local-development.md)
 - [System design](docs/superpowers/specs/2026-09-20-procedural-memory-platform-design.md)
 - [Jev judgment-ledger design](docs/superpowers/specs/2026-09-20-jev-judgment-ledger-design.md)
 - [Production deployment and rollback](docs/runbooks/production-deploy.md)
@@ -72,7 +112,7 @@ See [Jev operations](docs/runbooks/jev.md) before enabling tenant traffic. The l
 ## Controlled production launch
 
 Before the first hosted deployment, configure immutable image digests and production dependencies, run `make production-preflight`, create an encrypted backup, and deploy with `scripts/deploy-production.sh`. Operator-only tenant erasure is available through `go run ./cmd/admin erase-tenant` with a strict JSON request on standard input; the tenant identifier is never placed in command arguments or the durable receipt. Keep the previous image digests available for `scripts/rollback-production.sh`.
-- [Local development and release qualification](docs/runbooks/local-development.md)
+
 - [Retrieval operations](docs/runbooks/retrieval.md)
 - [Evidence-pipeline operations](docs/runbooks/evidence-pipeline.md)
 - [Composition and lifecycle operations](docs/runbooks/composition-lifecycle.md)

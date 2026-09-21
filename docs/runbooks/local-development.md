@@ -2,6 +2,10 @@
 
 Prerequisites are Go 1.25 or newer (the release and CI toolchain is pinned to Go 1.26.8), Docker with Compose v2, OpenSSL, curl, and Python 3. No durable credential is committed to the repository.
 
+For ordinary development, run `make setup`. It creates `.env.local` and `.runtime/credentials.json` with mode `0600`, starts the complete Compose stack, and waits for health checks. It preserves existing credentials. Run `make quickstart` to exercise retrieve, ingest, and outcome through the public API, and `make dev-down` to stop the containers without deleting local volumes.
+
+The commands below are qualification gates. They are intentionally heavier than setup.
+
 Run `./scripts/integration.sh`. It creates mode-0600 development credentials in `.env.local` and `.runtime/`, copies the credential file through a one-shot root initializer into a mode-0400 named volume owned by API UID 65532, rebuilds a clean Compose stack, waits for readiness, then runs the SurrealDB integration and end-to-end tests. The qualification gate also restarts the worker and proves durable recovery, verified synthesis, deterministic duplicate replay, negative-path scoping, abstention, tenant isolation, and archive-corruption quarantine. Run `./scripts/smoke.sh` for a second public-API check. Stop and erase the local state with `docker compose --env-file .env.local down --volumes`.
 
 The same gate builds the deployed API's optional vector channel against a real SurrealDB instance, then runs `scripts/retrieval-integration.sh`, which activates immutable retrieval manifests and proves selection, abstention, migration replay, projection-pinned replay, stable tie ordering, concurrent idempotency, encrypted query storage, explanation, authorization-context binding, cross-tenant denial, and hosted five-channel vector success/degradation/quarantine behavior. It then runs a two-tenant mixed selected/abstained/explanation probe at 100 scheduled RPS; queueing time is included and responses are semantically validated. This ten-second CI run is a smoke gate, not the production load claim.
