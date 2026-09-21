@@ -1,8 +1,8 @@
-# MemJev
+# memJev
 
-MemJev is a hosted, multi-tenant procedural-memory service for agents. It records sanitized traces and verified outcomes, derives immutable evidence-backed procedures, retrieves compatible procedures through deterministic gates and rank fusion, and returns an advisory plan with replayable provenance.
+memJev is a hosted, multi-tenant procedural-memory service for agents. It records sanitized traces and verified outcomes, derives immutable evidence-backed procedures, retrieves compatible procedures through deterministic gates and rank fusion, and returns an advisory plan with replayable provenance.
 
-The honest product boundary is deliberate: this is procedural reuse and bounded composition, not general learning. Compared with a fuzzy trace cache, MemJev adds verified outcome evidence, negative paths, tool/resource compatibility, hard eligibility gates, multi-procedure composition, immutable revisions, abstention, exact decision replay, and tenant isolation.
+The honest product boundary is deliberate: this is procedural reuse and bounded composition, not general learning. Compared with a fuzzy trace cache, memJev adds verified outcome evidence, negative paths, tool/resource compatibility, hard eligibility gates, multi-procedure composition, immutable revisions, abstention, exact decision replay, and tenant isolation.
 
 ## Architecture
 
@@ -78,3 +78,7 @@ Before the first hosted deployment, configure immutable image digests and produc
 - [Composition and lifecycle operations](docs/runbooks/composition-lifecycle.md)
 
 The local 100-RPS gate is a smoke qualification, not proof of the documented 10-million-event production target. Release qualification requires the production-shaped corpus, 30-minute load window, failover, backup/restore, and retained evidence described in the runbook.
+
+## License
+
+memJev is licensed under the [GNU Affero General Public License v3.0](LICENSE).
