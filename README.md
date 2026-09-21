@@ -1,32 +1,42 @@
-# memJev
+<div align="center">
 
-**Deterministic procedural memory for agents.**
+<h1>memJev</h1>
 
-[![CI](https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml/badge.svg)](https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.25%2B-000000)](https://go.dev/)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-000000.svg)](LICENSE)
+<h3>Deterministic procedural memory for agents.</h3>
 
-memJev turns successful agent runs into versioned, evidence-backed procedures and retrieves the right procedure for future tasks. It is a memory layer around your agent—not another agent framework and not a model-training system.
+<p>
+  <a href="https://memjev.getmetacognition.com">Website</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#add-memjev-to-an-agent">Agent setup</a> ·
+  <a href="#api">API</a> ·
+  <a href="#how-it-works">Architecture</a>
+</p>
 
-```text
-successful run → verified evidence → reusable procedure
-new task       → deterministic retrieval → advisory plan
-```
+<p>
+  <a href="https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://go.dev/"><img alt="Go 1.25+" src="https://img.shields.io/badge/Go-1.25%2B-000000"></a>
+  <a href="LICENSE"><img alt="AGPL v3" src="https://img.shields.io/badge/License-AGPL%20v3-000000.svg"></a>
+</p>
 
-## Why memJev?
+<br>
 
-Agents repeatedly spend tokens and tool calls rediscovering workflows they have already completed. A fuzzy trace cache helps, but it can replay the wrong path when tools, resources, policies, or environments differ.
+<h3>Successful runs should compound.</h3>
 
-memJev makes reuse explicit and inspectable:
+<p>
+  Record what worked. Verify it. Give the next agent a deterministic head start.
+</p>
 
-- Records sanitized, ordered tool traces.
-- Requires verified outcome evidence before a run can become memory.
-- Removes dead ends while preserving relevant negative paths.
-- Retrieves with exact, lexical, graph, facet, and optional vector signals.
-- Applies deterministic compatibility and policy gates before ranking.
-- Returns an advisory plan with provenance—or safely abstains.
-- Preserves immutable procedure revisions and replayable decisions.
-- Isolates every tenant through credential-derived identity.
+</div>
+
+---
+
+memJev turns successful agent runs into versioned, evidence-backed procedures and retrieves the right procedure for future tasks. It sits around your existing agent stack—capturing tool traces after execution and returning advisory plans before the next run.
+
+| Capture | Verify | Reuse |
+| --- | --- | --- |
+| Record sanitized tool calls in execution order. | Promote runs only after independent outcome evidence. | Retrieve a compatible procedure or safely abstain. |
+
+Unlike a fuzzy trace cache, memJev checks tools, resources, policies, environment, freshness, and risk before a procedure can be returned. Every decision remains inspectable and replayable.
 
 ## Quickstart
 
