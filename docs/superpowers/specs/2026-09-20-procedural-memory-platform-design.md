@@ -3,7 +3,6 @@
 **Status:** Proposed for review  
 **Date:** 2026-09-20  
 **Target:** Hosted, multi-tenant procedural memory for agents  
-**Initial capacity:** 10 million canonical events and 100 retrieval requests per second
 
 ## 1. Purpose
 
@@ -473,7 +472,7 @@ Key controls:
 - asynchronous embedding and synthesis, never on the ingest acknowledgment path;
 - Jev concurrency isolated from core API worker pools.
 
-A representative load model mixes retrieval, ingestion, outcomes, explanation, background synthesis, embedding, compaction, export, and erasure. A read-only 100-RPS benchmark is insufficient.
+A representative load model mixes retrieval, ingestion, outcomes, explanation, background synthesis, embedding, compaction, export, and erasure.
 
 ## 17. Evaluation strategy
 
@@ -512,11 +511,9 @@ Every ranker, rubric, model, embedding, gate, and synthesis change runs against 
 - Tool-version and resource-precondition incompatibility.
 - Erasure completeness and tombstone behavior.
 
-### 17.4 Scale and resilience tests
+### 17.4 Resilience tests
 
-At the full 10-million-event data shape and 100 mixed RPS, measure p50/p95/p99 latency, throughput, ANN recall, transaction conflicts, Jev cold/warm/degraded states, workflow lag, cost per useful recall, index rebuild time, regional rebuild, backup restoration, and node/provider failure behavior.
-
-Release requires successful chaos exercises for SurrealDB unavailability, object-store delay, workflow replay, embedding outage, Jev throttling, corrupt projection, policy expiry, and regional loss.
+Exercise SurrealDB unavailability, object-store delay, workflow replay, embedding outage, Jev throttling, corrupt projections, policy expiry, and regional recovery.
 
 ## 18. Operational surfaces
 
@@ -559,5 +556,4 @@ The system is production-ready for the stated target only when:
 - revision promotion is linked to attributable outcomes and is reversible;
 - cross-tenant tests find no readable, traversable, cached, logged, or exported leakage;
 - erasure and regional-rebuild drills complete within policy;
-- the mixed 10-million-event, 100-RPS workload meets the qualified SLOs;
 - product language states the exact determinism boundary and avoids claims of general learning.

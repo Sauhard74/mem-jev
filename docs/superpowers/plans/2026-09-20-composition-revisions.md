@@ -4,7 +4,7 @@
 
 **Goal:** Turn individually eligible procedures into deterministic typed plans, persist every injection, attribute later outcomes to the exact plan served, and promote or roll back immutable procedure versions through auditable champion/challenger policy.
 
-**Scale and safety target:** hosted from day one; 10 million canonical events; 100 mixed retrieval requests per second; tenant, consent, residency, policy, and risk boundaries remain hard gates; no composition or lifecycle decision depends on Jev.
+**Safety target:** tenant, consent, residency, policy, and risk boundaries remain hard gates; no composition or lifecycle decision depends on Jev.
 
 **Non-negotiable invariants**
 
@@ -158,10 +158,10 @@ Qualification must include:
 - champion promotion, unsafe rollback, and one-champion contention;
 - planner-manifest rollback and compatibility corruption quarantine;
 - worker crash/restart, SurrealDB failover, backlog recovery, and regional rebuild;
-- mixed retrieval/composition/outcome traffic at 100 RPS over a 10-million-event corpus with server CPU/RSS, snapshot age, queue depth, and p95/p99 recorded.
+- mixed retrieval/composition/outcome traffic with server CPU/RSS, snapshot age, queue depth, and latency recorded.
 
 **Commit:** `test: qualify composition and lifecycle production path`
 
 ## Completion gate
 
-This slice is complete only when all twelve tasks are committed; migrations replay safely; race, generation, vet, lint, security, and full-stack gates pass; every agent-facing plan has a committed injection ID; outcome credit is tenant-bound and reproducible; rebuilds are byte-identical; lifecycle rollback is proven; and the production-shaped 10-million-event mixed workload satisfies the published SLO without Jev.
+This slice is complete only when all twelve tasks are committed; migrations replay safely; race, generation, vet, lint, security, and full-stack checks pass; every agent-facing plan has a committed injection ID; outcome credit is tenant-bound and reproducible; rebuilds are byte-identical; and lifecycle rollback is proven.

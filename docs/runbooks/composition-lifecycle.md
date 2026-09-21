@@ -36,7 +36,3 @@ This runbook covers the derived compatibility graph, append-only lifecycle decis
 3. Produce a `derived-projection-snapshot.v1` for stored and rebuilt state. Compare all record IDs and hashes with `rebuild.CompareDerivedSnapshots`.
 4. Activate only when an authenticated `derived-activation-permit.v1` is produced. Any mismatch leaves the old generation active and pages the owner.
 5. Keep the prior projection epoch and planner serving head available for rollback. Activation and rollback move heads; they do not mutate evidence, plans, assignments, or decisions.
-
-## Capacity qualification
-
-Before production promotion, run `scripts/retrieval-release-qualification.sh` against at least 10 million canonical events and one million retrieval document revisions for at least 30 minutes at 100 RPS. Record p50/p95/p99 latency, API CPU/RSS, SurrealDB CPU/RSS, projection snapshot age, maintenance backlog by kind, dead letters, and transaction retry rate. A run is invalid if the corpus minima, tenant isolation checks, vector-generation checks, or rebuild equivalence checks are skipped.

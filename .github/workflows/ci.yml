@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  qualify:
+  test:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -38,7 +38,7 @@ jobs:
       - name: Check protobuf compatibility
         if: github.event_name == 'pull_request'
         run: go run github.com/bufbuild/buf/cmd/buf@v1.47.2 breaking --against ".git#branch=origin/${{ github.event.pull_request.base.ref }}"
-      - name: Run integration, retrieval, and 100 RPS gates
+      - name: Run integration and retrieval checks
         run: ./scripts/integration.sh
       - name: Run public smoke test
         run: ./scripts/smoke.sh

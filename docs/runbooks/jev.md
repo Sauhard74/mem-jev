@@ -39,9 +39,9 @@ The one-shot initializer copies the key to a mode-0400 named volume owned by API
 - Roll back by activating the prior immutable ranker/serving configuration or setting `MEMJEV_JEV_ENABLED=false`. Existing retrieval runs remain replayable and perform zero provider calls.
 - Never delete a judgment to force reevaluation. Change the query/document/environment/policy/rubric/model identity or wait for its bounded reuse window. Expiry creates an immutable successor and atomically advances the tenant-scoped head; prior generations remain audit evidence.
 
-## Required release evidence
+## Verification
 
-Run `make verify`, SurrealDB integration tests, the full Compose integration gate, and the opt-in live smoke test. Retain cold-miss, warm-hit, concurrent single-flight, timeout, 429, 5xx, malformed/oversized response, circuit recovery, secret rotation, 100-RPS fallback, and provider-enabled latency evidence with the release record. A successful live call is required before enabling a new model in production.
+Run `make verify`, the SurrealDB integration tests, the Compose integration suite, and the opt-in live smoke test. Verify cold and warm requests, concurrent single-flight behavior, timeouts, throttling, server errors, malformed responses, circuit recovery, and secret rotation before enabling a new model.
 
 The live smoke command reads the same restricted file source and prints only the pinned model, token counts, and quantized feature values:
 

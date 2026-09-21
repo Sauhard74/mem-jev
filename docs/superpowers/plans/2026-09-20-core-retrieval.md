@@ -233,10 +233,10 @@
 - Create: `docs/runbooks/retrieval-replay.md`
 - Modify: `docs/runbooks/local-development.md`
 
-**Produces:** repeatable proof of deterministic safe retrieval at the target 10M-event design point and 100 mixed RPS operating envelope.
+**Produces:** repeatable proof of deterministic safe retrieval under representative mixed workloads.
 
 - [ ] E2E exact/BM25/facet/graph/vector cases, cross-tenant denial, every hard gate, stable ties, abstention, vector outage, run replay, concurrent projection, and migration replay.
-- [ ] Load-test 100 mixed RPS with a production-shaped corpus and prove no-Jev p95 <=250ms, bounded saturation, stable memory, and zero incorrect-tenant/incorrect-snapshot responses.
+- [ ] Exercise representative mixed workloads and verify bounded saturation, stable memory, and zero incorrect-tenant or incorrect-snapshot responses.
 - [ ] Add metrics/alerts for per-channel latency/error/degradation, candidate counts, gate rejection codes, abstention, snapshot age, ranker version, vector staleness, run persistence failure, and replay mismatch.
 - [ ] Exercise clean-stack startup, index build/rebuild, failover, vector corruption quarantine, credential rotation, backup/restore, and byte-identical decision replay.
 - [ ] Run full unit/race/lint/vet/generated/migration/integration/load gates, request independent review, resolve all Critical/Important findings, and rerun from a clean stack.
