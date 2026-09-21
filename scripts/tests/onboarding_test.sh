@@ -14,11 +14,11 @@ MEMJEV_RUNTIME_DIR="$runtime_dir" \
 
 [[ -s "$env_file" ]] || { printf '%s\n' 'setup did not create the environment file' >&2; exit 1; }
 [[ -s "$runtime_dir/credentials.json" ]] || { printf '%s\n' 'setup did not create the credential file' >&2; exit 1; }
-[[ "$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")" == "600" ]] || {
+[[ "$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file")" == "600" ]] || {
   printf '%s\n' 'environment file permissions are not 0600' >&2
   exit 1
 }
-[[ "$(stat -f '%Lp' "$runtime_dir/credentials.json" 2>/dev/null || stat -c '%a' "$runtime_dir/credentials.json")" == "600" ]] || {
+[[ "$(stat -c '%a' "$runtime_dir/credentials.json" 2>/dev/null || stat -f '%Lp' "$runtime_dir/credentials.json")" == "600" ]] || {
   printf '%s\n' 'credential file permissions are not 0600' >&2
   exit 1
 }
