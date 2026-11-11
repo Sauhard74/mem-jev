@@ -31,8 +31,9 @@ Send the task together with the tools, tool-contract versions, accessible resour
 
 Treat the response as follows:
 
-- `SELECTED`: give `plan` to the agent as advisory context. Preserve `plan.injectionId` and `plan.taskExecutionId`.
-- `ABSTAINED`: run the agent normally. Abstention is an intentional safe result, not an exception.
+- `SELECTED`: give `plan` to the agent as advisory context. Preserve `plan.injectionId` and `plan.taskExecutionId`. Each `plan.nodes[].steps` lists the procedure's tool calls in order (tool name, version, and contract version; your harness supplies the arguments).
+  - If `plan.advisoryOnly` is `true`, the plan comes from a routine that has not been promoted yet. See [unpromoted plans](#unpromoted-plans-and-promotion).
+- `ABSTAINED`: run the agent normally. Abstention is an intentional safe result, not an exception. `abstentionCode` says why; `advisory_only` means only unpromoted routines matched and none could be handed out as a plan (see below), and `candidates` lists them for display only.
 - unavailable or timed out: follow your product's fallback policy. memJev is designed so the agent can continue without recalled guidance.
 
 Never turn a procedure node directly into an unreviewed tool execution. The plan can contain gaps and constraints, and remains advisory.
@@ -68,6 +69,32 @@ memjev.record_outcome(trace.id, evidence, plan.injection_id)
 ```
 
 A complete, compiling implementation is available in [`examples/go-agent/main.go`](../examples/go-agent/main.go). Replace only its `executeAgent` function with the framework-specific invocation and event capture.
+
+## Unpromoted plans and promotion
+
+A newly learned routine starts as a `candidate`. memJev hands it out as a plan only when no promoted routine matches, and marks that plan `advisoryOnly: true` (as is the candidate entry). It is handed out only if it passes every check a promoted plan passes (residency, the request's forbidden effects, tool contract versions, and risk class), is low or medium risk, and no step's tool is irreversible or high or critical risk. Otherwise the response abstains with `advisory_only`.
+
+What a harness should do with an unpromoted plan:
+
+- Treat it as a suggestion to try, never as approval: keep your normal tool authorization and review, especially for writes.
+- Run the task, verify it outside the model, and call `RecordOutcome` with the plan's `injectionId` and `taskExecutionId`.
+- If you do not want to try unproven routines, ignore plans with `advisoryOnly: true` and run normally.
+
+Promotion uses only verified outcomes of runs that were given the plan (linked by `injectionId` and `taskExecutionId`, with all goal evidence satisfied). `provisional_success`, outcomes without the link, and runs that did not get the plan never count. Under the default policy (`memjev-default-lifecycle.v1`):
+
+| Transition | When |
+|---|---|
+| candidate → trial | at least 3 such outcomes and a 95% Wilson lower bound on the success rate of at least 40% (3 of 3) |
+| trial → active | at least 10 outcomes, lower bound at least 60%, and at least one hour in trial |
+| active → retired | lower bound below 60% (verified failures), or no such outcome in 90 days |
+
+Each person's scope (`tenant__person`) is evaluated on its own outcomes only. Every decision is stored in `lifecycle_decision` and logged by the worker as `lifecycle decision`. Run an evaluation immediately with:
+
+```sh
+printf '{"tenant_id":"tenant_local"}' | docker compose --env-file .env.local exec -T api /memjev-admin evaluate-lifecycle
+```
+
+It evaluates the tenant and each of its people and prints one JSON line per decision.
 
 ## Tool contracts and first-run behavior
 

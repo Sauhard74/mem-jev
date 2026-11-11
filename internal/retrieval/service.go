@@ -82,6 +82,13 @@ type ServiceConfig struct {
 	// tenant without a serving configuration gets the default one. It must be
 	// cheap after the first success and must never replace operator configs.
 	ServingBootstrap func(context.Context, domain.TenantID)
+	// Steps loads the ordered steps attached to every plan. Without it plans
+	// carry no steps and unpromoted plans are never issued.
+	Steps StepReader
+	// UnpromotedPlans lets a candidate procedure be returned as a plan, marked
+	// advisory, when no promoted procedure is eligible. Outcomes of such runs
+	// are what promotion is evaluated on.
+	UnpromotedPlans bool
 }
 
 type Service struct {
@@ -129,6 +136,10 @@ type ServiceResponse struct {
 	Approximate         bool
 	Replayed            bool
 	Plan                *PlanArtifact
+	// PlanSteps maps each plan node's procedure version to its ordered steps.
+	PlanSteps map[string][]PlanStep
+	// PlanAdvisoryOnly marks a plan built from an unpromoted procedure.
+	PlanAdvisoryOnly bool
 }
 
 type ServiceError struct {
@@ -338,6 +349,17 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		selectedIDs = append(selectedIDs, item.VersionID)
 		responseCandidates = append(responseCandidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd})
 	}
+	if len(selectedIDs) == 0 && onlyAdvisory && s.config.UnpromotedPlans && s.config.Steps != nil {
+		// No promoted procedure is eligible: hand out the best unpromoted one
+		// as an advisory plan when it is safe to try.
+		selected, stepErr := s.selectUnpromoted(ctx, request.TenantID, ranked, docByID, decisionByID)
+		if stepErr != nil {
+			return ServiceResponse{}, &ServiceError{Code: "steps_unavailable", RunID: runID, Err: stepErr}
+		}
+		if selected != "" {
+			selectedIDs = append(selectedIDs, selected)
+		}
+	}
 	if len(selectedIDs) == 0 {
 		// Unpromoted routines are returned as advisory candidates only; say so
 		// rather than blaming the score.
@@ -483,7 +505,49 @@ func (s *Service) attachPlan(ctx context.Context, response ServiceResponse, run 
 		return ServiceResponse{}, &ServiceError{Code: "plan_persistence_failed", RunID: run.ID, Err: ErrPlanUnavailable}
 	}
 	response.Plan = &plan
+	lifecycleByID := make(map[string]string, len(documents))
+	for _, document := range documents {
+		lifecycleByID[document.ProcedureVersionID] = document.Lifecycle
+	}
+	versionIDs := make([]string, 0, len(plan.Nodes))
+	for _, node := range plan.Nodes {
+		versionIDs = append(versionIDs, node.VersionID)
+		if lifecycleByID[node.VersionID] == "candidate" {
+			response.PlanAdvisoryOnly = true
+		}
+	}
+	if s.config.Steps != nil {
+		steps, err := s.config.Steps.ProcedureSteps(ctx, string(run.TenantID), versionIDs)
+		if err != nil {
+			return ServiceResponse{}, &ServiceError{Code: "steps_unavailable", RunID: run.ID, Err: err}
+		}
+		response.PlanSteps = steps
+	}
 	return response, nil
+}
+
+// selectUnpromoted returns the best-ranked advisory candidate that clears the
+// score threshold and is safe to hand out unpromoted, or "".
+func (s *Service) selectUnpromoted(ctx context.Context, tenantID domain.TenantID, ranked []ranking.Result, docByID map[string]Document, decisionByID map[string]eligibility.Decision) (string, error) {
+	ids := make([]string, 0, len(ranked))
+	for _, item := range ranked {
+		if decisionByID[item.VersionID].AdvisoryOnly && item.FinalScore >= s.config.MinimumScore {
+			ids = append(ids, item.VersionID)
+		}
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	steps, err := s.config.Steps.ProcedureSteps(ctx, string(tenantID), ids)
+	if err != nil {
+		return "", err
+	}
+	for _, id := range ids {
+		if unpromotedPlanAllowed(docByID[id], steps[id]) {
+			return id, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *Service) persistOutcome(ctx context.Context, runID string, tenantID domain.TenantID, query Query, requestContextHash, envelope string, snapshot ServingSnapshot, executions []ChannelExecution, hits []PersistedHit, gates []PersistedGate, ranks []PersistedRank, semantic []PersistedSemanticJudgment, disposition RunDisposition, code string, selected []string, started time.Time, collection CandidateCollection) (ServiceResponse, error) {

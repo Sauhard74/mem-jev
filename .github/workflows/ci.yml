@@ -51,6 +51,8 @@ jobs:
         run: ./scripts/smoke.sh
       - name: Prove clean-stack reproducibility
         run: ./scripts/integration.sh && ./scripts/smoke.sh
+      - name: Prove a learned routine becomes a usable plan
+        run: ./scripts/tests/quickstart_live_test.sh
       - name: Build release image
         run: docker build --build-arg VERSION=ci --build-arg REVISION=${{ github.sha }} --build-arg BUILT_AT=ci -t memjev-api:${{ github.sha }} .
       - name: Scan release image

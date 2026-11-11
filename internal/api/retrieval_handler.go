@@ -80,7 +80,7 @@ func retrieveResponse(result retrieval.ServiceResponse) *memjevv1.RetrieveRespon
 	for index, item := range result.Candidates {
 		candidates[index] = &memjevv1.RetrievalCandidate{ProcedureVersionId: item.VersionID, ProcedureId: item.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: lifecycle(item.Lifecycle), ObservedEndToEnd: item.ObservedEndToEnd, AdvisoryOnly: item.AdvisoryOnly}
 	}
-	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.EnhancementDegraded, result.Approximate), Plan: executablePlan(result.Plan)}
+	return &memjevv1.RetrieveResponse{RetrievalRunId: result.RunID, Disposition: disposition(result.Disposition), Candidates: candidates, AbstentionCode: result.DecisionCode, Provenance: provenance(result.Snapshot, result.QueryHash, result.Degraded, result.EnhancementDegraded, result.Approximate), Plan: executablePlan(result.Plan, result.PlanSteps, result.PlanAdvisoryOnly)}
 }
 
 func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalResponse {
@@ -118,13 +118,17 @@ func explainResponse(result retrieval.Explanation) *memjevv1.ExplainRetrievalRes
 	return response
 }
 
-func executablePlan(plan *retrieval.PlanArtifact) *memjevv1.ExecutableProcedurePlan {
+func executablePlan(plan *retrieval.PlanArtifact, steps map[string][]retrieval.PlanStep, advisoryOnly bool) *memjevv1.ExecutableProcedurePlan {
 	if plan == nil {
 		return nil
 	}
 	nodes := make([]*memjevv1.ProcedurePlanNode, len(plan.Nodes))
 	for index, node := range plan.Nodes {
-		nodes[index] = &memjevv1.ProcedurePlanNode{Ordinal: node.Ordinal, ProcedureVersionId: node.VersionID, InterfaceHash: node.InterfaceHash, Bridge: node.Bridge}
+		nodeSteps := make([]*memjevv1.ProcedurePlanStep, len(steps[node.VersionID]))
+		for stepIndex, step := range steps[node.VersionID] {
+			nodeSteps[stepIndex] = &memjevv1.ProcedurePlanStep{Ordinal: step.Ordinal, ToolName: step.ToolName, ToolVersion: step.ToolVersion, ContractVersionId: step.ContractVersionID}
+		}
+		nodes[index] = &memjevv1.ProcedurePlanNode{Ordinal: node.Ordinal, ProcedureVersionId: node.VersionID, InterfaceHash: node.InterfaceHash, Bridge: node.Bridge, Steps: nodeSteps}
 	}
 	groups := []*memjevv1.ProcedureParallelGroup{}
 	if plan.ParallelGroups != nil {
@@ -135,7 +139,7 @@ func executablePlan(plan *retrieval.PlanArtifact) *memjevv1.ExecutableProcedureP
 	}
 	return &memjevv1.ExecutableProcedurePlan{
 		InjectionId: plan.InjectionID, TaskExecutionId: plan.TaskExecutionID, Nodes: nodes, Dependencies: planDependencies(plan.Dependencies), ParallelGroups: groups,
-		Gaps: planGaps(plan.Gaps), LimitCodes: append([]string(nil), plan.LimitCodes...), NoveltyClass: noveltyClass(plan.NoveltyClass), Complete: plan.Complete,
+		Gaps: planGaps(plan.Gaps), LimitCodes: append([]string(nil), plan.LimitCodes...), NoveltyClass: noveltyClass(plan.NoveltyClass), Complete: plan.Complete, AdvisoryOnly: advisoryOnly,
 		Provenance: &memjevv1.ProcedurePlanProvenance{
 			ProjectionEpoch: plan.ProjectionEpoch, SelectionHash: plan.SelectionHash, PlanHash: plan.PlanHash,
 			CompatibilityGraphId: plan.CompatibilityGraphID, CompatibilityGraphHash: plan.CompatibilityGraphHash,

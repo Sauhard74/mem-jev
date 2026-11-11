@@ -38,6 +38,7 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
 	"MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE": {}, "MEMJEV_EMBEDDING_PROVIDER_ENDPOINT": {}, "MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE": {},
 	"MEMJEV_RETRIEVAL_AUTO_ACTIVATE": {}, "MEMJEV_RETRIEVAL_DEFAULT_REGIONS": {}, "MEMJEV_PROCEDURE_REGION": {},
+	"MEMJEV_RETRIEVAL_UNPROMOTED_PLANS": {}, "MEMJEV_LIFECYCLE_AUTO_PROMOTE": {}, "MEMJEV_LIFECYCLE_INTERVAL": {},
 	"MEMJEV_JEV_ENABLED": {}, "MEMJEV_JEV_MODEL": {}, "MEMJEV_JEV_API_KEY_FILE": {}, "MEMJEV_JEV_TIMEOUT": {},
 	"MEMJEV_JEV_MAX_REQUEST_BYTES": {}, "MEMJEV_JEV_MAX_RESPONSE_BYTES": {}, "MEMJEV_JEV_REUSE_DURATION": {}, "MEMJEV_JEV_MINIMUM_REMAINING": {},
 	"MEMJEV_JEV_MAX_CONCURRENT": {}, "MEMJEV_JEV_GLOBAL_TOKEN_RATE": {}, "MEMJEV_JEV_GLOBAL_TOKEN_BURST": {},
@@ -81,6 +82,10 @@ type WorkerConfig struct {
 	BatchSize, MaximumAttempts              int
 	StageRetention                          time.Duration
 	ArchiveMaximumBytes                     int64
+	// AutoPromote periodically evaluates every learned procedure's lifecycle
+	// (candidate, trial, active, retired) from verified outcomes.
+	AutoPromote       bool
+	LifecycleInterval time.Duration
 	// ResidencyRegion is stamped on every learned procedure. Recall admits a
 	// procedure only when the caller's credential region and the eligibility
 	// policy both allow this region.
@@ -102,6 +107,9 @@ type RetrievalConfig struct {
 	AutoActivateServing bool
 	// DefaultResidencyRegions are the regions the default eligibility policy admits.
 	DefaultResidencyRegions []string
+	// UnpromotedPlans returns an eligible candidate procedure as an advisory
+	// plan when no promoted procedure matches.
+	UnpromotedPlans bool
 }
 
 type JevConfig struct {
@@ -248,6 +256,29 @@ func load() (Config, error) {
 		}
 	} else if config.Environment == "development" {
 		config.Retrieval.DefaultResidencyRegions = []string{"local"}
+	}
+	// Unpromoted plans and automatic promotion are on by default in
+	// development only, like the default serving configuration.
+	for _, item := range []struct {
+		name   string
+		target *bool
+	}{{"MEMJEV_RETRIEVAL_UNPROMOTED_PLANS", &config.Retrieval.UnpromotedPlans}, {"MEMJEV_LIFECYCLE_AUTO_PROMOTE", &config.Worker.AutoPromote}} {
+		*item.target = config.Environment == "development"
+		if raw := os.Getenv(item.name); raw != "" {
+			parsed, parseErr := strconv.ParseBool(raw)
+			if parseErr != nil {
+				return Config{}, fieldError(item.name)
+			}
+			*item.target = parsed
+		}
+	}
+	config.Worker.LifecycleInterval = 30 * time.Second
+	if raw := os.Getenv("MEMJEV_LIFECYCLE_INTERVAL"); raw != "" {
+		parsed, parseErr := time.ParseDuration(raw)
+		if parseErr != nil || parsed < time.Second {
+			return Config{}, fieldError("MEMJEV_LIFECYCLE_INTERVAL")
+		}
+		config.Worker.LifecycleInterval = parsed
 	}
 	// Learned procedures default to the region local credentials and the
 	// default policy use in development, and to the archive region elsewhere.

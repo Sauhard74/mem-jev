@@ -70,11 +70,21 @@ enum PlanNoveltyClass {
   PLAN_NOVELTY_CLASS_UNSEEN = 5;
 }
 
+// One tool call of a procedure, in execution order. Argument values are not
+// included; the harness supplies them for the current task.
+message ProcedurePlanStep {
+  uint32 ordinal = 1;
+  string tool_name = 2;
+  string tool_version = 3;
+  string contract_version_id = 4;
+}
+
 message ProcedurePlanNode {
   uint32 ordinal = 1;
   string procedure_version_id = 2;
   string interface_hash = 3;
   bool bridge = 4;
+  repeated ProcedurePlanStep steps = 5;
 }
 
 message ProcedurePlanDependency {
@@ -123,6 +133,10 @@ message ExecutableProcedurePlan {
   bool complete = 8;
   ProcedurePlanProvenance provenance = 9;
   string task_execution_id = 10;
+  // True when the plan is built from a procedure that has not been promoted
+  // yet (lifecycle candidate). Treat it as a suggestion to try, report the
+  // outcome with injection_id and task_execution_id, and keep your own checks.
+  bool advisory_only = 11;
 }
 
 message RetrieveResponse {

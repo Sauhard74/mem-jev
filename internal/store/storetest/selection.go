@@ -17,6 +17,12 @@ type TestingT interface {
 
 func SelectionDraft(t TestingT, tenant domain.TenantID, queryByte byte) selection.Draft {
 	t.Helper()
+	return SelectionDraftWithGoal(t, tenant, queryByte, "goal.done")
+}
+
+// SelectionDraftWithGoal is SelectionDraft with the plan's goal predicate.
+func SelectionDraftWithGoal(t TestingT, tenant domain.TenantID, queryByte byte, goal string) selection.Draft {
+	t.Helper()
 	procedureInterface, err := retrieval.NewProcedureInterface(nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +36,7 @@ func SelectionDraft(t TestingT, tenant domain.TenantID, queryByte byte) selectio
 	if err != nil {
 		t.Fatal(err)
 	}
-	plannerCandidate := composition.PlannerCandidate{VersionID: "pv_selection", Interface: procedureInterface, Lifecycle: "active", Seed: true, Eligible: true, PolicyManifestID: "policy_selection", GoalPredicateIDs: []string{"goal.done"}, EvidenceStrength: 100, ObservedEndToEnd: true, RiskCost: 1, ToolCost: 1}
+	plannerCandidate := composition.PlannerCandidate{VersionID: "pv_selection", Interface: procedureInterface, Lifecycle: "active", Seed: true, Eligible: true, PolicyManifestID: "policy_selection", GoalPredicateIDs: []string{goal}, EvidenceStrength: 100, ObservedEndToEnd: true, RiskCost: 1, ToolCost: 1}
 	plannerCandidate.PlanningFactsHash, err = composition.BuildPlanningFactsHash(composition.PlanningFacts{ProcedureVersionID: plannerCandidate.VersionID, InterfaceHash: procedureInterface.ContentHash, Lifecycle: plannerCandidate.Lifecycle, PolicyManifestID: plannerCandidate.PolicyManifestID, GoalPredicateIDs: plannerCandidate.GoalPredicateIDs, EvidenceStrength: plannerCandidate.EvidenceStrength, ObservedEndToEnd: plannerCandidate.ObservedEndToEnd, RiskCost: plannerCandidate.RiskCost, ToolCost: plannerCandidate.ToolCost})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +49,7 @@ func SelectionDraft(t TestingT, tenant domain.TenantID, queryByte byte) selectio
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := composition.BuildPlan(manifest, composition.PlanRequest{TenantID: tenant, ProjectionEpoch: 1, PolicyManifestID: "policy_selection", Graph: graph, GoalPredicateIDs: []string{"goal.done"}, Candidates: []composition.PlannerCandidate{plannerCandidate}})
+	plan, err := composition.BuildPlan(manifest, composition.PlanRequest{TenantID: tenant, ProjectionEpoch: 1, PolicyManifestID: "policy_selection", Graph: graph, GoalPredicateIDs: []string{goal}, Candidates: []composition.PlannerCandidate{plannerCandidate}})
 	if err != nil {
 		t.Fatal(err)
 	}

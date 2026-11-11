@@ -54,9 +54,9 @@ That command creates local credentials, starts the stack, waits for readiness, a
 2. Record the agent's tool trace.
 3. Submit independently verified outcome evidence.
 
-A new corpus has no reusable procedures yet, so the first retrieval abstains. The run is still recorded, and because the quickstart's demo tool has a registered contract and the outcome is verified, memJev learns it in the background. Run `make quickstart` again a few seconds later and the retrieval returns the learned routine as an advisory plan.
+A new corpus has no reusable procedures yet, so the first retrieval abstains. The run is still recorded, and because the quickstart's demo tool has a registered contract and the outcome is verified, memJev learns it in the background. Run `make quickstart` again a few seconds later: the retrieval is `SELECTED` with a plan (steps, `injectionId`, `taskExecutionId`) marked `advisoryOnly: true`, because the routine has not been promoted yet. Each verified run of that plan counts toward promotion; after three, the routine is promoted to `trial` and served as a normal plan.
 
-Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration. Newly learned routines come back as advisory candidates until the lifecycle promotes them, as long as every tool they use has a registered contract (see below). Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
+Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration, and the worker promotes and demotes learned routines from verified outcomes. A routine is learned only when every tool it uses has a registered contract (see below). Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
 
 ### Register your tools
 
@@ -91,6 +91,7 @@ Either way, everything a person records and recalls stays in their own scope, an
 make setup            # Start the local stack
 make quickstart       # Run the retrieve → trace → outcome example
 make onboarding-test  # Verify the setup and API lifecycle
+make learning-test    # Prove a learned routine becomes a plan, then gets promoted (starts its own stack)
 make test             # Run the Go test suite with the race detector
 make verify           # Run all repository quality checks
 make dev-down         # Stop the stack and keep its data

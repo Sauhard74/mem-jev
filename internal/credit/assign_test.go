@@ -81,3 +81,46 @@ func TestAssignRejectsForgedExpiredAndCrossTenantLinkage(t *testing.T) {
 		})
 	}
 }
+
+// The planner's own task goal ("goal_<hash>") is never shown to harnesses, so
+// it is judged from all goal evidence on the outcome linked to the plan.
+func TestAssignJudgesPlannerTaskGoalFromOutcomeGoalEvidence(t *testing.T) {
+	created := time.Date(2026, 9, 20, 4, 0, 0, 0, time.UTC)
+	draft := storetest.SelectionDraftWithGoal(t, "tenant_a", 'a', "goal_"+strings.Repeat("e", 64))
+	selected, err := selection.NewRecord(draft, strings.Repeat("d", 64), created, created.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := credit.NewRuleManifest("credit.v1", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	satisfied, failed := memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_SATISFIED, memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_FAILED
+	tests := []struct {
+		name     string
+		state    domain.OutcomeState
+		verdicts []memjevv1.EvidenceVerdict
+		want     credit.Class
+	}{
+		{name: "verified success with all goals satisfied", state: domain.OutcomeStateVerifiedSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied, satisfied}, want: credit.CausalSuccess},
+		{name: "provisional success never counts", state: domain.OutcomeStateProvisionalSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied}, want: credit.AssociatedSuccess},
+		{name: "verified failure", state: domain.OutcomeStateVerifiedFailure, verdicts: []memjevv1.EvidenceVerdict{satisfied, failed}, want: credit.CausalFailure},
+		{name: "verified success with a failed goal", state: domain.OutcomeStateVerifiedSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied, failed}, want: credit.AssociatedSuccess},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			facts := make([]*memjevv1.OutcomeEvidence, len(test.verdicts))
+			for index, verdict := range test.verdicts {
+				facts[index] = &memjevv1.OutcomeEvidence{ClientEvidenceId: "ev_" + string(rune('a'+index)), Class: memjevv1.EvidenceClass_EVIDENCE_CLASS_GOAL_PREDICATE, Verdict: verdict, PredicateId: "harness-goal-" + string(rune('a'+index)), VerifierId: "verifier", ObservedAt: timestamppb.New(created.Add(time.Minute))}
+			}
+			outcome, err := evidence.Canonicalize("tenant_a", &memjevv1.RecordOutcomeRequest{TraceId: "tr_" + strings.Repeat("a", 64), Evidence: facts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, err := credit.Assign(credit.AssignmentRequest{Manifest: manifest, Selection: selected, Outcome: outcome, Evaluation: evidence.Result{State: test.state}, InjectionID: selected.InjectionID, TaskExecutionID: selection.TaskExecutionID(selected.InjectionID), Now: created.Add(10 * time.Minute)})
+			if err != nil || record.Class != test.want {
+				t.Fatalf("class = %s, want %s (err %v)", record.Class, test.want, err)
+			}
+		})
+	}
+}

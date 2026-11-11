@@ -1,0 +1,92 @@
+package surreal
+
+import (
+	"context"
+	"sort"
+
+	"github.com/sauhard74/mem-jev/internal/domain"
+	"github.com/sauhard74/mem-jev/internal/retrieval"
+	surrealdb "github.com/surrealdb/surrealdb.go"
+)
+
+// StepRepository reads the ordered steps of stored procedures for plans.
+type StepRepository struct {
+	db *surrealdb.DB
+}
+
+func NewStepRepository(db *surrealdb.DB) *StepRepository {
+	return &StepRepository{db: db}
+}
+
+// ProcedureSteps returns each version's steps in order, with the side effect
+// and risk declared by the step's tool contract. A version with no stored
+// steps is absent from the result.
+func (r *StepRepository) ProcedureSteps(ctx context.Context, tenantID string, versionIDs []string) (map[string][]retrieval.PlanStep, error) {
+	if r == nil || r.db == nil || tenantID == "" {
+		return nil, retrieval.ErrStepsUnavailable
+	}
+	result := make(map[string][]retrieval.PlanStep, len(versionIDs))
+	if len(versionIDs) == 0 {
+		return result, nil
+	}
+	type stepRow struct {
+		VersionID  string         `json:"procedure_version_id"`
+		Ordinal    uint32         `json:"ordinal"`
+		ContractID *string        `json:"tool_contract_version_id"`
+		Payload    map[string]any `json:"payload"`
+	}
+	rows, err := surrealdb.Query[[]stepRow](ctx, r.db, `SELECT procedure_version_id, ordinal, tool_contract_version_id, payload FROM step
+		WHERE tenant_id = $tenant_id AND procedure_version_id IN $version_ids`, map[string]any{"tenant_id": tenantID, "version_ids": versionIDs})
+	if err != nil {
+		return nil, databaseFailure("read procedure steps", err)
+	}
+	contractIDs := make([]string, 0)
+	seen := make(map[string]bool)
+	if rows != nil && len(*rows) > 0 {
+		for _, row := range (*rows)[0].Result {
+			step := retrieval.PlanStep{Ordinal: row.Ordinal}
+			if row.ContractID != nil {
+				step.ContractVersionID = *row.ContractID
+				if !seen[step.ContractVersionID] {
+					seen[step.ContractVersionID] = true
+					contractIDs = append(contractIDs, step.ContractVersionID)
+				}
+			}
+			step.ToolName, _ = row.Payload["tool_name"].(string)
+			step.ToolVersion, _ = row.Payload["tool_version"].(string)
+			result[row.VersionID] = append(result[row.VersionID], step)
+		}
+	}
+	if len(contractIDs) > 0 {
+		type contractRow struct {
+			ContractID string `json:"contract_version_id"`
+			SideEffect string `json:"side_effect"`
+			Risk       string `json:"risk"`
+		}
+		contracts, err := surrealdb.Query[[]contractRow](ctx, r.db, `SELECT contract_version_id, manifest.side_effect AS side_effect, manifest.risk AS risk FROM tool_contract_version
+			WHERE tenant_id IN $tenant_ids AND contract_version_id IN $contract_ids`, map[string]any{"tenant_ids": contractTenants(domain.TenantID(tenantID)), "contract_ids": contractIDs})
+		if err != nil {
+			return nil, databaseFailure("read step contracts", err)
+		}
+		byID := make(map[string]contractRow)
+		if contracts != nil && len(*contracts) > 0 {
+			for _, row := range (*contracts)[0].Result {
+				byID[row.ContractID] = row
+			}
+		}
+		for versionID, steps := range result {
+			for index := range steps {
+				contract := byID[steps[index].ContractVersionID]
+				steps[index].SideEffect, steps[index].Risk = contract.SideEffect, contract.Risk
+			}
+			result[versionID] = steps
+		}
+	}
+	for versionID, steps := range result {
+		sort.Slice(steps, func(i, j int) bool { return steps[i].Ordinal < steps[j].Ordinal })
+		result[versionID] = steps
+	}
+	return result, nil
+}
+
+var _ retrieval.StepReader = (*StepRepository)(nil)

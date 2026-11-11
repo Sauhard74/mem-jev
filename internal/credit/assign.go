@@ -1,6 +1,7 @@
 package credit
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/domain"
@@ -72,15 +73,31 @@ func temporalEvidence(request AssignmentRequest) bool {
 	return true
 }
 
+// taskGoalPattern matches the goal the planner creates for the retrieval's
+// own task ("goal_" + a hash of the procedure version and query). Harnesses
+// never see this ID, so it is judged from all goal evidence on the outcome.
+var taskGoalPattern = regexp.MustCompile(`^goal_[0-9a-f]{64}$`)
+
 func goalEvidence(record selection.Record, outcome domain.CanonicalOutcome) (bool, bool) {
 	verdicts := make(map[string]domain.EvidenceVerdict, len(outcome.Evidence))
+	goalFacts, goalsSatisfied, goalFailed := 0, true, false
 	for _, fact := range outcome.Evidence {
 		if fact.Class == domain.EvidenceClassGoalPredicate || fact.Class == domain.EvidenceClassIndependentVerifier {
 			verdicts[fact.PredicateID] = fact.Verdict
+			goalFacts++
+			goalsSatisfied = goalsSatisfied && fact.Verdict == domain.EvidenceVerdictSatisfied
+			goalFailed = goalFailed || fact.Verdict == domain.EvidenceVerdictFailed
 		}
 	}
 	allSatisfied, anyFailed := len(record.Plan.RequestedGoalPredicateIDs) > 0, false
 	for _, goal := range record.Plan.RequestedGoalPredicateIDs {
+		if taskGoalPattern.MatchString(goal) {
+			// The task goal is met when the outcome reports goal evidence
+			// and all of it is satisfied; any failed goal fails it.
+			allSatisfied = allSatisfied && goalFacts > 0 && goalsSatisfied
+			anyFailed = anyFailed || goalFailed
+			continue
+		}
 		allSatisfied = allSatisfied && verdicts[goal] == domain.EvidenceVerdictSatisfied
 		anyFailed = anyFailed || verdicts[goal] == domain.EvidenceVerdictFailed
 	}

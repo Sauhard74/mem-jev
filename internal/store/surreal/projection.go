@@ -169,6 +169,15 @@ func (r *ProjectionRepository) publishOnce(ctx context.Context, value projection
 	if err != nil {
 		return projection.PublishReceipt{}, err
 	}
+	if !versionNew {
+		// Learning the same procedure again adds evidence; it must not reset
+		// a lifecycle decision (for example trial back to candidate).
+		if current, _, currentErr := currentLifecycleDocument(ctx, tx, value.TenantID, value.Version.ID); currentErr == nil && current.Lifecycle != document.Lifecycle {
+			if document, err = retrieval.ReviseLifecycle(document, current.Lifecycle, uint64(verifiedCount), uint64(unsafeCount), value.CreatedAt, current.ValidationPolicyVersion); err != nil {
+				return projection.PublishReceipt{}, err
+			}
+		}
+	}
 	epoch, err := publishRetrievalDocument(ctx, tx, value, document)
 	if err != nil {
 		return projection.PublishReceipt{}, err
@@ -280,10 +289,10 @@ func publishRetrievalDocument(ctx context.Context, tx *surrealdb.Transaction, va
 		"procedure_version_id": document.ProcedureVersionID, "procedure_id": document.ProcedureID, "projection_epoch": epoch,
 		"task_text": document.TaskText, "intent_hash": document.IntentHash, "effect_signature_hash": document.EffectSignatureHash,
 		"tool_names": toolNames, "tool_contract_version_ids": toolVersions, "resource_types": resourceTypes,
-		"resource_namespaces": resourceNamespaces, "resource_identity_hashes": resourceHashes, "effects": document.Effects,
+		"resource_namespaces": resourceNamespaces, "resource_identity_hashes": resourceHashes, "effects": nonNilStrings(document.Effects),
 		"resource_schema_versions": resourceSchemas,
 		"environment_scope_hash":   document.EnvironmentScopeHash, "harness_name": document.Harness.Name,
-		"environment_facts": string(environmentJSON), "prefix_hashes": document.PrefixHashes,
+		"environment_facts": string(environmentJSON), "prefix_hashes": nonNilStrings(document.PrefixHashes),
 		"lifecycle_state": document.Lifecycle, "observed_end_to_end": document.ObservedEndToEnd,
 		"verification_strength": document.VerificationStrength, "verified_success_count": document.VerifiedSuccessCount,
 		"unsafe_outcome_count": document.UnsafeOutcomeCount, "validated_at": value.CreatedAt,

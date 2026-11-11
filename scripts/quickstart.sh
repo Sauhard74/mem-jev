@@ -130,4 +130,4 @@ outcome=$(curl --fail-with-body --silent --show-error \
 python3 -m json.tool <<< "$outcome"
 
 printf '\nLifecycle complete. memJev retrieved, captured, and evaluated one agent run.\n'
-printf '%s\n' 'memJev learns the routine in the background. Run make quickstart again in a few seconds to see it recalled.'
+printf '%s\n' 'memJev learns the routine in the background. Run make quickstart again in a few seconds: it returns the routine as a plan marked advisoryOnly until verified runs promote it.'

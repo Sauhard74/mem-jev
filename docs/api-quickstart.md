@@ -31,7 +31,7 @@ curl --fail-with-body --silent --show-error \
   "$MEMJEV_URL/memjev.v1.RetrievalService/Retrieve"
 ```
 
-`RETRIEVAL_DISPOSITION_SELECTED` includes an advisory `plan`. Preserve its `injectionId` and `taskExecutionId`. `RETRIEVAL_DISPOSITION_ABSTAINED` means the agent should proceed without recalled guidance. In local development the first retrieval activates the default serving configuration automatically. Elsewhere, a clean tenant reports unavailable retrieval configuration until an operator activates one or sets `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=true`.
+`RETRIEVAL_DISPOSITION_SELECTED` includes an advisory `plan` whose nodes list the procedure's `steps`. Preserve its `injectionId` and `taskExecutionId`. `plan.advisoryOnly: true` means the routine is not promoted yet; see [unpromoted plans](agent-integration.md#unpromoted-plans-and-promotion). `RETRIEVAL_DISPOSITION_ABSTAINED` means the agent should proceed without recalled guidance. In local development the first retrieval activates the default serving configuration automatically. Elsewhere, a clean tenant reports unavailable retrieval configuration until an operator activates one or sets `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=true`.
 
 ## Ingest the resulting trace
 

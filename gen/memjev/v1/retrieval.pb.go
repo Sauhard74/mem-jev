@@ -612,19 +612,90 @@ func (x *RetrievalProvenance) GetDegradedEnhancements() []string {
 	return nil
 }
 
+// One tool call of a procedure, in execution order. Argument values are not
+// included; the harness supplies them for the current task.
+type ProcedurePlanStep struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Ordinal           uint32                 `protobuf:"varint,1,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	ToolName          string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	ToolVersion       string                 `protobuf:"bytes,3,opt,name=tool_version,json=toolVersion,proto3" json:"tool_version,omitempty"`
+	ContractVersionId string                 `protobuf:"bytes,4,opt,name=contract_version_id,json=contractVersionId,proto3" json:"contract_version_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ProcedurePlanStep) Reset() {
+	*x = ProcedurePlanStep{}
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProcedurePlanStep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProcedurePlanStep) ProtoMessage() {}
+
+func (x *ProcedurePlanStep) ProtoReflect() protoreflect.Message {
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProcedurePlanStep.ProtoReflect.Descriptor instead.
+func (*ProcedurePlanStep) Descriptor() ([]byte, []int) {
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ProcedurePlanStep) GetOrdinal() uint32 {
+	if x != nil {
+		return x.Ordinal
+	}
+	return 0
+}
+
+func (x *ProcedurePlanStep) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ProcedurePlanStep) GetToolVersion() string {
+	if x != nil {
+		return x.ToolVersion
+	}
+	return ""
+}
+
+func (x *ProcedurePlanStep) GetContractVersionId() string {
+	if x != nil {
+		return x.ContractVersionId
+	}
+	return ""
+}
+
 type ProcedurePlanNode struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Ordinal            uint32                 `protobuf:"varint,1,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
 	ProcedureVersionId string                 `protobuf:"bytes,2,opt,name=procedure_version_id,json=procedureVersionId,proto3" json:"procedure_version_id,omitempty"`
 	InterfaceHash      string                 `protobuf:"bytes,3,opt,name=interface_hash,json=interfaceHash,proto3" json:"interface_hash,omitempty"`
 	Bridge             bool                   `protobuf:"varint,4,opt,name=bridge,proto3" json:"bridge,omitempty"`
+	Steps              []*ProcedurePlanStep   `protobuf:"bytes,5,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ProcedurePlanNode) Reset() {
 	*x = ProcedurePlanNode{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[7]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +707,7 @@ func (x *ProcedurePlanNode) String() string {
 func (*ProcedurePlanNode) ProtoMessage() {}
 
 func (x *ProcedurePlanNode) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[7]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +720,7 @@ func (x *ProcedurePlanNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcedurePlanNode.ProtoReflect.Descriptor instead.
 func (*ProcedurePlanNode) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{7}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProcedurePlanNode) GetOrdinal() uint32 {
@@ -680,6 +751,13 @@ func (x *ProcedurePlanNode) GetBridge() bool {
 	return false
 }
 
+func (x *ProcedurePlanNode) GetSteps() []*ProcedurePlanStep {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
 type ProcedurePlanDependency struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	CompatibilityEdgeId      string                 `protobuf:"bytes,1,opt,name=compatibility_edge_id,json=compatibilityEdgeId,proto3" json:"compatibility_edge_id,omitempty"`
@@ -693,7 +771,7 @@ type ProcedurePlanDependency struct {
 
 func (x *ProcedurePlanDependency) Reset() {
 	*x = ProcedurePlanDependency{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[8]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -705,7 +783,7 @@ func (x *ProcedurePlanDependency) String() string {
 func (*ProcedurePlanDependency) ProtoMessage() {}
 
 func (x *ProcedurePlanDependency) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[8]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -718,7 +796,7 @@ func (x *ProcedurePlanDependency) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcedurePlanDependency.ProtoReflect.Descriptor instead.
 func (*ProcedurePlanDependency) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{8}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProcedurePlanDependency) GetCompatibilityEdgeId() string {
@@ -766,7 +844,7 @@ type ProcedureParallelGroup struct {
 
 func (x *ProcedureParallelGroup) Reset() {
 	*x = ProcedureParallelGroup{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[9]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +856,7 @@ func (x *ProcedureParallelGroup) String() string {
 func (*ProcedureParallelGroup) ProtoMessage() {}
 
 func (x *ProcedureParallelGroup) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[9]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +869,7 @@ func (x *ProcedureParallelGroup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcedureParallelGroup.ProtoReflect.Descriptor instead.
 func (*ProcedureParallelGroup) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{9}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProcedureParallelGroup) GetOrdinal() uint32 {
@@ -820,7 +898,7 @@ type ProcedurePlanGap struct {
 
 func (x *ProcedurePlanGap) Reset() {
 	*x = ProcedurePlanGap{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[10]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +910,7 @@ func (x *ProcedurePlanGap) String() string {
 func (*ProcedurePlanGap) ProtoMessage() {}
 
 func (x *ProcedurePlanGap) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[10]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +923,7 @@ func (x *ProcedurePlanGap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcedurePlanGap.ProtoReflect.Descriptor instead.
 func (*ProcedurePlanGap) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{10}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProcedurePlanGap) GetProcedureVersionId() string {
@@ -896,7 +974,7 @@ type ProcedurePlanProvenance struct {
 
 func (x *ProcedurePlanProvenance) Reset() {
 	*x = ProcedurePlanProvenance{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[11]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +986,7 @@ func (x *ProcedurePlanProvenance) String() string {
 func (*ProcedurePlanProvenance) ProtoMessage() {}
 
 func (x *ProcedurePlanProvenance) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[11]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +999,7 @@ func (x *ProcedurePlanProvenance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcedurePlanProvenance.ProtoReflect.Descriptor instead.
 func (*ProcedurePlanProvenance) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{11}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProcedurePlanProvenance) GetProjectionEpoch() uint64 {
@@ -1020,13 +1098,17 @@ type ExecutableProcedurePlan struct {
 	Complete        bool                       `protobuf:"varint,8,opt,name=complete,proto3" json:"complete,omitempty"`
 	Provenance      *ProcedurePlanProvenance   `protobuf:"bytes,9,opt,name=provenance,proto3" json:"provenance,omitempty"`
 	TaskExecutionId string                     `protobuf:"bytes,10,opt,name=task_execution_id,json=taskExecutionId,proto3" json:"task_execution_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// True when the plan is built from a procedure that has not been promoted
+	// yet (lifecycle candidate). Treat it as a suggestion to try, report the
+	// outcome with injection_id and task_execution_id, and keep your own checks.
+	AdvisoryOnly  bool `protobuf:"varint,11,opt,name=advisory_only,json=advisoryOnly,proto3" json:"advisory_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecutableProcedurePlan) Reset() {
 	*x = ExecutableProcedurePlan{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[12]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1120,7 @@ func (x *ExecutableProcedurePlan) String() string {
 func (*ExecutableProcedurePlan) ProtoMessage() {}
 
 func (x *ExecutableProcedurePlan) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[12]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1133,7 @@ func (x *ExecutableProcedurePlan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutableProcedurePlan.ProtoReflect.Descriptor instead.
 func (*ExecutableProcedurePlan) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{12}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ExecutableProcedurePlan) GetInjectionId() string {
@@ -1124,6 +1206,13 @@ func (x *ExecutableProcedurePlan) GetTaskExecutionId() string {
 	return ""
 }
 
+func (x *ExecutableProcedurePlan) GetAdvisoryOnly() bool {
+	if x != nil {
+		return x.AdvisoryOnly
+	}
+	return false
+}
+
 type RetrieveResponse struct {
 	state          protoimpl.MessageState   `protogen:"open.v1"`
 	RetrievalRunId string                   `protobuf:"bytes,1,opt,name=retrieval_run_id,json=retrievalRunId,proto3" json:"retrieval_run_id,omitempty"`
@@ -1138,7 +1227,7 @@ type RetrieveResponse struct {
 
 func (x *RetrieveResponse) Reset() {
 	*x = RetrieveResponse{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[13]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1150,7 +1239,7 @@ func (x *RetrieveResponse) String() string {
 func (*RetrieveResponse) ProtoMessage() {}
 
 func (x *RetrieveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[13]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1163,7 +1252,7 @@ func (x *RetrieveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetrieveResponse.ProtoReflect.Descriptor instead.
 func (*RetrieveResponse) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{13}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RetrieveResponse) GetRetrievalRunId() string {
@@ -1217,7 +1306,7 @@ type ExplainRetrievalRequest struct {
 
 func (x *ExplainRetrievalRequest) Reset() {
 	*x = ExplainRetrievalRequest{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[14]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1318,7 @@ func (x *ExplainRetrievalRequest) String() string {
 func (*ExplainRetrievalRequest) ProtoMessage() {}
 
 func (x *ExplainRetrievalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[14]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1331,7 @@ func (x *ExplainRetrievalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainRetrievalRequest.ProtoReflect.Descriptor instead.
 func (*ExplainRetrievalRequest) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{14}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ExplainRetrievalRequest) GetRetrievalRunId() string {
@@ -1265,7 +1354,7 @@ type ExplanationFact struct {
 
 func (x *ExplanationFact) Reset() {
 	*x = ExplanationFact{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[15]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1277,7 +1366,7 @@ func (x *ExplanationFact) String() string {
 func (*ExplanationFact) ProtoMessage() {}
 
 func (x *ExplanationFact) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[15]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1290,7 +1379,7 @@ func (x *ExplanationFact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplanationFact.ProtoReflect.Descriptor instead.
 func (*ExplanationFact) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{15}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ExplanationFact) GetCode() string {
@@ -1350,7 +1439,7 @@ type CandidateExplanation struct {
 
 func (x *CandidateExplanation) Reset() {
 	*x = CandidateExplanation{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[16]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1451,7 @@ func (x *CandidateExplanation) String() string {
 func (*CandidateExplanation) ProtoMessage() {}
 
 func (x *CandidateExplanation) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[16]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1464,7 @@ func (x *CandidateExplanation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CandidateExplanation.ProtoReflect.Descriptor instead.
 func (*CandidateExplanation) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{16}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CandidateExplanation) GetProcedureVersionId() string {
@@ -1486,7 +1575,7 @@ type RankedFeature struct {
 
 func (x *RankedFeature) Reset() {
 	*x = RankedFeature{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1498,7 +1587,7 @@ func (x *RankedFeature) String() string {
 func (*RankedFeature) ProtoMessage() {}
 
 func (x *RankedFeature) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[17]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1511,7 +1600,7 @@ func (x *RankedFeature) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RankedFeature.ProtoReflect.Descriptor instead.
 func (*RankedFeature) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{17}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RankedFeature) GetName() string {
@@ -1543,7 +1632,7 @@ type ExplainRetrievalResponse struct {
 
 func (x *ExplainRetrievalResponse) Reset() {
 	*x = ExplainRetrievalResponse{}
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1555,7 +1644,7 @@ func (x *ExplainRetrievalResponse) String() string {
 func (*ExplainRetrievalResponse) ProtoMessage() {}
 
 func (x *ExplainRetrievalResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_memjev_v1_retrieval_proto_msgTypes[18]
+	mi := &file_memjev_v1_retrieval_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1568,7 +1657,7 @@ func (x *ExplainRetrievalResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExplainRetrievalResponse.ProtoReflect.Descriptor instead.
 func (*ExplainRetrievalResponse) Descriptor() ([]byte, []int) {
-	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{18}
+	return file_memjev_v1_retrieval_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ExplainRetrievalResponse) GetRetrievalRunId() string {
@@ -1678,12 +1767,18 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\x12index_manifest_ids\x18\x05 \x03(\tR\x10indexManifestIds\x12+\n" +
 	"\x11degraded_channels\x18\x06 \x03(\tR\x10degradedChannels\x125\n" +
 	"\x16approximate_candidates\x18\a \x01(\bR\x15approximateCandidates\x123\n" +
-	"\x15degraded_enhancements\x18\b \x03(\tR\x14degradedEnhancements\"\x9e\x01\n" +
+	"\x15degraded_enhancements\x18\b \x03(\tR\x14degradedEnhancements\"\x9d\x01\n" +
+	"\x11ProcedurePlanStep\x12\x18\n" +
+	"\aordinal\x18\x01 \x01(\rR\aordinal\x12\x1b\n" +
+	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12!\n" +
+	"\ftool_version\x18\x03 \x01(\tR\vtoolVersion\x12.\n" +
+	"\x13contract_version_id\x18\x04 \x01(\tR\x11contractVersionId\"\xd2\x01\n" +
 	"\x11ProcedurePlanNode\x12\x18\n" +
 	"\aordinal\x18\x01 \x01(\rR\aordinal\x120\n" +
 	"\x14procedure_version_id\x18\x02 \x01(\tR\x12procedureVersionId\x12%\n" +
 	"\x0einterface_hash\x18\x03 \x01(\tR\rinterfaceHash\x12\x16\n" +
-	"\x06bridge\x18\x04 \x01(\bR\x06bridge\"\xb9\x02\n" +
+	"\x06bridge\x18\x04 \x01(\bR\x06bridge\x122\n" +
+	"\x05steps\x18\x05 \x03(\v2\x1c.memjev.v1.ProcedurePlanStepR\x05steps\"\xb9\x02\n" +
 	"\x17ProcedurePlanDependency\x122\n" +
 	"\x15compatibility_edge_id\x18\x01 \x01(\tR\x13compatibilityEdgeId\x12=\n" +
 	"\x1bsource_procedure_version_id\x18\x02 \x01(\tR\x18sourceProcedureVersionId\x12=\n" +
@@ -1711,7 +1806,7 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"\x12ranker_manifest_id\x18\n" +
 	" \x01(\tR\x10rankerManifestId\x12*\n" +
 	"\x11serving_config_id\x18\v \x01(\tR\x0fservingConfigId\x12*\n" +
-	"\x11document_set_hash\x18\f \x01(\tR\x0fdocumentSetHash\"\xa4\x04\n" +
+	"\x11document_set_hash\x18\f \x01(\tR\x0fdocumentSetHash\"\xc9\x04\n" +
 	"\x17ExecutableProcedurePlan\x12!\n" +
 	"\finjection_id\x18\x01 \x01(\tR\vinjectionId\x122\n" +
 	"\x05nodes\x18\x02 \x03(\v2\x1c.memjev.v1.ProcedurePlanNodeR\x05nodes\x12F\n" +
@@ -1726,7 +1821,8 @@ const file_memjev_v1_retrieval_proto_rawDesc = "" +
 	"provenance\x18\t \x01(\v2\".memjev.v1.ProcedurePlanProvenanceR\n" +
 	"provenance\x12*\n" +
 	"\x11task_execution_id\x18\n" +
-	" \x01(\tR\x0ftaskExecutionId\"\xdf\x02\n" +
+	" \x01(\tR\x0ftaskExecutionId\x12#\n" +
+	"\radvisory_only\x18\v \x01(\bR\fadvisoryOnly\"\xdf\x02\n" +
 	"\x10RetrieveResponse\x12(\n" +
 	"\x10retrieval_run_id\x18\x01 \x01(\tR\x0eretrievalRunId\x12A\n" +
 	"\vdisposition\x18\x02 \x01(\x0e2\x1f.memjev.v1.RetrievalDispositionR\vdisposition\x12=\n" +
@@ -1806,7 +1902,7 @@ func file_memjev_v1_retrieval_proto_rawDescGZIP() []byte {
 }
 
 var file_memjev_v1_retrieval_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_memjev_v1_retrieval_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_memjev_v1_retrieval_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_memjev_v1_retrieval_proto_goTypes = []any{
 	(PlanNoveltyClass)(0),            // 0: memjev.v1.PlanNoveltyClass
 	(*AvailableTool)(nil),            // 1: memjev.v1.AvailableTool
@@ -1816,22 +1912,23 @@ var file_memjev_v1_retrieval_proto_goTypes = []any{
 	(*RetrieveRequest)(nil),          // 5: memjev.v1.RetrieveRequest
 	(*RetrievalCandidate)(nil),       // 6: memjev.v1.RetrievalCandidate
 	(*RetrievalProvenance)(nil),      // 7: memjev.v1.RetrievalProvenance
-	(*ProcedurePlanNode)(nil),        // 8: memjev.v1.ProcedurePlanNode
-	(*ProcedurePlanDependency)(nil),  // 9: memjev.v1.ProcedurePlanDependency
-	(*ProcedureParallelGroup)(nil),   // 10: memjev.v1.ProcedureParallelGroup
-	(*ProcedurePlanGap)(nil),         // 11: memjev.v1.ProcedurePlanGap
-	(*ProcedurePlanProvenance)(nil),  // 12: memjev.v1.ProcedurePlanProvenance
-	(*ExecutableProcedurePlan)(nil),  // 13: memjev.v1.ExecutableProcedurePlan
-	(*RetrieveResponse)(nil),         // 14: memjev.v1.RetrieveResponse
-	(*ExplainRetrievalRequest)(nil),  // 15: memjev.v1.ExplainRetrievalRequest
-	(*ExplanationFact)(nil),          // 16: memjev.v1.ExplanationFact
-	(*CandidateExplanation)(nil),     // 17: memjev.v1.CandidateExplanation
-	(*RankedFeature)(nil),            // 18: memjev.v1.RankedFeature
-	(*ExplainRetrievalResponse)(nil), // 19: memjev.v1.ExplainRetrievalResponse
-	(RiskClass)(0),                   // 20: memjev.v1.RiskClass
-	(LatencyClass)(0),                // 21: memjev.v1.LatencyClass
-	(CandidateLifecycle)(0),          // 22: memjev.v1.CandidateLifecycle
-	(RetrievalDisposition)(0),        // 23: memjev.v1.RetrievalDisposition
+	(*ProcedurePlanStep)(nil),        // 8: memjev.v1.ProcedurePlanStep
+	(*ProcedurePlanNode)(nil),        // 9: memjev.v1.ProcedurePlanNode
+	(*ProcedurePlanDependency)(nil),  // 10: memjev.v1.ProcedurePlanDependency
+	(*ProcedureParallelGroup)(nil),   // 11: memjev.v1.ProcedureParallelGroup
+	(*ProcedurePlanGap)(nil),         // 12: memjev.v1.ProcedurePlanGap
+	(*ProcedurePlanProvenance)(nil),  // 13: memjev.v1.ProcedurePlanProvenance
+	(*ExecutableProcedurePlan)(nil),  // 14: memjev.v1.ExecutableProcedurePlan
+	(*RetrieveResponse)(nil),         // 15: memjev.v1.RetrieveResponse
+	(*ExplainRetrievalRequest)(nil),  // 16: memjev.v1.ExplainRetrievalRequest
+	(*ExplanationFact)(nil),          // 17: memjev.v1.ExplanationFact
+	(*CandidateExplanation)(nil),     // 18: memjev.v1.CandidateExplanation
+	(*RankedFeature)(nil),            // 19: memjev.v1.RankedFeature
+	(*ExplainRetrievalResponse)(nil), // 20: memjev.v1.ExplainRetrievalResponse
+	(RiskClass)(0),                   // 21: memjev.v1.RiskClass
+	(LatencyClass)(0),                // 22: memjev.v1.LatencyClass
+	(CandidateLifecycle)(0),          // 23: memjev.v1.CandidateLifecycle
+	(RetrievalDisposition)(0),        // 24: memjev.v1.RetrievalDisposition
 }
 var file_memjev_v1_retrieval_proto_depIdxs = []int32{
 	1,  // 0: memjev.v1.RetrieveRequest.tools:type_name -> memjev.v1.AvailableTool
@@ -1839,35 +1936,36 @@ var file_memjev_v1_retrieval_proto_depIdxs = []int32{
 	3,  // 2: memjev.v1.RetrieveRequest.environment:type_name -> memjev.v1.QueryFact
 	4,  // 3: memjev.v1.RetrieveRequest.resources:type_name -> memjev.v1.AccessibleResource
 	3,  // 4: memjev.v1.RetrieveRequest.constraints:type_name -> memjev.v1.QueryFact
-	20, // 5: memjev.v1.RetrieveRequest.risk_class:type_name -> memjev.v1.RiskClass
-	21, // 6: memjev.v1.RetrieveRequest.latency_class:type_name -> memjev.v1.LatencyClass
-	22, // 7: memjev.v1.RetrievalCandidate.lifecycle:type_name -> memjev.v1.CandidateLifecycle
-	8,  // 8: memjev.v1.ExecutableProcedurePlan.nodes:type_name -> memjev.v1.ProcedurePlanNode
-	9,  // 9: memjev.v1.ExecutableProcedurePlan.dependencies:type_name -> memjev.v1.ProcedurePlanDependency
-	10, // 10: memjev.v1.ExecutableProcedurePlan.parallel_groups:type_name -> memjev.v1.ProcedureParallelGroup
-	11, // 11: memjev.v1.ExecutableProcedurePlan.gaps:type_name -> memjev.v1.ProcedurePlanGap
-	0,  // 12: memjev.v1.ExecutableProcedurePlan.novelty_class:type_name -> memjev.v1.PlanNoveltyClass
-	12, // 13: memjev.v1.ExecutableProcedurePlan.provenance:type_name -> memjev.v1.ProcedurePlanProvenance
-	23, // 14: memjev.v1.RetrieveResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
-	6,  // 15: memjev.v1.RetrieveResponse.candidates:type_name -> memjev.v1.RetrievalCandidate
-	7,  // 16: memjev.v1.RetrieveResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
-	13, // 17: memjev.v1.RetrieveResponse.plan:type_name -> memjev.v1.ExecutableProcedurePlan
-	16, // 18: memjev.v1.CandidateExplanation.facts:type_name -> memjev.v1.ExplanationFact
-	18, // 19: memjev.v1.CandidateExplanation.semantic_features:type_name -> memjev.v1.RankedFeature
-	23, // 20: memjev.v1.ExplainRetrievalResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
-	7,  // 21: memjev.v1.ExplainRetrievalResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
-	17, // 22: memjev.v1.ExplainRetrievalResponse.candidates:type_name -> memjev.v1.CandidateExplanation
-	9,  // 23: memjev.v1.ExplainRetrievalResponse.composition_edges:type_name -> memjev.v1.ProcedurePlanDependency
-	11, // 24: memjev.v1.ExplainRetrievalResponse.plan_gaps:type_name -> memjev.v1.ProcedurePlanGap
-	5,  // 25: memjev.v1.RetrievalService.Retrieve:input_type -> memjev.v1.RetrieveRequest
-	15, // 26: memjev.v1.RetrievalService.ExplainRetrieval:input_type -> memjev.v1.ExplainRetrievalRequest
-	14, // 27: memjev.v1.RetrievalService.Retrieve:output_type -> memjev.v1.RetrieveResponse
-	19, // 28: memjev.v1.RetrievalService.ExplainRetrieval:output_type -> memjev.v1.ExplainRetrievalResponse
-	27, // [27:29] is the sub-list for method output_type
-	25, // [25:27] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	21, // 5: memjev.v1.RetrieveRequest.risk_class:type_name -> memjev.v1.RiskClass
+	22, // 6: memjev.v1.RetrieveRequest.latency_class:type_name -> memjev.v1.LatencyClass
+	23, // 7: memjev.v1.RetrievalCandidate.lifecycle:type_name -> memjev.v1.CandidateLifecycle
+	8,  // 8: memjev.v1.ProcedurePlanNode.steps:type_name -> memjev.v1.ProcedurePlanStep
+	9,  // 9: memjev.v1.ExecutableProcedurePlan.nodes:type_name -> memjev.v1.ProcedurePlanNode
+	10, // 10: memjev.v1.ExecutableProcedurePlan.dependencies:type_name -> memjev.v1.ProcedurePlanDependency
+	11, // 11: memjev.v1.ExecutableProcedurePlan.parallel_groups:type_name -> memjev.v1.ProcedureParallelGroup
+	12, // 12: memjev.v1.ExecutableProcedurePlan.gaps:type_name -> memjev.v1.ProcedurePlanGap
+	0,  // 13: memjev.v1.ExecutableProcedurePlan.novelty_class:type_name -> memjev.v1.PlanNoveltyClass
+	13, // 14: memjev.v1.ExecutableProcedurePlan.provenance:type_name -> memjev.v1.ProcedurePlanProvenance
+	24, // 15: memjev.v1.RetrieveResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
+	6,  // 16: memjev.v1.RetrieveResponse.candidates:type_name -> memjev.v1.RetrievalCandidate
+	7,  // 17: memjev.v1.RetrieveResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
+	14, // 18: memjev.v1.RetrieveResponse.plan:type_name -> memjev.v1.ExecutableProcedurePlan
+	17, // 19: memjev.v1.CandidateExplanation.facts:type_name -> memjev.v1.ExplanationFact
+	19, // 20: memjev.v1.CandidateExplanation.semantic_features:type_name -> memjev.v1.RankedFeature
+	24, // 21: memjev.v1.ExplainRetrievalResponse.disposition:type_name -> memjev.v1.RetrievalDisposition
+	7,  // 22: memjev.v1.ExplainRetrievalResponse.provenance:type_name -> memjev.v1.RetrievalProvenance
+	18, // 23: memjev.v1.ExplainRetrievalResponse.candidates:type_name -> memjev.v1.CandidateExplanation
+	10, // 24: memjev.v1.ExplainRetrievalResponse.composition_edges:type_name -> memjev.v1.ProcedurePlanDependency
+	12, // 25: memjev.v1.ExplainRetrievalResponse.plan_gaps:type_name -> memjev.v1.ProcedurePlanGap
+	5,  // 26: memjev.v1.RetrievalService.Retrieve:input_type -> memjev.v1.RetrieveRequest
+	16, // 27: memjev.v1.RetrievalService.ExplainRetrieval:input_type -> memjev.v1.ExplainRetrievalRequest
+	15, // 28: memjev.v1.RetrievalService.Retrieve:output_type -> memjev.v1.RetrieveResponse
+	20, // 29: memjev.v1.RetrievalService.ExplainRetrieval:output_type -> memjev.v1.ExplainRetrievalResponse
+	28, // [28:30] is the sub-list for method output_type
+	26, // [26:28] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_memjev_v1_retrieval_proto_init() }
@@ -1882,7 +1980,7 @@ func file_memjev_v1_retrieval_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memjev_v1_retrieval_proto_rawDesc), len(file_memjev_v1_retrieval_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

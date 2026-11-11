@@ -31,6 +31,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/embedding"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/jev"
+	"github.com/sauhard74/mem-jev/internal/lifecycle"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/outcome"
 	"github.com/sauhard74/mem-jev/internal/planning"
@@ -253,7 +254,7 @@ func buildRetrievalService(ctx context.Context, db *surrealdb.DB, selectionRepos
 	service, err := retrieval.NewService(runRepository, projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
 		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
 		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections, SemanticJudge: semanticJudge,
-		ServingBootstrap: bootstrap,
+		ServingBootstrap: bootstrap, Steps: storesurreal.NewStepRepository(db), UnpromotedPlans: configuration.UnpromotedPlans,
 	}, planIssuer)
 	if err != nil {
 		closeJev()
@@ -267,7 +268,12 @@ func buildRetrievalService(ctx context.Context, db *surrealdb.DB, selectionRepos
 // once per tenant per process after a success, so steady-state recall pays
 // nothing. Failures are logged and retried on the next recall.
 func buildServingBootstrap(repository *storesurreal.RetrievalRunRepository, channels []retrieval.Channel, regions []string, semantic bool, logger *slog.Logger) (func(context.Context, domain.TenantID), error) {
-	defaults, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: regions, Semantic: semantic})
+	// Procedures promoted by the default lifecycle policy stay eligible.
+	promotion, err := lifecycle.DefaultPolicy()
+	if err != nil {
+		return nil, err
+	}
+	defaults, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: regions, Semantic: semantic, PromotionPolicies: []string{promotion.ID}})
 	if err != nil {
 		return nil, err
 	}

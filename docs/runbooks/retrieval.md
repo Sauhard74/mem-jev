@@ -36,5 +36,13 @@ Default manifests have versions starting with `memjev-default`. The API replaces
 
 Each per-person scope (a credential with `subject_id`, or a `Memjev-Subject` header) is its own tenant scope for storage, so it gets its own serving configuration on first recall.
 
+## Unpromoted plans and automatic promotion
+
+- `MEMJEV_RETRIEVAL_UNPROMOTED_PLANS` (API; default `true` in development, `false` elsewhere): when no promoted procedure is eligible, return the best eligible `candidate` as a plan marked `advisoryOnly`. Only low or medium risk candidates whose steps' tool contracts are neither irreversible nor high or critical risk qualify.
+- `MEMJEV_LIFECYCLE_AUTO_PROMOTE` (worker; default `true` in development, `false` elsewhere) and `MEMJEV_LIFECYCLE_INTERVAL` (default `30s`): evaluate every scope's procedures under the default lifecycle policy and commit a `lifecycle_decision` whenever the state or the verified causal evidence changes. Promotions republish the procedure's retrieval document; learning the same procedure again keeps its state.
+- `memjev-admin evaluate-lifecycle` (stdin `{"tenant_id": "..."}`) runs the same evaluation immediately for a tenant and its people.
+
+The default eligibility policy trusts the default lifecycle policy as a validation policy, so promoted procedures stay eligible. See [agent integration](../agent-integration.md#unpromoted-plans-and-promotion) for the thresholds.
+
 The worker stamps each learned procedure with `MEMJEV_PROCEDURE_REGION` (default `local` in development, otherwise the archive region). Recall admits a procedure only if that region is allowed by both the policy and the caller's credential `region`, so keep the three in agreement. Procedures learned before this setting existed carry the archive region and are not recalled by a `local` policy.
 

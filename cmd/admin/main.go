@@ -18,6 +18,8 @@ import (
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/erasure"
+	"github.com/sauhard74/mem-jev/internal/lifecycle"
+	"github.com/sauhard74/mem-jev/internal/security"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
 	"github.com/sauhard74/mem-jev/internal/toolcontract"
 	"golang.org/x/sys/unix"
@@ -116,7 +118,7 @@ func journalErasureIntent(request erasure.Request) error {
 	return directoryHandle.Sync()
 }
 
-const usage = "usage: memjev-admin erase-tenant|register-tool-contracts|verify-archive-object"
+const usage = "usage: memjev-admin erase-tenant|evaluate-lifecycle|register-tool-contracts|verify-archive-object"
 
 // toolContractRequest is read from stdin by register-tool-contracts.
 type toolContractRequest struct {
@@ -168,6 +170,56 @@ func runRegisterToolContracts() int {
 	return status
 }
 
+// runEvaluateLifecycle evaluates promotion now for one tenant and each of its
+// per-person scopes, under the default lifecycle policy, and prints one JSON
+// line per committed decision. Input: {"tenant_id": "..."} on stdin.
+func runEvaluateLifecycle() int {
+	var request struct {
+		TenantID domain.TenantID `json:"tenant_id"`
+	}
+	decoder := json.NewDecoder(os.Stdin)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.TenantID == "" || security.OrganizationOf(request.TenantID) != request.TenantID {
+		fmt.Fprintln(os.Stderr, `lifecycle request rejected: need {"tenant_id": "..."} for a tenant, not a per-person scope`)
+		return 2
+	}
+	manifest, err := lifecycle.DefaultPolicy()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "default lifecycle policy unavailable")
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	db, err := storesurreal.Open(ctx, storesurreal.Config{
+		Endpoint: os.Getenv("MEMJEV_SURREAL_ENDPOINT"), Namespace: os.Getenv("MEMJEV_SURREAL_NAMESPACE"), Database: os.Getenv("MEMJEV_SURREAL_DATABASE"),
+		Username: os.Getenv("MEMJEV_SURREAL_USER"), Password: os.Getenv("MEMJEV_SURREAL_PASSWORD"), AuthScope: surrealAuthScope(),
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "database unavailable")
+		return 1
+	}
+	defer func() { _ = db.Close(context.Background()) }()
+	if err = storesurreal.NewMigrator(db).Apply(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "database schema unavailable")
+		return 1
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	err = lifecycle.EvaluateAll(ctx, storesurreal.NewLifecycleRepository(db), manifest, time.Now(),
+		func(scope domain.TenantID) bool { return security.OrganizationOf(scope) == request.TenantID },
+		func(decision lifecycle.Decision) {
+			_ = encoder.Encode(map[string]any{
+				"scope": decision.TenantID, "lifecycle_decision_id": decision.ID, "procedure_version_id": decision.ProcedureVersionID,
+				"prior_state": decision.PriorState, "next_state": decision.NextState, "reason_codes": decision.ReasonCodes,
+				"causal_success_count": decision.CausalSuccessCount, "causal_failure_count": decision.CausalFailureCount,
+			})
+		})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lifecycle evaluation failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func run() int {
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, usage)
@@ -176,6 +228,8 @@ func run() int {
 	switch os.Args[1] {
 	case "register-tool-contracts":
 		return runRegisterToolContracts()
+	case "evaluate-lifecycle":
+		return runEvaluateLifecycle()
 	case "erase-tenant":
 		return runEraseTenant()
 	case "verify-archive-object":

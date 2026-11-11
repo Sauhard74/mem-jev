@@ -91,7 +91,9 @@ func (r *LifecycleRepository) commitOnce(ctx context.Context, value lifecycle.Pu
 	if err != nil {
 		return lifecycle.Receipt{}, err
 	}
-	if found && (head.State != value.Decision.PriorState || head.ProjectionEpoch != value.SourceEpoch) {
+	// The source document is already checked to be the latest. A newer epoch
+	// than the head's only means the procedure was learned again meanwhile.
+	if found && (head.State != value.Decision.PriorState || head.ProjectionEpoch > value.SourceEpoch) {
 		return lifecycle.Receipt{}, lifecycle.ErrLifecycleConflict
 	}
 	champion, championFound, err := findChampion(ctx, tx, value.Decision.TenantID, value.Decision.ProcedureID, value.Manifest.ID)
@@ -187,7 +189,9 @@ func ensureLifecycleManifest(ctx context.Context, tx *surrealdb.Transaction, val
 	return createRecord(ctx, tx, lifecycleHeadID("lifecycle_policy_manifest", value.Decision.TenantID, value.Manifest.ID), record)
 }
 
-func currentLifecycleDocument(ctx context.Context, tx *surrealdb.Transaction, tenantID domain.TenantID, versionID string) (retrieval.Document, uint64, error) {
+func currentLifecycleDocument[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, tx S, tenantID domain.TenantID, versionID string) (retrieval.Document, uint64, error) {
 	type row struct {
 		ID        string `json:"retrieval_document_id"`
 		Hash      string `json:"content_hash"`

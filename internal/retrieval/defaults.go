@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/sauhard74/mem-jev/internal/eligibility"
@@ -28,6 +29,11 @@ type DefaultServingInput struct {
 	AllowedResidencyRegions []string
 	// Semantic adds the five Jev ranking features so Jev judgments can affect ranking.
 	Semantic bool
+	// PromotionPolicies are lifecycle policy manifest IDs whose promotion
+	// decisions are trusted. A promoted procedure records the promoting
+	// policy as its validation policy, so without this it would no longer be
+	// eligible after promotion.
+	PromotionPolicies []string
 }
 
 // DefaultServing is a ready-to-activate policy and ranker pair.
@@ -49,13 +55,19 @@ func BuildDefaultServing(input DefaultServingInput) (DefaultServing, error) {
 	if len(regions) == 0 {
 		return DefaultServing{}, errors.New("default serving requires at least one residency region")
 	}
+	validationPolicies := []string{defaultValidationPolicy}
+	for _, id := range input.PromotionPolicies {
+		if id = strings.TrimSpace(id); id != "" && !slices.Contains(validationPolicies, id) {
+			validationPolicies = append(validationPolicies, id)
+		}
+	}
 	policy, err := eligibility.NewPolicy(eligibility.PolicySpec{
 		Version:                      defaultPolicyVersion,
 		AllowedLifecycle:             []eligibility.Lifecycle{eligibility.LifecycleActive, eligibility.LifecycleTrial},
 		AllowAdvisoryCandidates:      true,
 		MaximumRisk:                  eligibility.RiskMedium,
 		MaximumValidationAgeSeconds:  defaultMaximumValidityAge,
-		CompatibleValidationPolicies: []string{defaultValidationPolicy},
+		CompatibleValidationPolicies: validationPolicies,
 		AllowedResidencyRegions:      regions,
 	})
 	if err != nil {

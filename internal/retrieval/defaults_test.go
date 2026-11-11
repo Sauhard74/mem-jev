@@ -101,3 +101,17 @@ func TestDefaultServingRecallsFreshlyLearnedRoutine(t *testing.T) {
 		t.Fatalf("default serving did not recall the learned routine: %#v", response)
 	}
 }
+
+func TestDefaultServingTrustsPromotionPolicies(t *testing.T) {
+	plain, err := BuildDefaultServing(DefaultServingInput{AllowedResidencyRegions: []string{"local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPromotion, err := BuildDefaultServing(DefaultServingInput{AllowedResidencyRegions: []string{"local"}, PromotionPolicies: []string{"lcman_test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(withPromotion.Policy.CanonicalJSON), `"lcman_test"`) || withPromotion.Policy.ID == plain.Policy.ID || !IsDefaultManifestVersion(withPromotion.Policy.Version) {
+		t.Fatalf("promotion policy not admitted: %s", withPromotion.Policy.CanonicalJSON)
+	}
+}

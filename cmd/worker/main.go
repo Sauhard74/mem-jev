@@ -21,6 +21,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sauhard74/mem-jev/internal/archive"
 	"github.com/sauhard74/mem-jev/internal/config"
+	"github.com/sauhard74/mem-jev/internal/erasure"
+	"github.com/sauhard74/mem-jev/internal/lifecycle"
 	"github.com/sauhard74/mem-jev/internal/maintenance"
 	"github.com/sauhard74/mem-jev/internal/observability"
 	"github.com/sauhard74/mem-jev/internal/rebuild"
@@ -183,6 +185,14 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 	go func() { relayErrors <- relay.Run(workerCtx) }()
 	maintenanceErrors := make(chan error, 1)
 	go func() { maintenanceErrors <- maintenanceRunner.Run(workerCtx) }()
+	if configuration.Worker.AutoPromote {
+		manifest, manifestErr := lifecycle.DefaultPolicy()
+		if manifestErr != nil {
+			logger.Error("default lifecycle policy rejected", "error", manifestErr)
+			return 1
+		}
+		go runLifecyclePromotion(workerCtx, logger, storesurreal.NewLifecycleRepository(db), manifest, configuration.Worker.LifecycleInterval)
+	}
 	var ready atomic.Bool
 	ready.Store(true)
 	healthServer := newHealthServer(configuration.Worker.HealthAddress, &ready, db, temporalClient)
@@ -303,4 +313,32 @@ func shutdownAndCode(logger *slog.Logger, shutdown observability.Shutdown, timeo
 		return 1
 	}
 	return code
+}
+
+// runLifecyclePromotion evaluates every scope's procedures on each tick and
+// logs each committed decision. Errors are logged and retried next tick.
+func runLifecyclePromotion(ctx context.Context, logger *slog.Logger, evaluator lifecycle.ScopeEvaluator, manifest lifecycle.PolicyManifest, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := lifecycle.EvaluateAll(ctx, evaluator, manifest, time.Now(), nil, func(decision lifecycle.Decision) {
+			logLifecycleDecision(logger, decision)
+		}); err != nil && ctx.Err() == nil {
+			logger.Warn("lifecycle evaluation failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// logLifecycleDecision writes an audit line for a committed decision. The
+// full decision is stored in lifecycle_decision.
+func logLifecycleDecision(logger *slog.Logger, decision lifecycle.Decision) {
+	tenantHash, _ := erasure.TenantHash(string(decision.TenantID))
+	logger.Info("lifecycle decision", "tenant_hash", tenantHash, "lifecycle_decision_id", decision.ID, "procedure_version_id", decision.ProcedureVersionID,
+		"prior_state", string(decision.PriorState), "next_state", string(decision.NextState), "reason_codes", decision.ReasonCodes,
+		"causal_success_count", decision.CausalSuccessCount, "causal_failure_count", decision.CausalFailureCount, "wilson_lower_bound_ppm", decision.WilsonLowerBoundPPM)
 }
