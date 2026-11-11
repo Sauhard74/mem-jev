@@ -16,8 +16,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sauhard74/mem-jev/internal/archive"
+	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/erasure"
 	storesurreal "github.com/sauhard74/mem-jev/internal/store/surreal"
+	"github.com/sauhard74/mem-jev/internal/toolcontract"
 	"golang.org/x/sys/unix"
 )
 
@@ -114,18 +116,72 @@ func journalErasureIntent(request erasure.Request) error {
 	return directoryHandle.Sync()
 }
 
+const usage = "usage: memjev-admin erase-tenant|register-tool-contracts|verify-archive-object"
+
+// toolContractRequest is read from stdin by register-tool-contracts.
+type toolContractRequest struct {
+	TenantID  domain.TenantID         `json:"tenant_id"`
+	Contracts []toolcontract.Manifest `json:"contracts"`
+}
+
+func runRegisterToolContracts() int {
+	var request toolContractRequest
+	decoder := json.NewDecoder(os.Stdin)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		fmt.Fprintf(os.Stderr, "tool contract request rejected: %v\n", err)
+		return 2
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || request.TenantID == "" || len(request.Contracts) == 0 {
+		fmt.Fprintln(os.Stderr, "tool contract request rejected: need one JSON object with tenant_id and contracts")
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	db, err := storesurreal.Open(ctx, storesurreal.Config{
+		Endpoint: os.Getenv("MEMJEV_SURREAL_ENDPOINT"), Namespace: os.Getenv("MEMJEV_SURREAL_NAMESPACE"), Database: os.Getenv("MEMJEV_SURREAL_DATABASE"),
+		Username: os.Getenv("MEMJEV_SURREAL_USER"), Password: os.Getenv("MEMJEV_SURREAL_PASSWORD"), AuthScope: surrealAuthScope(),
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "database unavailable")
+		return 1
+	}
+	defer func() { _ = db.Close(context.Background()) }()
+	if err = storesurreal.NewMigrator(db).Apply(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "database schema unavailable")
+		return 1
+	}
+	repository := storesurreal.NewToolContractRepository(db)
+	encoder := json.NewEncoder(os.Stdout)
+	status := 0
+	for index, contract := range request.Contracts {
+		registered, registerErr := repository.Register(ctx, request.TenantID, contract)
+		if registerErr != nil {
+			fmt.Fprintf(os.Stderr, "contract %d (%s %s) rejected: %v\n", index, contract.ToolID, contract.Version, registerErr)
+			status = 1
+			continue
+		}
+		if err = encoder.Encode(registered); err != nil {
+			return 1
+		}
+	}
+	return status
+}
+
 func run() int {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant|verify-archive-object")
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
 	switch os.Args[1] {
+	case "register-tool-contracts":
+		return runRegisterToolContracts()
 	case "erase-tenant":
 		return runEraseTenant()
 	case "verify-archive-object":
 		return runVerifyArchiveObject()
 	default:
-		fmt.Fprintln(os.Stderr, "usage: memjev-admin erase-tenant|verify-archive-object")
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
 }

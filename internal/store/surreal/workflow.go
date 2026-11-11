@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -356,13 +357,14 @@ func (r *tenantToolRegistry) load(ctx context.Context) error {
 	}
 	r.loaded = true
 	type row struct {
+		TenantID          string         `json:"tenant_id"`
 		ContractVersionID string         `json:"contract_version_id"`
 		Manifest          map[string]any `json:"manifest"`
 		ContentHash       string         `json:"content_hash"`
 	}
-	results, err := surrealdb.Query[[]row](ctx, r.db, `SELECT contract_version_id, manifest, content_hash FROM tool_contract_version
-		WHERE tenant_id = $tenant_id ORDER BY contract_version_id ASC`, map[string]any{
-		"tenant_id": string(r.tenantID),
+	results, err := surrealdb.Query[[]row](ctx, r.db, `SELECT tenant_id, contract_version_id, manifest, content_hash FROM tool_contract_version
+		WHERE tenant_id IN $tenant_ids ORDER BY contract_version_id ASC`, map[string]any{
+		"tenant_ids": contractTenants(r.tenantID),
 	})
 	if err != nil {
 		r.err = err
@@ -371,7 +373,13 @@ func (r *tenantToolRegistry) load(ctx context.Context) error {
 	memory := toolcontract.NewMemoryRegistry()
 	identities := make([]string, 0)
 	if results != nil && len(*results) > 0 {
-		for _, value := range (*results)[0].Result {
+		// A per-person scope's own contracts load first and win over its
+		// organization's contracts for the same tool version or alias.
+		rows := (*results)[0].Result
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].TenantID == string(r.tenantID) && rows[j].TenantID != string(r.tenantID)
+		})
+		for _, value := range rows {
 			encoded, marshalErr := json.Marshal(value.Manifest)
 			if marshalErr != nil {
 				r.err = fmt.Errorf("encode stored tool contract: %w", marshalErr)
@@ -384,10 +392,16 @@ func (r *tenantToolRegistry) load(ctx context.Context) error {
 			}
 			manifest.ContentHash = value.ContentHash
 			if err := memory.Register(ctx, manifest); err != nil {
+				if value.TenantID != string(r.tenantID) && (errors.Is(err, toolcontract.ErrVersionConflict) || errors.Is(err, toolcontract.ErrAliasConflict)) {
+					continue
+				}
 				r.err = fmt.Errorf("load stored tool contract: %w", err)
 				return r.err
 			}
-			identities = append(identities, manifest.ID+"\x00"+manifest.ContentHash)
+			// A person's copy of an organization contract counts once.
+			if identity := manifest.ID + "\x00" + manifest.ContentHash; !slices.Contains(identities, identity) {
+				identities = append(identities, identity)
+			}
 		}
 	}
 	sort.Strings(identities)

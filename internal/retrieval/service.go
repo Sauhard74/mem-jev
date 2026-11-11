@@ -321,9 +321,13 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 	persistedRanks := persistedRanking(ranked, rankingCandidates)
 	selectedIDs := make([]string, 0, min(int(s.config.MaximumSelections), len(ranked)))
 	responseCandidates := make([]SelectedCandidate, 0, len(ranked))
+	onlyAdvisory := true
 	for _, item := range ranked {
 		document := docByID[item.VersionID]
 		decision := decisionByID[item.VersionID]
+		if !decision.AdvisoryOnly {
+			onlyAdvisory = false
+		}
 		if decision.AdvisoryOnly {
 			responseCandidates = append(responseCandidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd, AdvisoryOnly: true})
 			continue
@@ -335,7 +339,13 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 		responseCandidates = append(responseCandidates, SelectedCandidate{VersionID: item.VersionID, ProcedureID: document.ProcedureID, FinalScore: item.FinalScore, Rank: item.Rank, Lifecycle: document.Lifecycle, ObservedEndToEnd: document.ObservedEndToEnd})
 	}
 	if len(selectedIDs) == 0 {
-		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunAbstained, "below_confidence_threshold", nil, started, collection)
+		// Unpromoted routines are returned as advisory candidates only; say so
+		// rather than blaming the score.
+		code := "below_confidence_threshold"
+		if onlyAdvisory && len(responseCandidates) > 0 {
+			code = "advisory_only"
+		}
+		response, persistErr := s.persistOutcome(ctx, runID, request.TenantID, query, requestContextHash, envelope, snapshot, executions, hits, gates, persistedRanks, semanticJudgments, RunAbstained, code, nil, started, collection)
 		if persistErr != nil || response.Replayed {
 			return response, persistErr
 		}

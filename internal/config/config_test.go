@@ -200,3 +200,25 @@ func clearKnownEnvironment(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+func TestLoadWorkerProcedureRegionMatchesRecallRegion(t *testing.T) {
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	t.Setenv("MEMJEV_TEMPORAL_ADDRESS", "temporal.example.test:7233")
+	t.Setenv("MEMJEV_TEMPORAL_NAMESPACE", "production")
+	t.Setenv("MEMJEV_TEMPORAL_TASK_QUEUE", "synthesis")
+	t.Setenv("MEMJEV_TEMPORAL_TLS_SERVER_NAME", "temporal.example.test")
+	got, err := LoadWorker()
+	if err != nil || got.Worker.ResidencyRegion != "us-east-1" {
+		t.Fatalf("production default region = %q, %v (want the archive region)", got.Worker.ResidencyRegion, err)
+	}
+	t.Setenv("MEMJEV_PROCEDURE_REGION", "eu-west-1")
+	if got, err = LoadWorker(); err != nil || got.Worker.ResidencyRegion != "eu-west-1" {
+		t.Fatalf("explicit region = %q, %v", got.Worker.ResidencyRegion, err)
+	}
+	t.Setenv("MEMJEV_PROCEDURE_REGION", "")
+	t.Setenv("MEMJEV_ENVIRONMENT", "development")
+	if got, err = LoadWorker(); err != nil || got.Worker.ResidencyRegion != "local" {
+		t.Fatalf("development default region = %q, %v (want local, matching local credentials)", got.Worker.ResidencyRegion, err)
+	}
+}

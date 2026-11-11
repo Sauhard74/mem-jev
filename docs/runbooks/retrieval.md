@@ -34,5 +34,7 @@ A tenant needs an active serving configuration (eligibility policy, ranker, and 
 
 Default manifests have versions starting with `memjev-default`. The API replaces an active configuration only when both its policy and ranker are such defaults, for example to switch to the Jev ranker after Jev is enabled. A configuration an operator published is never replaced.
 
-Each per-person scope (a credential with `subject_id`) is its own tenant scope for storage, so it gets its own serving configuration on first recall.
+Each per-person scope (a credential with `subject_id`, or a `Memjev-Subject` header) is its own tenant scope for storage, so it gets its own serving configuration on first recall.
+
+The worker stamps each learned procedure with `MEMJEV_PROCEDURE_REGION` (default `local` in development, otherwise the archive region). Recall admits a procedure only if that region is allowed by both the policy and the caller's credential `region`, so keep the three in agreement. Procedures learned before this setting existed carry the archive region and are not recalled by a `local` policy.
 

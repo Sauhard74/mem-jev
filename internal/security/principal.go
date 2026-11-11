@@ -20,7 +20,9 @@ type Principal struct {
 	// OrganizationID is the tenant_id from the credential file.
 	OrganizationID domain.TenantID
 	// SubjectID is the person the credential belongs to, if any.
-	SubjectID              string
+	SubjectID string
+	// MayAssertSubject allows the Memjev-Subject request header.
+	MayAssertSubject       bool
 	Region                 string
 	Scopes                 map[string]struct{}
 	Consent                policy.ConsentMode

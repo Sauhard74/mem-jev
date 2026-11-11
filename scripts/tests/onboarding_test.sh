@@ -66,9 +66,28 @@ import json, sys
 entries = [c for c in json.load(open(sys.argv[1]))["credentials"] if c["credential_sha256"] == sys.argv[2]]
 assert len(entries) == 1 and entries[0]["subject_id"] == "alice" and entries[0]["tenant_id"] == "tenant_local"
 PY
-if MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" 'bad_name' --no-restart >/dev/null 2>&1; then
+if MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" ' padded' --no-restart >/dev/null 2>&1; then
   printf '%s\n' 'add-person accepted an invalid name' >&2
   exit 1
 fi
+
+# Long or underscored person IDs are accepted and stored under a hashed scope.
+long_person="milkyway_$(printf 'p%.0s' $(seq 1 100))"
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" "$long_person" --no-restart > "$tmp_dir/long.out"
+expected_scope=$(python3 -c 'import hashlib,sys; print("tenant_local__h_" + hashlib.sha256(b"memjev-subject.v1\x00" + sys.argv[1].encode()).hexdigest()[:40])' "$long_person")
+grep -q "stored as $expected_scope" "$tmp_dir/long.out" || { printf '%s\n' 'add-person printed the wrong scope for a long person ID' >&2; exit 1; }
+
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" --service --no-restart > "$tmp_dir/service.out"
+service_hash=$(tail -n 1 "$tmp_dir/service.out" | tr -d '\n' | shasum -a 256 | awk '{print $1}')
+python3 - "$runtime_dir/credentials.json" "$service_hash" <<'PY' || { printf '%s\n' 'add-person --service did not add a trusted service credential' >&2; exit 1; }
+import json, sys
+entries = [c for c in json.load(open(sys.argv[1]))["credentials"] if c["credential_sha256"] == sys.argv[2]]
+assert len(entries) == 1 and entries[0].get("may_assert_subject") is True and "subject_id" not in entries[0]
+PY
+
+MEMJEV_ENV_FILE="$env_file" MEMJEV_RUNTIME_DIR="$runtime_dir" \
+  "$repo_dir/scripts/setup.sh" --prepare-only --project memjev-test >/dev/null
+grep -q '^COMPOSE_PROJECT_NAME=memjev-test$' "$env_file" || { printf '%s\n' 'setup did not save the Compose project' >&2; exit 1; }
+grep -q "^COMPOSE_FILE=$repo_dir/compose.yaml:$repo_dir/compose.jev.yaml$" "$env_file" || { printf '%s\n' 'setup did not save the Compose files' >&2; exit 1; }
 
 printf '%s\n' 'onboarding setup test: PASS'

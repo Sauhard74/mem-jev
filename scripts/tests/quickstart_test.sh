@@ -27,6 +27,7 @@ env_file="$tmp_dir/dev.env"
 {
   printf 'MEMJEV_E2E_API_URL=http://127.0.0.1:%s\n' "$(cat "$port_file")"
   printf 'MEMJEV_E2E_TOKEN=local-test-token\n'
+  printf 'MEMJEV_QUICKSTART_CONTRACT_ID=tcv_demo\n'
 } > "$env_file"
 
 MEMJEV_ENV_FILE="$env_file" MEMJEV_SKIP_SETUP=1 \
@@ -48,6 +49,8 @@ assert [request["path"] for request in requests] == expected_paths
 assert all(request["authorization"] == "Bearer local-test-token" for request in requests)
 assert all(request["idempotency_key"] for request in requests)
 assert requests[0]["body"]["task"] == "write a hello file"
+assert requests[0]["body"]["tools"] == [{"name": "quickstart_print", "contractVersionId": "tcv_demo"}]
+assert requests[1]["body"]["events"][0]["toolName"] == "quickstart_print"
 assert requests[1]["body"]["task"] == "write a hello file"
 assert requests[2]["body"]["traceId"] == "trace_demo"
 assert requests[2]["body"]["injectionId"] == "injection_demo"

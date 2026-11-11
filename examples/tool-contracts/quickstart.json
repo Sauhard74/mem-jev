@@ -1,0 +1,17 @@
+{
+  "contracts": [
+    {
+      "schema_version": "tool-contract.v1",
+      "tool_id": "quickstart_print",
+      "version": "1.0.0",
+      "inputs": [{"name": "command", "type": "string", "required": true, "sanitizer": "redact_secrets"}],
+      "side_effect": "none",
+      "risk": "low",
+      "idempotency": {"mode": "guaranteed"},
+      "retry": {"mode": "declared_transient_only", "maximum_attempts": 2},
+      "success_predicates": [{"id": "quickstart-goal", "field": "command", "operator": "exists"}],
+      "verification_methods": [{"id": "quickstart-user", "evidence_class": "goal_predicate"}],
+      "compatibility": [{"minimum_inclusive": "1.0.0", "maximum_exclusive": "2.0.0"}]
+    }
+  ]
+}

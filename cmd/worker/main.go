@@ -124,7 +124,7 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 			MaximumBytes: configuration.Worker.ArchiveMaximumBytes, AcceptedSchemas: []string{"canonical.v1"},
 		})),
 		storesurreal.NewTenantRegistryProvider(db), storesurreal.NewStageArtifactRepository(db), storesurreal.NewProjectionRepository(db),
-		memworkflow.ProcessorConfig{ArtifactRetention: configuration.Worker.StageRetention, Versions: synthesisVersions(), ResidencyRegion: configuration.Archive.Region, LearnedWithRecallConsent: true},
+		memworkflow.ProcessorConfig{ArtifactRetention: configuration.Worker.StageRetention, Versions: synthesisVersions(), ResidencyRegion: configuration.Worker.ResidencyRegion, LearnedWithRecallConsent: true},
 	)
 	if err != nil {
 		logger.Error("pipeline startup failed", "error", err)

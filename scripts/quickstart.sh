@@ -24,19 +24,23 @@ set +a
 : "${MEMJEV_E2E_API_URL:?environment file is missing MEMJEV_E2E_API_URL}"
 : "${MEMJEV_E2E_TOKEN:?environment file is missing MEMJEV_E2E_TOKEN}"
 
-run_id=$(openssl rand -hex 12)
+# Keep IDs short: memJev rejects long random-looking identifiers as possible secrets.
+run_id=$(openssl rand -hex 6)
 occurred_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 headers=(
   -H 'Content-Type: application/json'
   -H "Authorization: Bearer $MEMJEV_E2E_TOKEN"
 )
 
-retrieve_payload=$(python3 - "$task" <<'PY'
+# setup.sh registers the demo tool's contract and saves its ID.
+contract_id=${MEMJEV_QUICKSTART_CONTRACT_ID:-unregistered}
+
+retrieve_payload=$(python3 - "$task" "$contract_id" <<'PY'
 import json
 import sys
 print(json.dumps({
     "task": sys.argv[1],
-    "tools": [{"name": "shell", "contractVersionId": "shell.v1"}],
+    "tools": [{"name": "quickstart_print", "contractVersionId": sys.argv[2]}],
     "harness": {"name": "quickstart", "version": "1"},
     "riskClass": "RISK_CLASS_LOW",
     "latencyClass": "LATENCY_CLASS_INTERACTIVE",
@@ -78,8 +82,8 @@ print(json.dumps({
         "clientEventId": "event-1",
         "occurredAt": occurred_at,
         "kind": "EVENT_KIND_EXECUTE",
-        "toolName": "shell",
-        "toolVersion": "1",
+        "toolName": "quickstart_print",
+        "toolVersion": "1.0.0",
         "fields": [{"name": "command", "stringValue": "printf hello"}],
         "result": {"state": "TOOL_RESULT_STATE_SUCCESS", "exitCode": 0},
     }],
@@ -126,4 +130,4 @@ outcome=$(curl --fail-with-body --silent --show-error \
 python3 -m json.tool <<< "$outcome"
 
 printf '\nLifecycle complete. memJev retrieved, captured, and evaluated one agent run.\n'
-printf '%s\n' 'A new local corpus may abstain until a registered tool contract and verified procedure are available.'
+printf '%s\n' 'memJev learns the routine in the background. Run make quickstart again in a few seconds to see it recalled.'

@@ -22,7 +22,7 @@ curl --fail-with-body --silent --show-error \
   -H "Idempotency-Key: retrieve-$(openssl rand -hex 12)" \
   --data '{
     "task": "write a hello file",
-    "tools": [{"name": "shell", "contractVersionId": "shell.v1"}],
+    "tools": [{"name": "quickstart_print", "contractVersionId": "'"$MEMJEV_QUICKSTART_CONTRACT_ID"'"}],
     "harness": {"name": "my-agent", "version": "1"},
     "riskClass": "RISK_CLASS_LOW",
     "latencyClass": "LATENCY_CLASS_INTERACTIVE",
@@ -49,8 +49,8 @@ curl --fail-with-body --silent --show-error \
       "clientEventId": "tool-call-01",
       "occurredAt": "2026-09-21T00:00:00Z",
       "kind": "EVENT_KIND_EXECUTE",
-      "toolName": "shell",
-      "toolVersion": "1",
+      "toolName": "quickstart_print",
+      "toolVersion": "1.0.0",
       "fields": [{"name": "command", "stringValue": "printf hello"}],
       "result": {"state": "TOOL_RESULT_STATE_SUCCESS", "exitCode": 0}
     }]
@@ -78,8 +78,8 @@ curl --fail-with-body --silent --show-error \
       "clientEvidenceId": "verification-01",
       "class": "EVIDENCE_CLASS_GOAL_PREDICATE",
       "verdict": "EVIDENCE_VERDICT_SATISFIED",
-      "predicateId": "hello-file-exists",
-      "verifierId": "filesystem-verifier",
+      "predicateId": "quickstart-goal",
+      "verifierId": "quickstart-user",
       "verifierVersion": "1",
       "observedAt": "2026-09-21T00:00:01Z"
     }]
@@ -87,7 +87,9 @@ curl --fail-with-body --silent --show-error \
   "$MEMJEV_URL/memjev.v1.OutcomeService/RecordOutcome"
 ```
 
-An accepted submission is not automatically a promoted memory. The evidence worker validates the archive, tool contracts, policy, and outcome before synthesizing or explicitly abstaining.
+An accepted submission is not automatically a promoted memory. The evidence worker validates the archive, tool contracts, policy, and outcome before synthesizing or explicitly abstaining. These examples use the quickstart's demo tool, `quickstart_print`, whose contract `make setup` registers, so a few seconds later the same retrieval returns the learned routine. For your own tools, register contracts first (see [tool contracts](agent-integration.md#tool-contracts-and-first-run-behavior)).
+
+To act for one person with a service token (`scripts/add-person.sh --service`), add `-H 'Memjev-Subject: alice'` to every request.
 
 ## Explain a retrieval
 

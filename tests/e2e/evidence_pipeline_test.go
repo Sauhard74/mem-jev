@@ -38,10 +38,11 @@ import (
 func TestEvidencePipelineProductionCases(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	// Use a unique, low-entropy decimal suffix. Persisted identities are
-	// deliberately rejected when they look like credentials, so hexadecimal
-	// randomness is the wrong shape for an otherwise harmless test identity.
-	runID := fmt.Sprintf("%d", time.Now().UnixNano())
+	// Persisted identities are rejected when they look like credentials: a
+	// long run of letters mixed with digits and high entropy. A decimal
+	// timestamp still trips that check for some values, so spell the
+	// timestamp with letters only; tokens without digits are never flagged.
+	runID := strings.Map(func(r rune) rune { return 'a' + r - '0' }, fmt.Sprintf("%d", time.Now().UnixNano()))
 	db := openSurreal(t, ctx)
 	defer func() { _ = db.Close(context.Background()) }()
 	seedWriterContract(t, ctx, db)

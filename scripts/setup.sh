@@ -7,14 +7,17 @@ runtime_dir=${MEMJEV_RUNTIME_DIR:-$repo_dir/.runtime}
 prepare_only=false
 jev_key_file=${MEMJEV_JEV_API_KEY_HOST_FILE:-}
 jev_model=${MEMJEV_JEV_MODEL:-}
+project=${COMPOSE_PROJECT_NAME:-}
 default_jev_model=jev-1.13.0
 
 usage() {
-  printf '%s\n' 'Usage: scripts/setup.sh [--prepare-only] [--jev-key-file PATH] [--jev-model jev-X.Y.Z]'
+  printf '%s\n' 'Usage: scripts/setup.sh [--prepare-only] [--jev-key-file PATH] [--jev-model jev-X.Y.Z] [--project NAME]'
   printf '%s\n' '  --prepare-only       Generate local credentials without starting Docker Compose.'
   printf '%s\n' '  --jev-key-file PATH  Enable Jev ranking with the TypeSafe API key stored in PATH.'
   printf '%s\n' "  --jev-model MODEL    Pinned Jev model (default $default_jev_model)."
-  printf '%s\n' 'MEMJEV_JEV_API_KEY_HOST_FILE and MEMJEV_JEV_MODEL work the same way as the flags.'
+  printf '%s\n' '  --project NAME       Docker Compose project name (default memjev). Saved in the'
+  printf '%s\n' '                       env file so the other scripts use the same project.'
+  printf '%s\n' 'MEMJEV_JEV_API_KEY_HOST_FILE, MEMJEV_JEV_MODEL and COMPOSE_PROJECT_NAME work the same way as the flags.'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -22,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --prepare-only) prepare_only=true ;;
     --jev-key-file) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; jev_key_file=$2; shift ;;
     --jev-model) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; jev_model=$2; shift ;;
+    --project) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; project=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -94,11 +98,19 @@ set_env() {
   mv "$temporary" "$env_file"
 }
 
+# Compose reads COMPOSE_PROJECT_NAME and COMPOSE_FILE from the env file, so
+# every script given --env-file targets this stack from any directory.
+if [[ -n "$project" ]]; then
+  [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { printf 'invalid Compose project name: %s\n' "$project" >&2; exit 1; }
+  set_env COMPOSE_PROJECT_NAME "$project"
+fi
+
 # A Jev key given now, or saved by an earlier run, turns Jev on.
 if [[ -z "$jev_key_file" ]]; then
   jev_key_file=$(sed -n 's/^MEMJEV_JEV_API_KEY_HOST_FILE=//p' "$env_file")
 fi
 compose_files=(-f "$repo_dir/compose.yaml")
+set_env COMPOSE_FILE "$repo_dir/compose.yaml"
 if [[ -n "$jev_key_file" ]]; then
   [[ -f "$jev_key_file" ]] || { printf 'Jev key file does not exist: %s\n' "$jev_key_file" >&2; exit 1; }
   jev_key_file=$(cd "$(dirname "$jev_key_file")" && pwd)/$(basename "$jev_key_file")
@@ -139,6 +151,11 @@ fi
 command -v docker >/dev/null 2>&1 || { printf '%s\n' 'Docker with Compose v2 is required' >&2; exit 1; }
 docker compose version >/dev/null
 docker compose --env-file "$env_file" "${compose_files[@]}" up --detach --build --wait
+
+# The quickstart's demo tool needs a contract before its runs can be learned.
+contract_id=$(MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/register-tool-contracts.sh" "$repo_dir/examples/tool-contracts/quickstart.json" |
+  python3 -c 'import json,sys; print(json.loads(sys.stdin.readline())["contract_version_id"])')
+set_env MEMJEV_QUICKSTART_CONTRACT_ID "$contract_id"
 
 # shellcheck disable=SC1090
 source "$env_file"

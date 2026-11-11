@@ -37,7 +37,7 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT": {}, "MEMJEV_RETRIEVAL_RETENTION": {}, "MEMJEV_RETRIEVAL_MINIMUM_SCORE": {}, "MEMJEV_RETRIEVAL_MAX_SELECTIONS": {},
 	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
 	"MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE": {}, "MEMJEV_EMBEDDING_PROVIDER_ENDPOINT": {}, "MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE": {},
-	"MEMJEV_RETRIEVAL_AUTO_ACTIVATE": {}, "MEMJEV_RETRIEVAL_DEFAULT_REGIONS": {},
+	"MEMJEV_RETRIEVAL_AUTO_ACTIVATE": {}, "MEMJEV_RETRIEVAL_DEFAULT_REGIONS": {}, "MEMJEV_PROCEDURE_REGION": {},
 	"MEMJEV_JEV_ENABLED": {}, "MEMJEV_JEV_MODEL": {}, "MEMJEV_JEV_API_KEY_FILE": {}, "MEMJEV_JEV_TIMEOUT": {},
 	"MEMJEV_JEV_MAX_REQUEST_BYTES": {}, "MEMJEV_JEV_MAX_RESPONSE_BYTES": {}, "MEMJEV_JEV_REUSE_DURATION": {}, "MEMJEV_JEV_MINIMUM_REMAINING": {},
 	"MEMJEV_JEV_MAX_CONCURRENT": {}, "MEMJEV_JEV_GLOBAL_TOKEN_RATE": {}, "MEMJEV_JEV_GLOBAL_TOKEN_BURST": {},
@@ -81,6 +81,10 @@ type WorkerConfig struct {
 	BatchSize, MaximumAttempts              int
 	StageRetention                          time.Duration
 	ArchiveMaximumBytes                     int64
+	// ResidencyRegion is stamped on every learned procedure. Recall admits a
+	// procedure only when the caller's credential region and the eligibility
+	// policy both allow this region.
+	ResidencyRegion string
 }
 
 type RetrievalConfig struct {
@@ -244,6 +248,16 @@ func load() (Config, error) {
 		}
 	} else if config.Environment == "development" {
 		config.Retrieval.DefaultResidencyRegions = []string{"local"}
+	}
+	// Learned procedures default to the region local credentials and the
+	// default policy use in development, and to the archive region elsewhere.
+	config.Worker.ResidencyRegion = strings.TrimSpace(os.Getenv("MEMJEV_PROCEDURE_REGION"))
+	if config.Worker.ResidencyRegion == "" {
+		if config.Environment == "development" {
+			config.Worker.ResidencyRegion = "local"
+		} else {
+			config.Worker.ResidencyRegion = config.Archive.Region
+		}
 	}
 	if raw := os.Getenv("MEMJEV_JEV_ENABLED"); raw != "" {
 		parsed, parseErr := strconv.ParseBool(raw)
@@ -476,7 +490,7 @@ func validate(config Config, requireAPICredentials bool) error {
 func validateWorker(config Config) error {
 	if config.AdapterMode != "surreal-s3" || config.Worker.ID == "" || config.Worker.HealthAddress == "" ||
 		config.Worker.BatchSize > 100 || config.Worker.MaximumAttempts > 100 || config.Worker.LeaseDuration < time.Second || config.Worker.StageRetention < time.Hour ||
-		config.Temporal.Address == "" || config.Temporal.Namespace == "" || config.Temporal.TaskQueue == "" ||
+		config.Temporal.Address == "" || config.Temporal.Namespace == "" || config.Temporal.TaskQueue == "" || config.Worker.ResidencyRegion == "" ||
 		(config.Temporal.TLSCertFile == "") != (config.Temporal.TLSKeyFile == "") {
 		return fieldError("worker configuration")
 	}

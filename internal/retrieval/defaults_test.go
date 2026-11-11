@@ -97,7 +97,7 @@ func TestDefaultServingRecallsFreshlyLearnedRoutine(t *testing.T) {
 		t.Fatalf("bootstrap calls = %v", bootstrapped)
 	}
 	// Unpromoted routines come back as advisory guidance rather than a plan.
-	if len(response.Candidates) != 1 || response.Candidates[0].VersionID != document.ProcedureVersionID || !response.Candidates[0].AdvisoryOnly {
+	if len(response.Candidates) != 1 || response.Candidates[0].VersionID != document.ProcedureVersionID || !response.Candidates[0].AdvisoryOnly || response.DecisionCode != "advisory_only" {
 		t.Fatalf("default serving did not recall the learned routine: %#v", response)
 	}
 }

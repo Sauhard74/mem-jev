@@ -71,9 +71,45 @@ A complete, compiling implementation is available in [`examples/go-agent/main.go
 
 ## Tool contracts and first-run behavior
 
-Tool names alone are insufficient for safe replay. A tenant operator must provision immutable tool-contract versions describing inputs, outputs, effects, resources, and verification semantics. Retrieval is enabled only after compatible policy, ranker, index, and serving manifests are active.
+Tool names alone are insufficient for safe replay. A tenant operator registers an immutable tool-contract version for each tool, describing its inputs, outputs, effects, resources, and verification semantics. A trace that uses a tool without a contract is recorded but never learned: the worker abstains with `opaque_tool`.
 
-Consequently, a clean self-hosted database will not immediately return a procedure. It will abstain or report unavailable retrieval configuration until the operator has provisioned those controls and enough verified evidence has produced an eligible procedure. This is fail-closed behavior, not a cache miss disguised as a match.
+### Registering contracts
+
+Put the contracts in a JSON file, `{"contracts": [ ... ]}`. [`examples/tool-contracts/quickstart.json`](../examples/tool-contracts/quickstart.json) is a complete example. The main fields are:
+
+- `tool_id` and `version`: the `toolName` and `toolVersion` your traces report. `compatibility` lists the tool version ranges the contract covers.
+- `inputs`: the fields the tool takes, each with a `sanitizer` (`token`, `text`, `relative_path`, `redact_secrets`, `integer`, or `drop`). Traces may only carry the fields `command`, `path`, `url_host`, `query_shape`, `resource_type`, `resource_id`, and `assertion`, so name inputs after these.
+- `side_effect` (`none`, `read`, `write`, `external`, `irreversible`) and `risk` (`low`, `medium`, `high`, `critical`).
+- `success_predicates` and `verification_methods`: a run is learned when its outcome evidence names one of these predicate IDs (`predicateId`) or verifier IDs (`verifierId`).
+
+Register them with a running local stack:
+
+```sh
+scripts/register-tool-contracts.sh my-tools.json [--tenant tenant_local]
+```
+
+Elsewhere, pipe the same document with a `tenant_id` into the admin binary, which needs the API's database settings:
+
+```sh
+printf '%s' '{"tenant_id":"tenant_a","contracts":[...]}' | memjev-admin register-tool-contracts
+```
+
+Each registered contract prints one JSON line with its `contract_version_id` (`tcv_...`). Send that ID as the tool's `contractVersionId` in retrieval requests; a learned routine is recalled only when the request offers the same contract versions. Registering the same contract again does nothing. Changing a registered tool version is rejected, so publish a new `version` instead. Contracts registered for a tenant also apply to each of its people.
+
+### First-run behavior
+
+Retrieval also needs active policy, ranker, index, and serving manifests. In local development memJev activates a default configuration on the first recall; elsewhere an operator activates one (see the [retrieval runbook](runbooks/retrieval.md)).
+
+Consequently, a clean database will not immediately return a procedure. It abstains until verified evidence for runs of contracted tools has produced an eligible procedure. This is fail-closed behavior, not a cache miss disguised as a match.
+
+## One memory per person
+
+A tenant's tokens share one memory unless they name a person. There are two ways to name one:
+
+- A token issued with `subject_id` (for example `scripts/add-person.sh alice`) always acts for that person.
+- A token issued with `may_assert_subject` (`scripts/add-person.sh --service`) names the person on each request with the `Memjev-Subject` header. Use this when one trusted service acts for many people, such as a chat platform's memory plugin. Requests without the header use the tenant's shared memory. Other tokens that send the header are rejected.
+
+Person IDs are 1 to 256 printable characters. Each person's data is stored in the scope `<tenant>__<person>`; IDs longer than 63 characters or with characters other than letters, digits, and dashes are replaced by `h_` and the first 40 hex digits of SHA-256 over `memjev-subject.v1`, a zero byte, and the ID. `scripts/add-person.sh` prints the scope, which you need to [erase one person](runbooks/tenant-erasure.md).
 
 ## Production checklist
 

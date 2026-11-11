@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sauhard74/mem-jev/internal/canonical"
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/projection"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
+	"github.com/sauhard74/mem-jev/internal/security"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 )
@@ -308,14 +310,11 @@ func createRetrievalRelations(ctx context.Context, tx *surrealdb.Transaction, va
 		ID models.RecordID `json:"id"`
 	}
 	for _, tool := range document.Tools {
-		rows, err := surrealdb.Query[[]idRow](ctx, tx, `SELECT id FROM tool_contract_version WHERE tenant_id = $tenant_id AND contract_version_id = $version LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "version": tool.ContractVersionID})
-		if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
-			if err == nil {
-				err = projection.ErrInvalidProjection
-			}
+		contractID, err := scopeToolContract(ctx, tx, value.TenantID, tool.ContractVersionID, value.CreatedAt)
+		if err != nil {
 			return err
 		}
-		if err := relate(ctx, tx, documentID, "retrieval_uses_tool", (*rows)[0].Result[0].ID, edgeRecord(value, document.ContentHash)); err != nil {
+		if err := relate(ctx, tx, documentID, "retrieval_uses_tool", contractID, edgeRecord(value, document.ContentHash)); err != nil {
 			return err
 		}
 	}
@@ -365,10 +364,26 @@ func createRetrievalRelations(ctx context.Context, tx *surrealdb.Transaction, va
 		}
 	}
 	for index, prefixHash := range document.PrefixHashes {
-		prefixID := models.NewRecordID("procedure_prefix", "pfx_"+prefixHash)
-		if _, found, findErr := findContentHash(ctx, tx, "procedure_prefix", "prefix_hash", value.TenantID, prefixHash); findErr != nil {
-			return findErr
-		} else if !found {
+		// Prefixes are shared within a tenant scope only. Reuse this scope's
+		// record (older ones carry the unscoped ID) or create one whose ID
+		// includes the scope, so two scopes learning the same routine never
+		// collide on the record ID.
+		rows, err := surrealdb.Query[[]idRow](ctx, tx, `SELECT id FROM procedure_prefix WHERE tenant_id = $tenant_id AND prefix_hash = $hash LIMIT 1`, map[string]any{"tenant_id": string(value.TenantID), "hash": prefixHash})
+		if err != nil {
+			return err
+		}
+		var prefixID models.RecordID
+		if rows != nil && len(*rows) > 0 && len((*rows)[0].Result) > 0 {
+			prefixID = (*rows)[0].Result[0].ID
+		} else {
+			_, scopedHash, hashErr := canonical.MarshalAndHash(struct {
+				TenantID   domain.TenantID `json:"tenant_id"`
+				PrefixHash string          `json:"prefix_hash"`
+			}{value.TenantID, prefixHash})
+			if hashErr != nil {
+				return hashErr
+			}
+			prefixID = models.NewRecordID("procedure_prefix", "pfx_"+scopedHash)
 			if err := createRecord(ctx, tx, prefixID, map[string]any{"tenant_id": string(value.TenantID), "prefix_hash": prefixHash, "length": index + 1, "created_at": value.CreatedAt, "schema_version": "procedure-prefix.v1", "content_hash": prefixHash}); err != nil {
 				return err
 			}
@@ -378,6 +393,61 @@ func createRetrievalRelations(ctx context.Context, tx *surrealdb.Transaction, va
 		}
 	}
 	return nil
+}
+
+// scopeToolContract returns the scope's record for a contract version. A
+// per-person scope uses its organization's contracts: on first use the
+// contract is copied into the scope, so relations never cross scopes and
+// erasing the person removes the copy.
+func scopeToolContract(ctx context.Context, tx *surrealdb.Transaction, tenantID domain.TenantID, contractVersionID string, createdAt time.Time) (models.RecordID, error) {
+	type contractRow struct {
+		ID            models.RecordID `json:"id"`
+		ToolID        string          `json:"tool_id"`
+		ToolVersion   string          `json:"tool_version"`
+		Manifest      map[string]any  `json:"manifest"`
+		SchemaVersion string          `json:"schema_version"`
+		ContentHash   string          `json:"content_hash"`
+	}
+	find := func(owner domain.TenantID) (*contractRow, error) {
+		rows, err := surrealdb.Query[[]contractRow](ctx, tx, `SELECT id, tool_id, tool_version, manifest, schema_version, content_hash FROM tool_contract_version WHERE tenant_id = $tenant_id AND contract_version_id = $version LIMIT 1`, map[string]any{"tenant_id": string(owner), "version": contractVersionID})
+		if err != nil || rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
+			return nil, err
+		}
+		return &(*rows)[0].Result[0], nil
+	}
+	own, err := find(tenantID)
+	if err != nil {
+		return models.RecordID{}, err
+	}
+	if own != nil {
+		return own.ID, nil
+	}
+	organization := security.OrganizationOf(tenantID)
+	if organization == tenantID {
+		return models.RecordID{}, projection.ErrInvalidProjection
+	}
+	shared, err := find(organization)
+	if err != nil {
+		return models.RecordID{}, err
+	}
+	if shared == nil {
+		return models.RecordID{}, projection.ErrInvalidProjection
+	}
+	_, recordHash, err := canonical.MarshalAndHash(struct {
+		TenantID          domain.TenantID `json:"tenant_id"`
+		ContractVersionID string          `json:"contract_version_id"`
+	}{tenantID, contractVersionID})
+	if err != nil {
+		return models.RecordID{}, err
+	}
+	id := models.NewRecordID("tool_contract_version", "tcv_"+recordHash)
+	if err = createRecord(ctx, tx, id, map[string]any{
+		"tenant_id": string(tenantID), "contract_version_id": contractVersionID, "tool_id": shared.ToolID, "tool_version": shared.ToolVersion,
+		"manifest": shared.Manifest, "created_at": createdAt, "schema_version": shared.SchemaVersion, "content_hash": shared.ContentHash,
+	}); err != nil {
+		return models.RecordID{}, err
+	}
+	return id, nil
 }
 
 func edgeRecord(value projection.Projection, hash string) map[string]any {

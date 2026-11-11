@@ -54,19 +54,36 @@ That command creates local credentials, starts the stack, waits for readiness, a
 2. Record the agent's tool trace.
 3. Submit independently verified outcome evidence.
 
-A new corpus has no reusable procedures yet, so the first retrieval may abstain. The run is still recorded and can become evidence for future procedures once its tool contracts and outcome are verified.
+A new corpus has no reusable procedures yet, so the first retrieval abstains. The run is still recorded, and because the quickstart's demo tool has a registered contract and the outcome is verified, memJev learns it in the background. Run `make quickstart` again a few seconds later and the retrieval returns the learned routine as an advisory plan.
 
-Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration. Newly learned routines come back as advisory candidates until the lifecycle promotes them. Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
+Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration. Newly learned routines come back as advisory candidates until the lifecycle promotes them, as long as every tool they use has a registered contract (see below). Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
+
+### Register your tools
+
+memJev learns a routine only when every tool in it has a tool contract: a description of its inputs, side effects, risk, and how success is verified. Without one, the tool is opaque and its runs are recorded but never learned. Write the contracts as JSON (see [`examples/tool-contracts/quickstart.json`](examples/tool-contracts/quickstart.json)) and register them:
+
+```sh
+scripts/register-tool-contracts.sh my-tools.json
+```
+
+The script prints each contract's `contract_version_id`. Send it as the tool's `contractVersionId` in retrieval requests. See [tool contracts](docs/agent-integration.md#tool-contracts-and-first-run-behavior).
 
 ### One memory per person
 
-By default every token in a tenant shares one memory. To keep each person's routines separate, issue them their own token:
+By default every token in a tenant shares one memory. To keep each person's routines separate, either issue each person their own token:
 
 ```sh
 scripts/add-person.sh alice
 ```
 
-The token carries a `subject_id`, so everything that person records and recalls stays in their own scope. Other people in the same tenant never see it.
+or issue one token to a trusted service that names the person on every request:
+
+```sh
+scripts/add-person.sh --service
+# then send: Memjev-Subject: <person id>
+```
+
+Either way, everything a person records and recalls stays in their own scope, and other people in the same tenant never see it. Person IDs can be up to 256 characters. Tool contracts registered for the tenant apply to all its people.
 
 ### Useful commands
 

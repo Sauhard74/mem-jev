@@ -27,6 +27,12 @@ func authenticationError(err error) error {
 	if errors.Is(err, security.ErrTenantOverride) {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("tenant header is not accepted"))
 	}
+	if errors.Is(err, security.ErrInvalidSubject) {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("subject header is invalid"))
+	}
+	if errors.Is(err, security.ErrSubjectNotAllowed) {
+		return connect.NewError(connect.CodePermissionDenied, errors.New("credential may not name a subject"))
+	}
 	if errors.Is(err, security.ErrInvalidPrincipal) {
 		return connect.NewError(connect.CodePermissionDenied, errors.New("credential is not authorized"))
 	}
