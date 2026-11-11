@@ -189,7 +189,8 @@ func TestMaintenanceWorkerPublishesAuthenticatedCompatibilityGraph(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	epoch := uint64(time.Now().UnixNano())
+	// Microseconds stay below rebuild.MaximumProjectionEpoch.
+	epoch := uint64(time.Now().UnixMicro())
 	graph, err := composition.BuildCompatibilityGraph(composition.GraphRequest{
 		TenantID: "tenant_e2e", ProjectionEpoch: epoch, PlannerManifestID: "planner.e2e.v1", PolicyManifestID: "policy.e2e.v1", Matrix: matrix,
 	})

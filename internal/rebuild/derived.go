@@ -58,8 +58,14 @@ type ActivationPermit struct {
 	CanonicalJSON     []byte          `json:"-"`
 }
 
+// MaximumProjectionEpoch is the largest epoch that survives canonical JSON
+// exactly (2^53).
+const MaximumProjectionEpoch = 1 << 53
+
 func BuildDerivedSnapshot(input DerivedInput) (DerivedSnapshot, error) {
-	if input.TenantID == "" || input.ProjectionEpoch == 0 {
+	// Canonical JSON stores numbers as IEEE doubles, so a larger epoch would
+	// be rounded and no longer match the projection it names.
+	if input.TenantID == "" || input.ProjectionEpoch == 0 || input.ProjectionEpoch > MaximumProjectionEpoch {
 		return DerivedSnapshot{}, ErrInvalidDerivedSnapshot
 	}
 	compatibility, err := normalizeDigests(input.Compatibility)

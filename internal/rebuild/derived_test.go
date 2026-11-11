@@ -64,3 +64,12 @@ func derivedInput() rebuild.DerivedInput {
 		LifecycleHeads:     []rebuild.RecordDigest{{ID: "head_a", ContentHash: strings.Repeat("f", 64)}},
 	}
 }
+
+func TestBuildDerivedSnapshotRejectsEpochsCanonicalJSONWouldRound(t *testing.T) {
+	if _, err := rebuild.BuildDerivedSnapshot(rebuild.DerivedInput{TenantID: "tenant_a", ProjectionEpoch: rebuild.MaximumProjectionEpoch}); err != nil {
+		t.Fatalf("largest exact epoch rejected: %v", err)
+	}
+	if _, err := rebuild.BuildDerivedSnapshot(rebuild.DerivedInput{TenantID: "tenant_a", ProjectionEpoch: rebuild.MaximumProjectionEpoch + 1}); err == nil {
+		t.Fatal("epoch above 2^53 accepted")
+	}
+}
