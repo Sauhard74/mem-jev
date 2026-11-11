@@ -1,6 +1,8 @@
 package credit_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -86,8 +88,16 @@ func TestAssignRejectsForgedExpiredAndCrossTenantLinkage(t *testing.T) {
 // it is judged from all goal evidence on the outcome linked to the plan.
 func TestAssignJudgesPlannerTaskGoalFromOutcomeGoalEvidence(t *testing.T) {
 	created := time.Date(2026, 9, 20, 4, 0, 0, 0, time.UTC)
-	draft := storetest.SelectionDraftWithGoal(t, "tenant_a", 'a', "goal_"+strings.Repeat("e", 64))
+	// The planner's goal for seed "pv_selection" and the fixture's query hash.
+	sum := sha256.Sum256([]byte("pv_selection\x00" + strings.Repeat("a", 64)))
+	draft := storetest.SelectionDraftWithGoal(t, "tenant_a", 'a', "goal_"+hex.EncodeToString(sum[:]))
 	selected, err := selection.NewRecord(draft, strings.Repeat("d", 64), created, created.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A goal that only looks like a planner goal must still be named exactly.
+	lookalikeDraft := storetest.SelectionDraftWithGoal(t, "tenant_a", 'a', "goal_"+strings.Repeat("e", 64))
+	lookalike, err := selection.NewRecord(lookalikeDraft, strings.Repeat("d", 64), created, created.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +111,9 @@ func TestAssignJudgesPlannerTaskGoalFromOutcomeGoalEvidence(t *testing.T) {
 		state    domain.OutcomeState
 		verdicts []memjevv1.EvidenceVerdict
 		want     credit.Class
+		record   *selection.Record
 	}{
+		{name: "look-alike goal is not a planner goal", state: domain.OutcomeStateVerifiedSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied}, want: credit.AssociatedSuccess, record: &lookalike},
 		{name: "verified success with all goals satisfied", state: domain.OutcomeStateVerifiedSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied, satisfied}, want: credit.CausalSuccess},
 		{name: "provisional success never counts", state: domain.OutcomeStateProvisionalSuccess, verdicts: []memjevv1.EvidenceVerdict{satisfied}, want: credit.AssociatedSuccess},
 		{name: "verified failure", state: domain.OutcomeStateVerifiedFailure, verdicts: []memjevv1.EvidenceVerdict{satisfied, failed}, want: credit.CausalFailure},
@@ -117,7 +129,11 @@ func TestAssignJudgesPlannerTaskGoalFromOutcomeGoalEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, err := credit.Assign(credit.AssignmentRequest{Manifest: manifest, Selection: selected, Outcome: outcome, Evaluation: evidence.Result{State: test.state}, InjectionID: selected.InjectionID, TaskExecutionID: selection.TaskExecutionID(selected.InjectionID), Now: created.Add(10 * time.Minute)})
+			chosen := selected
+			if test.record != nil {
+				chosen = *test.record
+			}
+			record, err := credit.Assign(credit.AssignmentRequest{Manifest: manifest, Selection: chosen, Outcome: outcome, Evaluation: evidence.Result{State: test.state}, InjectionID: chosen.InjectionID, TaskExecutionID: selection.TaskExecutionID(chosen.InjectionID), Now: created.Add(10 * time.Minute)})
 			if err != nil || record.Class != test.want {
 				t.Fatalf("class = %s, want %s (err %v)", record.Class, test.want, err)
 			}

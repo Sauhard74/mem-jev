@@ -1,7 +1,8 @@
 package credit
 
 import (
-	"regexp"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/domain"
@@ -73,10 +74,18 @@ func temporalEvidence(request AssignmentRequest) bool {
 	return true
 }
 
-// taskGoalPattern matches the goal the planner creates for the retrieval's
-// own task ("goal_" + a hash of the procedure version and query). Harnesses
-// never see this ID, so it is judged from all goal evidence on the outcome.
-var taskGoalPattern = regexp.MustCompile(`^goal_[0-9a-f]{64}$`)
+// plannerTaskGoals returns the goal IDs the planner creates for the
+// retrieval's own task: "goal_" + sha256(seed version + NUL + query hash),
+// as in planning.DeterministicIssuer. Harnesses never see these IDs, so they
+// are judged from all goal evidence on the outcome linked to the plan.
+func plannerTaskGoals(record selection.Record) map[string]bool {
+	goals := make(map[string]bool, len(record.Plan.SeedVersionIDs))
+	for _, versionID := range record.Plan.SeedVersionIDs {
+		sum := sha256.Sum256([]byte(versionID + "\x00" + record.QueryHash))
+		goals["goal_"+hex.EncodeToString(sum[:])] = true
+	}
+	return goals
+}
 
 func goalEvidence(record selection.Record, outcome domain.CanonicalOutcome) (bool, bool) {
 	verdicts := make(map[string]domain.EvidenceVerdict, len(outcome.Evidence))
@@ -90,8 +99,9 @@ func goalEvidence(record selection.Record, outcome domain.CanonicalOutcome) (boo
 		}
 	}
 	allSatisfied, anyFailed := len(record.Plan.RequestedGoalPredicateIDs) > 0, false
+	taskGoals := plannerTaskGoals(record)
 	for _, goal := range record.Plan.RequestedGoalPredicateIDs {
-		if taskGoalPattern.MatchString(goal) {
+		if taskGoals[goal] {
 			// The task goal is met when the outcome reports goal evidence
 			// and all of it is satisfied; any failed goal fails it.
 			allSatisfied = allSatisfied && goalFacts > 0 && goalsSatisfied

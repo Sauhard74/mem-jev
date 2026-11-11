@@ -78,6 +78,9 @@ func (r *LifecycleRepository) evaluateVersion(ctx context.Context, tenantID doma
 	if err != nil {
 		return lifecycle.Decision{}, false, err
 	}
+	// Unsafe outcomes recorded on the procedure always count: the policy
+	// quarantines at the first one and never promotes past the ceiling.
+	evidence.UnsafeOutcomeCount = document.UnsafeOutcomeCount
 	head, headFound, err := findVersionHead(ctx, r.db, tenantID, versionID, manifest.ID)
 	if err != nil {
 		return lifecycle.Decision{}, false, databaseFailure("read lifecycle version head", err)

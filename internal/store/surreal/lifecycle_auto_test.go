@@ -172,3 +172,44 @@ func TestRelearningKeepsPromotionAndEvaluationContinues(t *testing.T) {
 		t.Fatalf("evaluation after relearning = %#v, %v", decisions, err)
 	}
 }
+
+// A recorded unsafe outcome must block promotion and is never erased.
+func TestUnsafeOutcomeBlocksAutomaticPromotion(t *testing.T) {
+	ctx := context.Background()
+	db := projectionDatabase(t)
+	seedProjectionOutcomes(t, db)
+	first := storetest.ValidProjectionForTenant(t, "tenant_a", 1, false)
+	if _, err := NewProjectionRepository(db).Publish(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	versionID := first.Version.ID
+	if _, err := surrealdb.Query[any](ctx, db, `UPDATE procedure_version SET unsafe_outcome_count = 1 WHERE tenant_id = "tenant_a" AND procedure_version_id = $id`, map[string]any{"id": versionID}); err != nil {
+		t.Fatal(err)
+	}
+	second := storetest.ValidProjectionForTenant(t, "tenant_a", 2, false)
+	if second.Version.ID != versionID {
+		t.Skip("fixture does not relearn the same version")
+	}
+	if _, err := NewProjectionRepository(db).Publish(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := currentLifecycleDocument(ctx, db, "tenant_a", versionID)
+	if err != nil || document.UnsafeOutcomeCount != 1 {
+		t.Fatalf("unsafe count not recorded on document: %d, %v", document.UnsafeOutcomeCount, err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	for range 3 {
+		seedCausalCredit(t, db, "tenant_a", versionID, "causal_success", now.Add(-time.Minute))
+	}
+	manifest, err := lifecycle.DefaultPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions, err := NewLifecycleRepository(db).EvaluateScope(ctx, "tenant_a", manifest, now)
+	if err != nil || len(decisions) != 1 || decisions[0].NextState != lifecycle.Quarantined {
+		t.Fatalf("unsafe procedure decision = %#v, %v", decisions, err)
+	}
+	if after, _, err := currentLifecycleDocument(ctx, db, "tenant_a", versionID); err != nil || after.Lifecycle != "quarantined" || after.UnsafeOutcomeCount != 1 {
+		t.Fatalf("document after decision = %s unsafe=%d, %v", after.Lifecycle, after.UnsafeOutcomeCount, err)
+	}
+}

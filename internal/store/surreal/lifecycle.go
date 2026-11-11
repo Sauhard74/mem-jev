@@ -105,7 +105,8 @@ func (r *LifecycleRepository) commitOnce(ctx context.Context, value lifecycle.Pu
 	}
 	receipt := lifecycle.Receipt{DecisionID: value.Decision.ID, RetrievalDocumentID: stored.ID, ProjectionEpoch: value.SourceEpoch, Disposition: lifecycle.DispositionPublished}
 	if value.Decision.NextState != value.Decision.PriorState {
-		document, err := retrieval.ReviseLifecycle(stored, string(value.Decision.NextState), value.Decision.CausalSuccessCount, value.Decision.UnsafeOutcomeCount, value.Decision.EvaluatedAt, value.Manifest.ID)
+		// Never lower the stored unsafe count through a lifecycle decision.
+		document, err := retrieval.ReviseLifecycle(stored, string(value.Decision.NextState), value.Decision.CausalSuccessCount, max(stored.UnsafeOutcomeCount, value.Decision.UnsafeOutcomeCount), value.Decision.EvaluatedAt, value.Manifest.ID)
 		if err != nil {
 			return lifecycle.Receipt{}, err
 		}
