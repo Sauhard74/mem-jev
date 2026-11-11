@@ -15,7 +15,8 @@ services:
     restart: unless-stopped
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # MinIO no longer publishes images; this is the pgsty community build, pinned by digest.
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:?}"
@@ -31,8 +32,9 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # quay.io/minio/mc is no longer published; the Bitnami legacy mc image is pinned by digest.
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: bitnamilegacy/minio-client@sha256:8a86e441decf053093c5977d49290298295f850c7843652f93e970ab15871dd1
     depends_on:
       minio: {condition: service_healthy}
     environment:
@@ -80,7 +82,7 @@ services:
     restart: unless-stopped
 
   credential-init:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: bitnamilegacy/minio-client@sha256:8a86e441decf053093c5977d49290298295f850c7843652f93e970ab15871dd1
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command: ["cp /source/credentials.json /target/credentials.json && chown 65532:65532 /target/credentials.json && chmod 0400 /target/credentials.json"]
@@ -118,6 +120,9 @@ services:
       MEMJEV_ARCHIVE_REGION: us-east-1
       MEMJEV_ARCHIVE_ENDPOINT: http://minio:9000
       MEMJEV_ARCHIVE_SSE: AES256
+      # Activate the default recall configuration on each tenant's first recall.
+      MEMJEV_RETRIEVAL_AUTO_ACTIVATE: "${MEMJEV_RETRIEVAL_AUTO_ACTIVATE:-true}"
+      MEMJEV_RETRIEVAL_DEFAULT_REGIONS: "${MEMJEV_RETRIEVAL_DEFAULT_REGIONS:-local}"
       MEMJEV_BUILD_VERSION: "${MEMJEV_BUILD_VERSION:-dev}"
       MEMJEV_BUILD_COMMIT: "${MEMJEV_BUILD_COMMIT:-local}"
       MEMJEV_BUILD_AT: "${MEMJEV_BUILD_AT:-unknown}"

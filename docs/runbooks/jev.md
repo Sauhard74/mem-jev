@@ -2,6 +2,12 @@
 
 Jev is a post-eligibility, pointwise ranking enhancement. Exact, lexical, facet, graph, policy gates, and the deterministic integer ranker remain authoritative. Provider failure, quota exhaustion, a circuit-open state, or invalid output must preserve the preliminary no-Jev ordering.
 
+## Local quick enablement
+
+For local development, `scripts/setup.sh --jev-key-file /path/to/key [--jev-model jev-X.Y.Z]` does steps 2 to 4 below for you: it starts the Jev overlay, sets `allow_external_inference` on the local credentials, and the API's default ranker declares the five Jev features. If a tenant is already serving the no-Jev default, the API switches it to the Jev default on its next recall. Configurations an operator published are never replaced.
+
+Jev runs only when all three are true: the API has `MEMJEV_JEV_ENABLED=true`, the calling credential has `allow_external_inference: true`, and the active ranker declares the features below.
+
 ## Enablement prerequisites
 
 1. Pin an exact TypeSafe model matching `jev-X.Y.Z`; never use a floating alias.

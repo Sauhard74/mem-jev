@@ -5,7 +5,7 @@ name: memjev
 # so the API container never receives a host filesystem path.
 services:
   jev-key-init:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: bitnamilegacy/minio-client@sha256:8a86e441decf053093c5977d49290298295f850c7843652f93e970ab15871dd1
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command: ["cp /source/api-key /target/api-key && chown 65532:65532 /target/api-key && chmod 0400 /target/api-key"]

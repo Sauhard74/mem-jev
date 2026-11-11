@@ -23,6 +23,8 @@ var (
 	ErrServiceUnavailable  = errors.New("retrieval service unavailable")
 	ErrRecallDenied        = errors.New("retrieval recall not permitted")
 	ErrIdempotencyConflict = errors.New("retrieval idempotency conflict")
+	// ErrNothingLearned means the tenant can recall but has no learned procedures yet.
+	ErrNothingLearned = errors.New("no procedures learned yet")
 )
 
 type DecisionRepository interface {
@@ -76,6 +78,10 @@ type ServiceConfig struct {
 	MaximumSelections uint32
 	Aliases           AliasSet
 	SemanticJudge     SemanticJudge
+	// ServingBootstrap, when set, runs before each snapshot acquisition so a
+	// tenant without a serving configuration gets the default one. It must be
+	// cheap after the first success and must never replace operator configs.
+	ServingBootstrap func(context.Context, domain.TenantID)
 }
 
 type Service struct {
@@ -202,7 +208,13 @@ func (s *Service) Retrieve(ctx context.Context, request ServiceRequest) (Service
 			return ServiceResponse{}, &ServiceError{Code: "run_lookup_failed", RunID: runID, Err: findErr}
 		}
 	}
+	if s.config.ServingBootstrap != nil {
+		s.config.ServingBootstrap(ctx, request.TenantID)
+	}
 	snapshot, err := s.repository.AcquireServingSnapshot(ctx, request.TenantID)
+	if errors.Is(err, ErrNothingLearned) {
+		return ServiceResponse{}, &ServiceError{Code: "nothing_learned_yet", Err: err}
+	}
 	if err != nil {
 		return ServiceResponse{}, &ServiceError{Code: "snapshot_unavailable", Err: err}
 	}

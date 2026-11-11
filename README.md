@@ -56,6 +56,18 @@ That command creates local credentials, starts the stack, waits for readiness, a
 
 A new corpus has no reusable procedures yet, so the first retrieval may abstain. The run is still recorded and can become evidence for future procedures once its tool contracts and outcome are verified.
 
+Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration. Newly learned routines come back as advisory candidates until the lifecycle promotes them. Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
+
+### One memory per person
+
+By default every token in a tenant shares one memory. To keep each person's routines separate, issue them their own token:
+
+```sh
+scripts/add-person.sh alice
+```
+
+The token carries a `subject_id`, so everything that person records and recalls stays in their own scope. Other people in the same tenant never see it.
+
 ### Useful commands
 
 ```sh
@@ -138,10 +150,10 @@ SurrealDB provides graph, document, text, and vector storage. Temporal runs dura
 [TypeSafe Jev](https://typesafe.ai/) can judge ambiguous candidates after deterministic eligibility gates have run. It is optional and never required for availability. Accepted judgments are recorded with their model, rubric, features, and content hash so replays do not call the provider again.
 
 ```sh
-export MEMJEV_JEV_API_KEY_HOST_FILE=/absolute/path/to/jev-api-key
-export MEMJEV_JEV_MODEL=jev-1.13.0
-docker compose --env-file .env.local -f compose.yaml -f compose.jev.yaml up --build -d
+scripts/setup.sh --jev-key-file /absolute/path/to/jev-api-key   # optional: --jev-model jev-1.13.0
 ```
+
+This starts the Jev overlay, allows external model calls for the local credentials, and makes the default ranker use Jev features. The setting is saved in `.env.local`, so later `scripts/setup.sh` runs keep Jev on.
 
 Read the [Jev guide](docs/runbooks/jev.md) before enabling it.
 

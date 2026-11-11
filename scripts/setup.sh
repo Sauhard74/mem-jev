@@ -5,18 +5,28 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 env_file=${MEMJEV_ENV_FILE:-$repo_dir/.env.local}
 runtime_dir=${MEMJEV_RUNTIME_DIR:-$repo_dir/.runtime}
 prepare_only=false
+jev_key_file=${MEMJEV_JEV_API_KEY_HOST_FILE:-}
+jev_model=${MEMJEV_JEV_MODEL:-}
+default_jev_model=jev-1.13.0
 
 usage() {
-  printf '%s\n' 'Usage: scripts/setup.sh [--prepare-only]'
-  printf '%s\n' '  --prepare-only  Generate local credentials without starting Docker Compose.'
+  printf '%s\n' 'Usage: scripts/setup.sh [--prepare-only] [--jev-key-file PATH] [--jev-model jev-X.Y.Z]'
+  printf '%s\n' '  --prepare-only       Generate local credentials without starting Docker Compose.'
+  printf '%s\n' '  --jev-key-file PATH  Enable Jev ranking with the TypeSafe API key stored in PATH.'
+  printf '%s\n' "  --jev-model MODEL    Pinned Jev model (default $default_jev_model)."
+  printf '%s\n' 'MEMJEV_JEV_API_KEY_HOST_FILE and MEMJEV_JEV_MODEL work the same way as the flags.'
 }
 
-case "${1:-}" in
-  "") ;;
-  --prepare-only) prepare_only=true ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prepare-only) prepare_only=true ;;
+    --jev-key-file) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; jev_key_file=$2; shift ;;
+    --jev-model) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; jev_model=$2; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
 command -v openssl >/dev/null 2>&1 || { printf '%s\n' 'openssl is required' >&2; exit 1; }
 mkdir -p "$runtime_dir" "$(dirname "$env_file")"
@@ -75,6 +85,52 @@ else
   chmod 600 "$credential_path"
 fi
 
+# Set or replace KEY=VALUE in the environment file.
+set_env() {
+  local key=$1 value=$2 temporary
+  temporary=$(mktemp "$env_file.XXXXXX")
+  { grep -v "^$key=" "$env_file" || true; printf '%s=%s\n' "$key" "$value"; } > "$temporary"
+  chmod 600 "$temporary"
+  mv "$temporary" "$env_file"
+}
+
+# A Jev key given now, or saved by an earlier run, turns Jev on.
+if [[ -z "$jev_key_file" ]]; then
+  jev_key_file=$(sed -n 's/^MEMJEV_JEV_API_KEY_HOST_FILE=//p' "$env_file")
+fi
+compose_files=(-f "$repo_dir/compose.yaml")
+if [[ -n "$jev_key_file" ]]; then
+  [[ -f "$jev_key_file" ]] || { printf 'Jev key file does not exist: %s\n' "$jev_key_file" >&2; exit 1; }
+  jev_key_file=$(cd "$(dirname "$jev_key_file")" && pwd)/$(basename "$jev_key_file")
+  [[ -s "$jev_key_file" ]] || { printf 'Jev key file is empty: %s\n' "$jev_key_file" >&2; exit 1; }
+  chmod 600 "$jev_key_file"
+  if [[ -z "$jev_model" ]]; then
+    jev_model=$(sed -n 's/^MEMJEV_JEV_MODEL=//p' "$env_file")
+  fi
+  jev_model=${jev_model:-$default_jev_model}
+  [[ "$jev_model" =~ ^jev-[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf 'Jev model must be pinned as jev-X.Y.Z: %s\n' "$jev_model" >&2; exit 1; }
+  command -v python3 >/dev/null 2>&1 || { printf '%s\n' 'python3 is required to enable Jev' >&2; exit 1; }
+  set_env MEMJEV_JEV_API_KEY_HOST_FILE "$jev_key_file"
+  set_env MEMJEV_JEV_MODEL "$jev_model"
+  set_env COMPOSE_FILE "$repo_dir/compose.yaml:$repo_dir/compose.jev.yaml"
+  # Jev only runs for credentials that allow external model calls. These are
+  # local development credentials, so allow it for all of them.
+  python3 - "$credential_path" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+with open(path) as handle:
+    document = json.load(handle)
+for entry in document["credentials"]:
+    entry["allow_external_inference"] = True
+temporary = path + ".tmp"
+with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+    json.dump(document, handle, separators=(",", ":"))
+os.replace(temporary, path)
+PY
+  compose_files+=(-f "$repo_dir/compose.jev.yaml")
+  printf 'Jev enabled with model %s.\n' "$jev_model"
+fi
+
 if [[ "$prepare_only" == true ]]; then
   printf 'Local environment ready: %s\n' "$env_file"
   exit 0
@@ -82,7 +138,7 @@ fi
 
 command -v docker >/dev/null 2>&1 || { printf '%s\n' 'Docker with Compose v2 is required' >&2; exit 1; }
 docker compose version >/dev/null
-docker compose --env-file "$env_file" up --detach --build --wait
+docker compose --env-file "$env_file" "${compose_files[@]}" up --detach --build --wait
 
 # shellcheck disable=SC1090
 source "$env_file"

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/buildinfo"
 	"github.com/sauhard74/mem-jev/internal/config"
 	"github.com/sauhard74/mem-jev/internal/credit"
+	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/embedding"
 	"github.com/sauhard74/mem-jev/internal/ingest"
 	"github.com/sauhard74/mem-jev/internal/jev"
@@ -239,15 +241,60 @@ func buildRetrievalService(ctx context.Context, db *surrealdb.DB, selectionRepos
 	if err != nil {
 		return nil, nil, err
 	}
-	service, err := retrieval.NewService(storesurreal.NewRetrievalRunRepository(db), projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
+	runRepository := storesurreal.NewRetrievalRunRepository(db)
+	var bootstrap func(context.Context, domain.TenantID)
+	if configuration.AutoActivateServing {
+		bootstrap, err = buildServingBootstrap(runRepository, channels, configuration.DefaultResidencyRegions, semanticJudge != nil, observability.NewJSONLogger(os.Stdout))
+		if err != nil {
+			closeJev()
+			return nil, nil, err
+		}
+	}
+	service, err := retrieval.NewService(runRepository, projectionRepository, manifestRepository, nil, cipher, retrieval.RandomRunIDSource{}, retrieval.ServiceConfig{
 		Channels: channels, RequiredChannels: required, ChannelTimeout: configuration.ChannelTimeout, Retention: configuration.Retention,
 		MinimumScore: configuration.MinimumScore, MaximumSelections: configuration.MaximumSelections, SemanticJudge: semanticJudge,
+		ServingBootstrap: bootstrap,
 	}, planIssuer)
 	if err != nil {
 		closeJev()
 		return nil, nil, err
 	}
 	return service, closeJev, nil
+}
+
+// buildServingBootstrap returns a hook that activates the default serving
+// configuration for each tenant on its first recall. It checks the database
+// once per tenant per process after a success, so steady-state recall pays
+// nothing. Failures are logged and retried on the next recall.
+func buildServingBootstrap(repository *storesurreal.RetrievalRunRepository, channels []retrieval.Channel, regions []string, semantic bool, logger *slog.Logger) (func(context.Context, domain.TenantID), error) {
+	defaults, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: regions, Semantic: semantic})
+	if err != nil {
+		return nil, err
+	}
+	indexes := make([]retrieval.SnapshotIndex, len(channels))
+	for position, channel := range channels {
+		indexes[position] = retrieval.SnapshotIndex{Channel: channel.Name(), ManifestID: channel.ManifestID(), Approximate: channel.Approximate()}
+	}
+	var (
+		mutex sync.Mutex
+		ready = make(map[domain.TenantID]struct{})
+	)
+	return func(ctx context.Context, tenantID domain.TenantID) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if _, done := ready[tenantID]; done {
+			return
+		}
+		activated, ensureErr := repository.EnsureDefaultServing(ctx, tenantID, defaults, indexes)
+		if ensureErr != nil {
+			logger.Warn("default serving activation failed", "error", ensureErr)
+			return
+		}
+		if activated {
+			logger.Info("activated default serving configuration", "ranker_manifest_id", defaults.Ranker.ID, "policy_manifest_id", defaults.Policy.ID)
+		}
+		ready[tenantID] = struct{}{}
+	}, nil
 }
 
 func buildJevJudge(ctx context.Context, db *surrealdb.DB, configuration config.JevConfig) (retrieval.SemanticJudge, func(), error) {

@@ -10,6 +10,8 @@ Send the request on standard input so the tenant identifier is never exposed in 
 printf '%s\n' '{"tenant_id":"tenant_a","request_id":"erase_01JABCDE1234567890","confirmation":"erase:tenant_a:erase_01JABCDE1234567890"}' | memjev-admin erase-tenant
 ```
 
+To erase one person, use their storage scope as `tenant_id`: the tenant and `subject_id` joined by `__` (for example `tenant_a__alice`). Erasing a whole tenant whose people have their own tokens means erasing the tenant scope and each person's scope.
+
 The command validates the complete JSON document and ledger before external work, creates a durable database write fence, removes every S3 object version and delete marker under the hashed tenant prefix, verifies the prefix is empty, deletes tenant-owned online rows transactionally, and records a tenant-hash-only receipt. A failed archive deletion leaves the fence active and does not delete database rows; repeat the identical request after correcting the archive failure. A different request ID for an already fenced tenant is rejected.
 
 Every restore requires the current independent ledger and replays it before health verification. This prevents an older snapshot from resurrecting erased data. Do not route traffic if ledger replay or the final health check fails.

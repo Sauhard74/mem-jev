@@ -23,3 +23,16 @@ Move the tenant serving head to the last known-good immutable serving configurat
 ## Jev boundary
 
 Jev is not required for the core path. It evaluates only eligible candidates in a deterministic ambiguity band, and its quantized features feed the same immutable integer ranker used by the preliminary pass. It cannot change an eligibility rejection. If TypeSafe is disabled or unavailable, explicit zero missing-values reproduce the no-Jev ordering. See [Jev ranking enhancement operations](jev.md) for secret mounting, consent, manifests, alerts, and rollback.
+
+## Default serving configuration
+
+A tenant needs an active serving configuration (eligibility policy, ranker, and index manifests) before recall can return anything. With `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=true` (the default when `MEMJEV_ENVIRONMENT=development`), the API activates memJev's default configuration on a tenant's first recall:
+
+- The policy admits `active` and `trial` procedures, plus new `candidate` procedures as advisory guidance, up to medium risk, validated by `outcome-policy.v1` within 90 days, in the regions listed in `MEMJEV_RETRIEVAL_DEFAULT_REGIONS` (default `local` in development; required when auto-activation is on elsewhere).
+- The ranker uses the exact, lexical, facet, graph, and vector channels. When Jev is enabled it also declares the five Jev features.
+- Missing index manifests for the configured channels are created. A vector index is included only if its manifest was already provisioned.
+
+Default manifests have versions starting with `memjev-default`. The API replaces an active configuration only when both its policy and ranker are such defaults, for example to switch to the Jev ranker after Jev is enabled. A configuration an operator published is never replaced.
+
+Each per-person scope (a credential with `subject_id`) is its own tenant scope for storage, so it gets its own serving configuration on first recall.
+

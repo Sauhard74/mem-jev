@@ -160,8 +160,11 @@ func (r *RetrievalRunRepository) AcquireServingSnapshot(ctx context.Context, ten
 		Hash  string `json:"document_set_hash"`
 	}
 	epochs, err := surrealdb.Query[[]epochRow](ctx, tx, `SELECT current_epoch, document_set_hash FROM projection_epoch_head WHERE tenant_id = $tenant_id LIMIT 1`, map[string]any{"tenant_id": string(tenantID)})
-	if err != nil || epochs == nil || len(*epochs) == 0 || len((*epochs)[0].Result) == 0 {
+	if err != nil || epochs == nil || len(*epochs) == 0 {
 		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
+	}
+	if len((*epochs)[0].Result) == 0 {
+		return retrieval.ServingSnapshot{}, fmt.Errorf("%w: %w", store.ErrServingConfigUnavailable, retrieval.ErrNothingLearned)
 	}
 	epoch := (*epochs)[0].Result[0]
 	type createdAtRow struct {

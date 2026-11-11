@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -61,7 +62,10 @@ func (r *RetrievalRunRepository) AcquireServingSnapshot(ctx context.Context, ten
 	epochKey := epochKey(tenantID, epoch)
 	hash := r.projection.epochHistory[epochKey]
 	createdAt := r.projection.epochCreated[epochKey]
-	if epoch == 0 || hash == "" {
+	if epoch == 0 {
+		return retrieval.ServingSnapshot{}, fmt.Errorf("%w: %w", store.ErrServingConfigUnavailable, retrieval.ErrNothingLearned)
+	}
+	if hash == "" {
 		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
 	}
 	return retrieval.ServingSnapshot{ProjectionEpoch: epoch, ProjectionCreatedAt: createdAt, DocumentSetHash: hash, ServingConfigID: config.ID, PolicyManifestID: config.PolicyManifestID, RankerManifestID: config.RankerManifestID, Indexes: append([]retrieval.SnapshotIndex(nil), config.Indexes...)}, nil

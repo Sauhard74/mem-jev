@@ -14,7 +14,13 @@ const (
 )
 
 type Principal struct {
-	TenantID               domain.TenantID
+	// TenantID is the storage scope every read and write is limited to. For a
+	// credential with a subject_id it is the per-person scope (see ScopedTenantID).
+	TenantID domain.TenantID
+	// OrganizationID is the tenant_id from the credential file.
+	OrganizationID domain.TenantID
+	// SubjectID is the person the credential belongs to, if any.
+	SubjectID              string
 	Region                 string
 	Scopes                 map[string]struct{}
 	Consent                policy.ConsentMode

@@ -53,7 +53,14 @@ if retrieval=$(curl --fail-with-body --silent --show-error \
   injection_id=$(python3 -c 'import json,sys; print((json.load(sys.stdin).get("plan") or {}).get("injectionId", ""))' <<< "$retrieval")
   task_execution_id=$(python3 -c 'import json,sys; print((json.load(sys.stdin).get("plan") or {}).get("taskExecutionId", ""))' <<< "$retrieval")
 else
-  printf '%s\n' 'No retrieval configuration is active yet; continuing without recalled guidance.'
+  reason=$(python3 -c 'import json,sys
+try: print(next((d.get("debug",{}).get("reasonCode","") for d in json.load(sys.stdin).get("details",[])),""))
+except Exception: print("")' <<< "${retrieval:-}")
+  if [[ "$reason" == "nothing_learned_yet" ]]; then
+    printf '%s\n' 'Recall is on, but nothing has been learned for this tenant yet; continuing without recalled guidance.'
+  else
+    printf '%s\n' "Recall is unavailable${reason:+ ($reason)}; continuing without recalled guidance."
+  fi
   injection_id=''
   task_execution_id=''
 fi

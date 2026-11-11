@@ -37,6 +37,7 @@ var allowedVariables = map[string]struct{}{
 	"MEMJEV_RETRIEVAL_CHANNEL_TIMEOUT": {}, "MEMJEV_RETRIEVAL_RETENTION": {}, "MEMJEV_RETRIEVAL_MINIMUM_SCORE": {}, "MEMJEV_RETRIEVAL_MAX_SELECTIONS": {},
 	"MEMJEV_RETRIEVAL_EXACT_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_LEXICAL_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_FACET_MANIFEST_ID": {}, "MEMJEV_RETRIEVAL_GRAPH_MANIFEST_ID": {},
 	"MEMJEV_RETRIEVAL_VECTOR_CONFIG_FILE": {}, "MEMJEV_EMBEDDING_PROVIDER_ENDPOINT": {}, "MEMJEV_EMBEDDING_PROVIDER_TOKEN_FILE": {},
+	"MEMJEV_RETRIEVAL_AUTO_ACTIVATE": {}, "MEMJEV_RETRIEVAL_DEFAULT_REGIONS": {},
 	"MEMJEV_JEV_ENABLED": {}, "MEMJEV_JEV_MODEL": {}, "MEMJEV_JEV_API_KEY_FILE": {}, "MEMJEV_JEV_TIMEOUT": {},
 	"MEMJEV_JEV_MAX_REQUEST_BYTES": {}, "MEMJEV_JEV_MAX_RESPONSE_BYTES": {}, "MEMJEV_JEV_REUSE_DURATION": {}, "MEMJEV_JEV_MINIMUM_REMAINING": {},
 	"MEMJEV_JEV_MAX_CONCURRENT": {}, "MEMJEV_JEV_GLOBAL_TOKEN_RATE": {}, "MEMJEV_JEV_GLOBAL_TOKEN_BURST": {},
@@ -92,6 +93,11 @@ type RetrievalConfig struct {
 	VectorConfigFile                          string
 	EmbeddingProviderEndpoint                 string
 	EmbeddingProviderTokenFile                string
+	// AutoActivateServing activates the default serving configuration for a
+	// tenant on its first recall when no configuration is active yet.
+	AutoActivateServing bool
+	// DefaultResidencyRegions are the regions the default eligibility policy admits.
+	DefaultResidencyRegions []string
 }
 
 type JevConfig struct {
@@ -221,6 +227,23 @@ func load() (Config, error) {
 			return Config{}, fieldError("MEMJEV_TENANT_METRICS")
 		}
 		config.TenantMetrics = parsed
+	}
+	config.Retrieval.AutoActivateServing = config.Environment == "development"
+	if raw := os.Getenv("MEMJEV_RETRIEVAL_AUTO_ACTIVATE"); raw != "" {
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			return Config{}, fieldError("MEMJEV_RETRIEVAL_AUTO_ACTIVATE")
+		}
+		config.Retrieval.AutoActivateServing = parsed
+	}
+	if raw := os.Getenv("MEMJEV_RETRIEVAL_DEFAULT_REGIONS"); raw != "" {
+		for _, region := range strings.Split(raw, ",") {
+			if region = strings.TrimSpace(region); region != "" {
+				config.Retrieval.DefaultResidencyRegions = append(config.Retrieval.DefaultResidencyRegions, region)
+			}
+		}
+	} else if config.Environment == "development" {
+		config.Retrieval.DefaultResidencyRegions = []string{"local"}
 	}
 	if raw := os.Getenv("MEMJEV_JEV_ENABLED"); raw != "" {
 		parsed, parseErr := strconv.ParseBool(raw)
@@ -375,6 +398,9 @@ func validate(config Config, requireAPICredentials bool) error {
 	}
 	if config.Retrieval.PolicyVersion == "" || config.Retrieval.QueryKeyID == "" || config.Retrieval.ChannelTimeout <= 0 || config.Retrieval.ChannelTimeout > config.RequestTimeout || config.Retrieval.Retention <= 0 || config.Retrieval.Retention > 30*24*time.Hour || config.Retrieval.MaximumSelections == 0 || config.Retrieval.MaximumSelections > 100 || config.Retrieval.ExactManifestID == "" || config.Retrieval.LexicalManifestID == "" || config.Retrieval.FacetManifestID == "" || config.Retrieval.GraphManifestID == "" {
 		return fieldError("retrieval configuration")
+	}
+	if config.Retrieval.AutoActivateServing && len(config.Retrieval.DefaultResidencyRegions) == 0 {
+		return fieldError("MEMJEV_RETRIEVAL_DEFAULT_REGIONS")
 	}
 	if !config.Jev.Enabled && (config.Jev.Model != "" || config.Jev.APIKeyFile != "") {
 		return fieldError("Jev configuration while disabled")

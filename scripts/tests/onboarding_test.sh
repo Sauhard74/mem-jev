@@ -46,4 +46,29 @@ source "$env_file"
   exit 1
 }
 
+jev_key="$tmp_dir/jev-api-key"
+printf '%s' 'test-key' > "$jev_key"
+MEMJEV_ENV_FILE="$env_file" \
+MEMJEV_RUNTIME_DIR="$runtime_dir" \
+  "$repo_dir/scripts/setup.sh" --prepare-only --jev-key-file "$jev_key" >/dev/null
+grep -q "^MEMJEV_JEV_API_KEY_HOST_FILE=$jev_key$" "$env_file" || { printf '%s\n' 'setup did not save the Jev key path' >&2; exit 1; }
+grep -q '^MEMJEV_JEV_MODEL=jev-1.13.0$' "$env_file" || { printf '%s\n' 'setup did not save the default Jev model' >&2; exit 1; }
+python3 -c 'import json,sys; assert all(c["allow_external_inference"] for c in json.load(open(sys.argv[1]))["credentials"])' "$runtime_dir/credentials.json" || {
+  printf '%s\n' 'setup did not allow Jev on local credentials' >&2
+  exit 1
+}
+
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" alice --no-restart > "$tmp_dir/alice.out"
+alice_token=$(tail -n 1 "$tmp_dir/alice.out")
+alice_hash=$(printf '%s' "$alice_token" | shasum -a 256 | awk '{print $1}')
+python3 - "$runtime_dir/credentials.json" "$alice_hash" <<'PY' || { printf '%s\n' 'add-person did not add a per-person credential' >&2; exit 1; }
+import json, sys
+entries = [c for c in json.load(open(sys.argv[1]))["credentials"] if c["credential_sha256"] == sys.argv[2]]
+assert len(entries) == 1 and entries[0]["subject_id"] == "alice" and entries[0]["tenant_id"] == "tenant_local"
+PY
+if MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" 'bad_name' --no-restart >/dev/null 2>&1; then
+  printf '%s\n' 'add-person accepted an invalid name' >&2
+  exit 1
+fi
+
 printf '%s\n' 'onboarding setup test: PASS'
