@@ -4,8 +4,12 @@ package surreal
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/sauhard74/mem-jev/internal/ranking"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store/storetest"
 )
@@ -90,5 +94,66 @@ func TestEnsureDefaultServingNeverReplacesOperatorConfig(t *testing.T) {
 	}
 	if snapshot, acquireErr := repository.AcquireServingSnapshot(ctx, "tenant_a"); acquireErr != nil || snapshot.ServingConfigID != operator.ID {
 		t.Fatalf("snapshot = %#v, err = %v", snapshot, acquireErr)
+	}
+}
+
+func TestConditionalActivationNeverOverwritesConcurrentOperatorChange(t *testing.T) {
+	ctx := context.Background()
+	db := projectionDatabase(t)
+	seedProjectionOutcomes(t, db)
+	if _, err := NewProjectionRepository(db).Publish(ctx, storetest.ValidProjection(t, 1, false)); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewRetrievalRunRepository(db)
+	plain, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: []string{"local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.EnsureDefaultServing(ctx, "tenant_a", plain, defaultIndexes()); err != nil {
+		t.Fatal(err)
+	}
+	staleHead, found, err := repository.activeServingConfig(ctx, "tenant_a")
+	if err != nil || !found {
+		t.Fatalf("default head missing: %v", err)
+	}
+	semantic, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: []string{"local"}, Semantic: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrade, err := retrieval.BuildServingConfig("tenant_a", semantic.Policy.ID, semantic.Ranker.ID, staleHead.Indexes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.ensureManifest(ctx, "ranker_manifest", "ranker_manifest_id", "tenant_a", semantic.Ranker.ID, map[string]any{
+		"tenant_id": "tenant_a", "ranker_manifest_id": semantic.Ranker.ID, "version": semantic.Ranker.Version, "manifest": string(semantic.Ranker.CanonicalJSON),
+		"created_at": time.Now().UTC(), "schema_version": "ranker.v1", "content_hash": strings.TrimPrefix(semantic.Ranker.ID, "rnk_"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// An operator activates their own config after the bootstrap read the head.
+	operatorRanker, err := ranking.NewManifest(ranking.ManifestSpec{Version: "operator.v1", RRFK: 60, RRFCoefficient: 1, MaxCandidates: 10, Channels: []ranking.ChannelWeight{{Channel: "exact", WeightMicros: 1_000_000}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.ensureManifest(ctx, "ranker_manifest", "ranker_manifest_id", "tenant_a", operatorRanker.ID, map[string]any{
+		"tenant_id": "tenant_a", "ranker_manifest_id": operatorRanker.ID, "version": operatorRanker.Version, "manifest": string(operatorRanker.CanonicalJSON),
+		"created_at": time.Now().UTC(), "schema_version": "ranker.v1", "content_hash": strings.TrimPrefix(operatorRanker.ID, "rnk_"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := retrieval.BuildServingConfig("tenant_a", plain.Policy.ID, operatorRanker.ID, staleHead.Indexes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.ActivateServingConfig(ctx, operator); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = repository.activateServingConfig(ctx, upgrade, &staleHead.ID); !errors.Is(err, errServingHeadChanged) {
+		t.Fatalf("stale conditional activation err = %v, want errServingHeadChanged", err)
+	}
+	if active, _, readErr := repository.activeServingConfig(ctx, "tenant_a"); readErr != nil || active.ID != operator.ID {
+		t.Fatalf("operator config overwritten: active = %s, err = %v", active.ID, readErr)
 	}
 }

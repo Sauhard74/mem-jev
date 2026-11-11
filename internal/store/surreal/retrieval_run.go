@@ -3,6 +3,7 @@ package surreal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -25,7 +26,19 @@ func NewRetrievalRunRepository(db *surrealdb.DB) *RetrievalRunRepository {
 	return &RetrievalRunRepository{db: db}
 }
 
-func (r *RetrievalRunRepository) ActivateServingConfig(ctx context.Context, config retrieval.ServingConfig) (err error) {
+func (r *RetrievalRunRepository) ActivateServingConfig(ctx context.Context, config retrieval.ServingConfig) error {
+	return r.activateServingConfig(ctx, config, nil)
+}
+
+// errServingHeadChanged means the tenant's serving head no longer points at
+// the configuration a conditional activation expected.
+var errServingHeadChanged = errors.New("serving head changed concurrently")
+
+// activateServingConfig moves the tenant's serving head to config. When
+// expectedHead is set, the move happens only if the head still points at that
+// config ID ("" meaning no head yet); the check and the write share one
+// transaction, so a concurrent operator activation is never overwritten.
+func (r *RetrievalRunRepository) activateServingConfig(ctx context.Context, config retrieval.ServingConfig, expectedHead *string) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -64,16 +77,36 @@ func (r *RetrievalRunRepository) ActivateServingConfig(ctx context.Context, conf
 	}
 	headID := models.NewRecordID("retrieval_serving_head", "serving_"+string(config.TenantID))
 	type headRow struct {
-		ID *models.RecordID `json:"id"`
+		ID       *models.RecordID `json:"id"`
+		ConfigID string           `json:"serving_config_id"`
 	}
-	heads, err := surrealdb.Query[[]headRow](ctx, tx, `SELECT id FROM $id`, map[string]any{"id": headID})
+	heads, err := surrealdb.Query[[]headRow](ctx, tx, `SELECT id, serving_config_id FROM $id`, map[string]any{"id": headID})
 	if err != nil {
 		return err
 	}
+	headExists := heads != nil && len(*heads) > 0 && len((*heads)[0].Result) > 0
+	if expectedHead != nil {
+		current := ""
+		if headExists {
+			current = (*heads)[0].Result[0].ConfigID
+		}
+		if current != *expectedHead {
+			return errServingHeadChanged
+		}
+	}
 	now := time.Now().UTC()
-	if heads == nil || len(*heads) == 0 || len((*heads)[0].Result) == 0 {
+	if !headExists {
 		if err = createRecord(ctx, tx, headID, map[string]any{"tenant_id": string(config.TenantID), "serving_config_id": config.ID, "updated_at": now, "schema_version": "retrieval-serving-head.v1", "content_hash": config.ContentHash}); err != nil {
 			return err
+		}
+	} else if expectedHead != nil {
+		// Compare-and-set: only move the head if it still holds the expected config.
+		updated, updateErr := surrealdb.Query[[]headRow](ctx, tx, `UPDATE $id SET serving_config_id = $config_id, updated_at = $at, content_hash = $hash WHERE serving_config_id = $expected RETURN AFTER`, map[string]any{"id": headID, "config_id": config.ID, "at": now, "hash": config.ContentHash, "expected": *expectedHead})
+		if updateErr != nil {
+			return updateErr
+		}
+		if updated == nil || len(*updated) == 0 || len((*updated)[0].Result) != 1 {
+			return errServingHeadChanged
 		}
 	} else {
 		if _, err = surrealdb.Query[any](ctx, tx, `UPDATE $id SET serving_config_id = $config_id, updated_at = $at, content_hash = $hash`, map[string]any{"id": headID, "config_id": config.ID, "at": now, "hash": config.ContentHash}); err != nil {

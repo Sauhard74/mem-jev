@@ -82,7 +82,8 @@ services:
     restart: unless-stopped
 
   credential-init:
-    image: bitnamilegacy/minio-client@sha256:8a86e441decf053093c5977d49290298295f850c7843652f93e970ab15871dd1
+    # Only copies a file, so it uses the official busybox image.
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command: ["cp /source/credentials.json /target/credentials.json && chown 65532:65532 /target/credentials.json && chmod 0400 /target/credentials.json"]

@@ -44,7 +44,7 @@ func (r *RetrievalRunRepository) EnsureDefaultServing(ctx context.Context, tenan
 	if err != nil {
 		return false, err
 	}
-	replaceable, err := r.defaultServingReplaceable(ctx, tenantID, config)
+	expectedHead, replaceable, err := r.defaultServingReplaceable(ctx, tenantID, config)
 	if err != nil || !replaceable {
 		return false, err
 	}
@@ -68,7 +68,12 @@ func (r *RetrievalRunRepository) EnsureDefaultServing(ctx context.Context, tenan
 			return false, err
 		}
 	}
-	if err = r.ActivateServingConfig(ctx, config); err != nil {
+	// Activate only if the head is still what was judged replaceable above, so
+	// an operator activation that lands in between is never overwritten.
+	if err = r.activateServingConfig(ctx, config, &expectedHead); err != nil {
+		if errors.Is(err, errServingHeadChanged) {
+			return false, nil
+		}
 		// A concurrent request may have activated the same config first.
 		if active, found, readErr := r.activeServingConfig(ctx, tenantID); readErr == nil && found && active.ID == config.ID {
 			return false, nil
@@ -80,26 +85,27 @@ func (r *RetrievalRunRepository) EnsureDefaultServing(ctx context.Context, tenan
 
 // defaultServingReplaceable reports whether desired should become the active
 // config: true when no config is active or the active one is an older default.
-func (r *RetrievalRunRepository) defaultServingReplaceable(ctx context.Context, tenantID domain.TenantID, desired retrieval.ServingConfig) (bool, error) {
+// It also returns the active config ID ("" for none) for the conditional switch.
+func (r *RetrievalRunRepository) defaultServingReplaceable(ctx context.Context, tenantID domain.TenantID, desired retrieval.ServingConfig) (string, bool, error) {
 	active, found, err := r.activeServingConfig(ctx, tenantID)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	if !found {
-		return true, nil
+		return "", true, nil
 	}
 	if active.ID == desired.ID {
-		return false, nil
+		return active.ID, false, nil
 	}
 	policyVersion, err := r.manifestVersion(ctx, "eligibility_policy_manifest", "policy_manifest_id", tenantID, active.PolicyManifestID)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	rankerVersion, err := r.manifestVersion(ctx, "ranker_manifest", "ranker_manifest_id", tenantID, active.RankerManifestID)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return retrieval.IsDefaultManifestVersion(policyVersion) && retrieval.IsDefaultManifestVersion(rankerVersion), nil
+	return active.ID, retrieval.IsDefaultManifestVersion(policyVersion) && retrieval.IsDefaultManifestVersion(rankerVersion), nil
 }
 
 func (r *RetrievalRunRepository) activeServingConfig(ctx context.Context, tenantID domain.TenantID) (retrieval.ServingConfig, bool, error) {
