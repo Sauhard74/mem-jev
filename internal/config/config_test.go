@@ -222,3 +222,48 @@ func TestLoadWorkerProcedureRegionMatchesRecallRegion(t *testing.T) {
 		t.Fatalf("development default region = %q, %v (want local, matching local credentials)", got.Worker.ResidencyRegion, err)
 	}
 }
+
+func TestUnpromotedPlansAndAutoPromoteDefaultOnOnlyInDevelopment(t *testing.T) {
+	switches := []string{"MEMJEV_RETRIEVAL_UNPROMOTED_PLANS", "MEMJEV_LIFECYCLE_AUTO_PROMOTE"}
+	read := func(t *testing.T) (bool, bool) {
+		t.Helper()
+		got, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Retrieval.UnpromotedPlans, got.Worker.AutoPromote
+	}
+
+	setValidDurableEnvironment(t)
+	t.Setenv("MEMJEV_SURREAL_AUTH_SCOPE", "database")
+	if plans, promote := read(t); plans || promote {
+		t.Fatalf("production defaults: unpromoted plans %v, auto promote %v; want both off", plans, promote)
+	}
+	for _, name := range switches {
+		t.Setenv(name, "true")
+	}
+	if plans, promote := read(t); !plans || !promote {
+		t.Fatalf("production opt-in: unpromoted plans %v, auto promote %v; want both on", plans, promote)
+	}
+	for _, name := range switches {
+		t.Setenv(name, "sometimes")
+		if _, err := Load(); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("%s=sometimes error = %v", name, err)
+		}
+		t.Setenv(name, "")
+	}
+
+	clearKnownEnvironment(t)
+	t.Setenv("MEMJEV_ENVIRONMENT", "development")
+	t.Setenv("MEMJEV_ADAPTER_MODE", "memory")
+	t.Setenv("MEMJEV_CREDENTIALS_FILE", "/tmp/credentials.json")
+	if plans, promote := read(t); !plans || !promote {
+		t.Fatalf("development defaults: unpromoted plans %v, auto promote %v; want both on", plans, promote)
+	}
+	for _, name := range switches {
+		t.Setenv(name, "false")
+	}
+	if plans, promote := read(t); plans || promote {
+		t.Fatalf("development opt-out: unpromoted plans %v, auto promote %v; want both off", plans, promote)
+	}
+}

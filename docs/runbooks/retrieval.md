@@ -26,7 +26,7 @@ Jev is not required for the core path. It evaluates only eligible candidates in 
 
 ## Default serving configuration
 
-A tenant needs an active serving configuration (eligibility policy, ranker, and index manifests) before recall can return anything. With `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=true` (the default when `MEMJEV_ENVIRONMENT=development`), the API activates memJev's default configuration on a tenant's first recall:
+A tenant needs an active serving configuration (eligibility policy, ranker, and index manifests) before recall can return anything. With `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=true` (the default when `MEMJEV_ENVIRONMENT=development`), the API activates memJev's default configuration on a tenant's first recall after it has learned something (a recall before that answers `nothing_learned_yet` and writes nothing):
 
 - The policy admits `active` and `trial` procedures, plus new `candidate` procedures as advisory guidance, up to medium risk, validated by `outcome-policy.v1` within 90 days, in the regions listed in `MEMJEV_RETRIEVAL_DEFAULT_REGIONS` (default `local` in development; required when auto-activation is on elsewhere).
 - The ranker uses the exact, lexical, facet, graph, and vector channels. When Jev is enabled it also declares the five Jev features.
@@ -34,7 +34,7 @@ A tenant needs an active serving configuration (eligibility policy, ranker, and 
 
 Default manifests have versions starting with `memjev-default`. The API replaces an active configuration only when both its policy and ranker are such defaults, for example to switch to the Jev ranker after Jev is enabled. A configuration an operator published is never replaced.
 
-Each per-person scope (a credential with `subject_id`, or a `Memjev-Subject` header) is its own tenant scope for storage, so it gets its own serving configuration on first recall.
+Each per-person scope (a credential with `subject_id`, or a `Memjev-Subject` header) is its own tenant scope for storage, so it gets its own serving configuration on its first recall after learning something.
 
 ## Unpromoted plans and automatic promotion
 

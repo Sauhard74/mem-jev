@@ -213,8 +213,9 @@ func loadStoredOutcome(ctx context.Context, db *surrealdb.DB, tenantID domain.Te
 		PolicyVersion     string    `json:"policy_version"`
 		EvidenceCount     int       `json:"evidence_count"`
 		CreatedAt         time.Time `json:"created_at"`
+		InjectionID       *string   `json:"injection_id"`
 	}
-	results, err := surrealdb.Query[[]outcomeRow](ctx, db, `SELECT outcome_id, content_hash, state, promotion_eligible, policy_version, evidence_count, created_at
+	results, err := surrealdb.Query[[]outcomeRow](ctx, db, `SELECT outcome_id, content_hash, state, promotion_eligible, policy_version, evidence_count, created_at, injection_id
 		FROM outcome_evidence WHERE tenant_id = $tenant_id AND outcome_id = $outcome_id LIMIT 1`, map[string]any{
 		"tenant_id": string(tenantID), "outcome_id": string(outcomeID),
 	})
@@ -237,10 +238,14 @@ func loadStoredOutcome(ctx context.Context, db *surrealdb.DB, tenantID domain.Te
 	if len(facts) != row.EvidenceCount {
 		return memworkflow.StoredOutcome{}, false, &memworkflow.StageError{Code: "evidence_mismatch", Err: memworkflow.ErrStageArtifactConflict}
 	}
-	return memworkflow.StoredOutcome{
+	stored := memworkflow.StoredOutcome{
 		ID: domain.OutcomeID(row.ID), ContentHash: row.ContentHash, State: domain.OutcomeState(row.State),
 		PromotionEligible: row.PromotionEligible, PolicyVersion: row.PolicyVersion, Evidence: facts, CreatedAt: row.CreatedAt.UTC(),
-	}, true, nil
+	}
+	if row.InjectionID != nil {
+		stored.InjectionID = *row.InjectionID
+	}
+	return stored, true, nil
 }
 
 func recordPipelineQuarantine(ctx context.Context, db *surrealdb.DB, input memworkflow.SynthesisInput, reason string) error {

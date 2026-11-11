@@ -56,7 +56,7 @@ That command creates local credentials, starts the stack, waits for readiness, a
 
 A new corpus has no reusable procedures yet, so the first retrieval abstains. The run is still recorded, and because the quickstart's demo tool has a registered contract and the outcome is verified, memJev learns it in the background. Run `make quickstart` again a few seconds later: the retrieval is `SELECTED` with a plan (steps, `injectionId`, `taskExecutionId`) marked `advisoryOnly: true`, because the routine has not been promoted yet. Each verified run of that plan counts toward promotion; after three, the routine is promoted to `trial` and served as a normal plan.
 
-Recall is switched on automatically in local development: the first retrieval for each tenant (or person) activates memJev's default serving configuration, and the worker promotes and demotes learned routines from verified outcomes. A routine is learned only when every tool it uses has a registered contract (see below). Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
+Recall is switched on automatically in local development: once a tenant (or person) has learned something, its first retrieval activates memJev's default serving configuration, and the worker promotes learned routines from verified outcomes and demotes them on verified failures (trial back to candidate, active to retired). An outcome reported `unsafe` quarantines the routine immediately, in every environment. A routine is learned only when every tool it uses has a registered contract (see below). Operators who publish their own manifests are never overridden; set `MEMJEV_RETRIEVAL_AUTO_ACTIVATE=false` to turn the default off. See the [retrieval runbook](docs/runbooks/retrieval.md).
 
 ### Register your tools
 
@@ -168,10 +168,10 @@ SurrealDB provides graph, document, text, and vector storage. Temporal runs dura
 [TypeSafe Jev](https://typesafe.ai/) can judge ambiguous candidates after deterministic eligibility gates have run. It is optional and never required for availability. Accepted judgments are recorded with their model, rubric, features, and content hash so replays do not call the provider again.
 
 ```sh
-scripts/setup.sh --jev-key-file /absolute/path/to/jev-api-key   # optional: --jev-model jev-1.13.0
+scripts/setup.sh --jev-key-file /absolute/path/to/jev-api-key   # optional: --jev-model jev-1.14.0
 ```
 
-This starts the Jev overlay, allows external model calls for the local credentials, and makes the default ranker use Jev features. The setting is saved in `.env.local`, so later `scripts/setup.sh` runs keep Jev on.
+This starts the Jev overlay, allows external model calls for the local credentials, and makes the default ranker use Jev features. The setting is saved in `.env.local`, so later `scripts/setup.sh` runs keep Jev on. The model is pinned: new installs default to `jev-1.14.0`, and an existing `.env.local` keeps the model it was set up with until you pass `--jev-model`.
 
 Read the [Jev guide](docs/runbooks/jev.md) before enabling it.
 

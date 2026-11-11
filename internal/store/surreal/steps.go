@@ -6,6 +6,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
+	memworkflow "github.com/sauhard74/mem-jev/internal/workflow"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 )
 
@@ -90,3 +91,38 @@ func (r *StepRepository) ProcedureSteps(ctx context.Context, tenantID string, ve
 }
 
 var _ retrieval.StepReader = (*StepRepository)(nil)
+
+// RecalledPlan returns the procedure versions of the plan an injection handed
+// out, in plan order, with each version's ordered steps.
+func (r *StepRepository) RecalledPlan(ctx context.Context, tenantID domain.TenantID, injectionID string) (memworkflow.RecalledPlan, bool, error) {
+	if r == nil || r.db == nil || tenantID == "" || injectionID == "" {
+		return memworkflow.RecalledPlan{}, false, retrieval.ErrStepsUnavailable
+	}
+	rows, err := surrealdb.Query[[]struct {
+		VersionID string `json:"procedure_version_id"`
+		Ordinal   uint32 `json:"ordinal"`
+	}](ctx, r.db, `SELECT procedure_version_id, ordinal FROM selection_plan_node WHERE tenant_id = $tenant_id AND injection_id = $injection_id ORDER BY ordinal`,
+		map[string]any{"tenant_id": string(tenantID), "injection_id": injectionID})
+	if err != nil {
+		return memworkflow.RecalledPlan{}, false, databaseFailure("read recalled plan", err)
+	}
+	plan := memworkflow.RecalledPlan{Steps: map[string][]memworkflow.RecalledStep{}}
+	if rows != nil && len(*rows) > 0 {
+		for _, row := range (*rows)[0].Result {
+			plan.VersionIDs = append(plan.VersionIDs, row.VersionID)
+		}
+	}
+	if len(plan.VersionIDs) == 0 {
+		return plan, false, nil
+	}
+	steps, err := r.ProcedureSteps(ctx, string(tenantID), plan.VersionIDs)
+	if err != nil {
+		return memworkflow.RecalledPlan{}, false, err
+	}
+	for versionID, versionSteps := range steps {
+		for _, step := range versionSteps {
+			plan.Steps[versionID] = append(plan.Steps[versionID], memworkflow.RecalledStep{ContractVersionID: step.ContractVersionID, SideEffect: step.SideEffect})
+		}
+	}
+	return plan, true, nil
+}

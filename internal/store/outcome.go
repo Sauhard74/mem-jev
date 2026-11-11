@@ -19,6 +19,7 @@ var (
 	ErrOutcomeSelectionNotFound   = errors.New("outcome selection was not found")
 	ErrOutcomeSupersessionInvalid = errors.New("outcome supersession is invalid")
 	ErrOutcomeCreditClaimed       = errors.New("injected plan already has outcome credit")
+	ErrOutcomeConflict            = errors.New("outcome conflicts with a recorded outcome")
 )
 
 type OutcomeDisposition string
@@ -38,6 +39,9 @@ type CommitOutcomeRequest struct {
 	Outcome            domain.CanonicalOutcome
 	Evaluation         evidence.Result
 	Credit             *credit.Record
+	// UnsafeVersionIDs lists the procedure versions of the injected plan when
+	// the outcome reports the run unsafe; each one's unsafe count is raised.
+	UnsafeVersionIDs []string
 }
 
 type OutcomeReceipt struct {
@@ -91,6 +95,14 @@ func ValidateOutcomeCommit(request CommitOutcomeRequest) error {
 	if request.Credit != nil && (credit.Validate(*request.Credit) != nil || request.Credit.TenantID != request.TenantID || request.Credit.OutcomeID != request.Outcome.ID || request.Credit.InjectionID != request.Outcome.InjectionID || request.Credit.TaskExecutionID != request.Outcome.TaskExecutionID) {
 		return ErrInvalidOutcomeCommit
 	}
+	if request.Outcome.Unsafe != (len(request.UnsafeVersionIDs) > 0) || request.Outcome.Unsafe && request.Credit == nil {
+		return ErrInvalidOutcomeCommit
+	}
+	for _, versionID := range request.UnsafeVersionIDs {
+		if versionID == "" {
+			return ErrInvalidOutcomeCommit
+		}
+	}
 	conflicts := append([]string(nil), request.Evaluation.ConflictPredicates...)
 	sort.Strings(conflicts)
 	if !equalStrings(conflicts, request.Evaluation.ConflictPredicates) {
@@ -105,6 +117,12 @@ func OutcomeReceiptID(tenantID domain.TenantID, idempotencyKeyHash string) strin
 
 func OutcomeWorkflowID(tenantID domain.TenantID, traceID domain.TraceID, outcomeID domain.OutcomeID) string {
 	return fmt.Sprintf("synthesize/%s/%s/%s/v1", hashIdentity(string(tenantID))[:16], traceID, outcomeID)
+}
+
+// CreditSupersededAuditEventID names the audit event recorded when a
+// correction takes over the outcome credit of the outcome it supersedes.
+func CreditSupersededAuditEventID(tenantID domain.TenantID, outcomeID domain.OutcomeID) string {
+	return "audit_" + hashIdentity(strings.Join([]string{string(tenantID), string(outcomeID), "credit_superseded", "v1"}, "\x00"))
 }
 
 func OutcomeAuditEventID(tenantID domain.TenantID, outcomeID domain.OutcomeID) string {

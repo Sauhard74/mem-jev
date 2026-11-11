@@ -13,6 +13,8 @@ const DefaultPolicyVersion = "memjev-default-lifecycle.v1"
 //     (3 of 3 succeeds).
 //   - trial -> active: at least 10 causal outcomes, lower bound >= 60%, and
 //     at least one hour in trial.
+//   - trial -> candidate: at least 3 causal outcomes and lower bound below
+//     40% (verified failures demote a trial routine).
 //   - active -> retired: lower bound below 60%, or no causal evidence in the
 //     last 90 days.
 func DefaultPolicy() (PolicyManifest, error) {

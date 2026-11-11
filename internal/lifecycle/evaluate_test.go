@@ -147,3 +147,24 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+// The reported case: 3 verified successes and 6 verified failures in trial
+// (Wilson bound about 12%) must demote the routine, not keep it in trial.
+func TestDefaultPolicyDemotesTrialOnVerifiedFailures(t *testing.T) {
+	now := time.Date(2026, 11, 12, 8, 0, 0, 0, time.UTC)
+	manifest, err := lifecycle.DefaultPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := lifecycle.EvaluationRequest{TenantID: "tenant_a", ProcedureID: "proc_a", ProcedureVersionID: "pv_a", PriorState: lifecycle.Trial, Manifest: manifest, EvidenceCutoffAt: now, EvaluatedAt: now,
+		Evidence: lifecycle.Evidence{CausalSuccessCount: 3, CausalFailureCount: 6, LatestCausalAt: now, TrialStartedAt: now.Add(-time.Minute)}}
+	decision, err := lifecycle.Evaluate(request)
+	if err != nil || decision.NextState != lifecycle.Candidate || !contains(decision.ReasonCodes, lifecycle.ReasonTrialDemoted) {
+		t.Fatalf("trial with 3/9 = %#v, %v", decision, err)
+	}
+	// 9 of 10 keeps the bound above the trial bar, so the routine stays.
+	request.Evidence = lifecycle.Evidence{CausalSuccessCount: 9, CausalFailureCount: 1, LatestCausalAt: now, TrialStartedAt: now.Add(-time.Minute)}
+	if decision, err = lifecycle.Evaluate(request); err != nil || decision.NextState != lifecycle.Trial {
+		t.Fatalf("trial with 9/10 = %#v, %v", decision, err)
+	}
+}

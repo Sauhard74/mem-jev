@@ -11,6 +11,8 @@ const (
 	ScopeIngestWrite   = "ingest:write"
 	ScopeOutcomeWrite  = "outcomes:write"
 	ScopeRetrievalRead = "retrievals:read"
+	// ScopeContractWrite allows registering tool contracts for the tenant.
+	ScopeContractWrite = "contracts:write"
 )
 
 type Principal struct {

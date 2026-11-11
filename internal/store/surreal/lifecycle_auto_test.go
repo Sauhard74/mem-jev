@@ -213,3 +213,35 @@ func TestUnsafeOutcomeBlocksAutomaticPromotion(t *testing.T) {
 		t.Fatalf("document after decision = %s unsafe=%d, %v", after.Lifecycle, after.UnsafeOutcomeCount, err)
 	}
 }
+
+// An unsafe outcome quarantines the routine right away, without any causal
+// samples and whether or not automatic promotion runs.
+func TestQuarantineUnsafeTakesRoutineOutOfService(t *testing.T) {
+	ctx := context.Background()
+	db := projectionDatabase(t)
+	seedProjectionOutcomes(t, db)
+	value := storetest.ValidProjectionForTenant(t, "tenant_a", 1, false)
+	if _, err := NewProjectionRepository(db).Publish(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	versionID := value.Version.ID
+	repository := NewLifecycleRepository(db)
+	// No unsafe outcome yet: nothing changes.
+	if err := repository.QuarantineUnsafe(ctx, "tenant_a", []string{versionID}); err != nil || documentLifecycle(t, db, "tenant_a", versionID) != "candidate" {
+		t.Fatalf("quarantine without unsafe outcome: %v", err)
+	}
+	if _, err := surrealdb.Query[any](ctx, db, `UPDATE procedure_version SET unsafe_outcome_count += 1 WHERE tenant_id = "tenant_a" AND procedure_version_id = $id`, map[string]any{"id": versionID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.QuarantineUnsafe(ctx, "tenant_a", []string{versionID, "pv_not_published"}); err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := currentLifecycleDocument(ctx, db, "tenant_a", versionID)
+	if err != nil || document.Lifecycle != "quarantined" || document.UnsafeOutcomeCount != 1 {
+		t.Fatalf("document = %s unsafe=%d, %v", document.Lifecycle, document.UnsafeOutcomeCount, err)
+	}
+	// Idempotent: a retried outcome quarantines again without error.
+	if err := repository.QuarantineUnsafe(ctx, "tenant_a", []string{versionID}); err != nil {
+		t.Fatal(err)
+	}
+}

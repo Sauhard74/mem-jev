@@ -190,3 +190,49 @@ func (r *recordingRepository) CommitOutcome(_ context.Context, request store.Com
 		}(),
 	}, nil
 }
+
+type recordingQuarantine struct {
+	tenantID   domain.TenantID
+	versionIDs []string
+}
+
+func (q *recordingQuarantine) QuarantineUnsafe(_ context.Context, tenantID domain.TenantID, versionIDs []string) error {
+	q.tenantID, q.versionIDs = tenantID, append([]string(nil), versionIDs...)
+	return nil
+}
+
+func TestServiceQuarantinesEveryRoutineOfAnUnsafeRun(t *testing.T) {
+	now := time.Now().UTC()
+	selected, err := selection.NewRecord(storetest.SelectionDraft(t, "tenant_a", 'a'), strings.Repeat("d", 64), now.Add(-time.Minute), now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := credit.NewRuleManifest("credit.v1", 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, quarantine := &recordingRepository{}, &recordingQuarantine{}
+	service := outcome.NewService(repository, outcome.DefaultPolicy(), outcome.Attribution{Selections: fixedSelectionRepository{record: selected}, Rules: rules, Quarantine: quarantine})
+	command := validCommand()
+	command.Request.Unsafe = true
+	if _, err := service.Record(context.Background(), command); !errors.Is(err, outcome.ErrInvalidCommand) {
+		t.Fatalf("unsafe without a recalled plan: %v", err)
+	}
+	command.Request.InjectionId = selected.InjectionID
+	command.Request.TaskExecutionId = selection.TaskExecutionID(selected.InjectionID)
+	command.Request.Evidence[0].Verdict = memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_FAILED
+	command.Request.Evidence[0].ObservedAt = timestamppb.New(now)
+	if _, err := service.Record(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{}
+	for _, node := range selected.Plan.Nodes {
+		want = append(want, node.VersionID)
+	}
+	if !repository.request.Outcome.Unsafe || strings.Join(repository.request.UnsafeVersionIDs, ",") != strings.Join(want, ",") || len(want) == 0 {
+		t.Fatalf("commit request unsafe=%v versions=%v want %v", repository.request.Outcome.Unsafe, repository.request.UnsafeVersionIDs, want)
+	}
+	if quarantine.tenantID != "tenant_a" || strings.Join(quarantine.versionIDs, ",") != strings.Join(want, ",") {
+		t.Fatalf("quarantined %s %v", quarantine.tenantID, quarantine.versionIDs)
+	}
+}

@@ -50,6 +50,7 @@ type CanonicalOutcome struct {
 	TaskExecutionID     string            `json:"task_execution_id,omitempty"`
 	SupersedesOutcomeID OutcomeID         `json:"supersedes_outcome_id,omitempty"`
 	CorrectionReason    string            `json:"correction_reason,omitempty"`
+	Unsafe              bool              `json:"unsafe,omitempty"`
 	Evidence            []OutcomeEvidence `json:"evidence"`
 	Hash                string            `json:"-"`
 	CanonicalJSON       []byte            `json:"-"`

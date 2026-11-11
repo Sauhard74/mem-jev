@@ -96,11 +96,14 @@ func TestDeterministicIssuerCommitsAndReplaysAgentPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partial, err := issuer.Issue(context.Background(), lexicalRun, []retrieval.Document{document})
+	// Natural wording reaches a routine through the lexical channel. The plan
+	// still covers the task goal (verified goal evidence on the outcome decides
+	// it), but it is not certified as an exact replay.
+	lexical, err := issuer.Issue(context.Background(), lexicalRun, []retrieval.Document{document})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if partial.Complete || partial.NoveltyClass != "partial" || len(partial.ParallelGroups) != 0 || len(partial.Gaps) == 0 {
-		t.Fatalf("lexical-only retrieval was over-certified: %#v", partial)
+	if !lexical.Complete || lexical.NoveltyClass != "known_shape" || len(lexical.Gaps) != 0 {
+		t.Fatalf("lexical retrieval plan = %#v", lexical)
 	}
 }

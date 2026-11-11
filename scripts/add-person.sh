@@ -8,7 +8,7 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 env_file=${MEMJEV_ENV_FILE:-$repo_dir/.env.local}
 tenant=tenant_local
 region=local
-restart=true
+reload=true
 service=false
 project=''
 
@@ -22,7 +22,7 @@ usage() {
   printf '%s\n' '  --region      Residency region (default local).'
   printf '%s\n' '  --project     Docker Compose project running memJev (default: COMPOSE_PROJECT_NAME'
   printf '%s\n' '                from the environment or the env file, else memjev).'
-  printf '%s\n' '  --no-restart  Do not restart the API to load the new token.'
+  printf '%s\n' '  --no-reload   Only update the credential file; do not hand it to the running API.'
 }
 
 person=''
@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --tenant) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; tenant=$2; shift ;;
     --region) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; region=$2; shift ;;
     --project) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; project=$2; shift ;;
-    --no-restart) restart=false ;;
+    --no-reload|--no-restart) reload=false ;;
     -h|--help) usage; exit 0 ;;
     -*) usage >&2; exit 2 ;;
     *) [[ -z "$person" ]] || { usage >&2; exit 2; }; person=$1 ;;
@@ -102,11 +102,32 @@ if [[ -n "$project" ]]; then
   project_args=(-p "$project")
 fi
 compose=(docker compose --env-file "$env_file" ${project_args[@]+"${project_args[@]}"})
-if [[ "$restart" == true ]] && command -v docker >/dev/null 2>&1; then
+# The API re-reads its credential file every few seconds, so a new person only
+# needs the file copied into the API's secret volume; the API keeps running.
+if [[ "$reload" == true ]] && command -v docker >/dev/null 2>&1; then
   if "${compose[@]}" ps --quiet api 2>/dev/null | grep -q .; then
-    "${compose[@]}" up --detach --wait --force-recreate credential-init api >/dev/null
+    if ! output=$("${compose[@]}" run --rm --no-deps --quiet-pull credential-init 2>&1); then
+      printf '%s\n' "$output" >&2
+      printf '%s\n' 'Could not hand the new credential file to the API.' >&2
+      exit 1
+    fi
+    # Wait until the API accepts the token (anything but 401 Unauthorized).
+    api_port=$(sed -n 's/^MEMJEV_API_PORT=//p' "$env_file")
+    accepted=false
+    for _ in $(seq 1 20); do
+      status=$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $token" --data '{}' "http://127.0.0.1:${api_port:-8080}/memjev.v1.RetrievalService/ExplainRetrieval" 2>/dev/null || true)
+      if [[ "$status" != 401 && "$status" != 000 ]]; then
+        accepted=true
+        break
+      fi
+      sleep 0.5
+    done
+    if [[ "$accepted" != true ]]; then
+      printf '%s\n' 'The API has not picked up the new token yet; it reloads its credential file every few seconds.' >&2
+    fi
   else
-    printf '%s\n' 'No running memJev API found for this project; restart it (or pass --project) to load the token.' >&2
+    printf '%s\n' 'No running memJev API found for this project; start it (or pass --project) to load the token.' >&2
   fi
 fi
 

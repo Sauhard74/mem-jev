@@ -134,6 +134,9 @@ func ValidateOutcome(request *memjevv1.RecordOutcomeRequest) error {
 	if request.GetSupersedesOutcomeId() != "" && canonicalToken(request.GetCorrectionReason()) == "" {
 		return &ViolationError{Field: "correction_reason", Rule: "required when superseding an outcome"}
 	}
+	if request.GetUnsafe() && canonicalToken(request.GetInjectionId()) == "" {
+		return &ViolationError{Field: "unsafe", Rule: "requires injection_id: only a run of a recalled plan can be reported unsafe"}
+	}
 	if request.GetSupersedesOutcomeId() == "" && canonicalToken(request.GetCorrectionReason()) != "" {
 		return &ViolationError{Field: "supersedes_outcome_id", Rule: "required when a correction reason is supplied"}
 	}

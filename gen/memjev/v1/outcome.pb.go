@@ -191,8 +191,11 @@ type RecordOutcomeRequest struct {
 	Evidence            []*OutcomeEvidence     `protobuf:"bytes,6,rep,name=evidence,proto3" json:"evidence,omitempty"`
 	InjectionId         string                 `protobuf:"bytes,7,opt,name=injection_id,json=injectionId,proto3" json:"injection_id,omitempty"`
 	TaskExecutionId     string                 `protobuf:"bytes,8,opt,name=task_execution_id,json=taskExecutionId,proto3" json:"task_execution_id,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The run of the recalled plan did something unsafe. Requires injection_id.
+	// Every routine in that plan is quarantined and never served again.
+	Unsafe        bool `protobuf:"varint,9,opt,name=unsafe,proto3" json:"unsafe,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RecordOutcomeRequest) Reset() {
@@ -279,6 +282,13 @@ func (x *RecordOutcomeRequest) GetTaskExecutionId() string {
 		return x.TaskExecutionId
 	}
 	return ""
+}
+
+func (x *RecordOutcomeRequest) GetUnsafe() bool {
+	if x != nil {
+		return x.Unsafe
+	}
+	return false
 }
 
 type RecordOutcomeResponse struct {
@@ -401,7 +411,7 @@ const file_memjev_v1_outcome_proto_rawDesc = "" +
 	"\x10verifier_version\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\x0fverifierVersion\x12C\n" +
 	"\vobserved_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\n" +
 	"observedAt\x123\n" +
-	"\x06fields\x18\b \x03(\v2\x10.memjev.v1.FieldB\t\xbaH\x06\x92\x01\x03\x10\x80\x01R\x06fields\"\xaf\x03\n" +
+	"\x06fields\x18\b \x03(\v2\x10.memjev.v1.FieldB\t\xbaH\x06\x92\x01\x03\x10\x80\x01R\x06fields\"\xc7\x03\n" +
 	"\x14RecordOutcomeRequest\x12$\n" +
 	"\btrace_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18PR\atraceId\x12+\n" +
 	"\fexecution_id\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vexecutionId\x12*\n" +
@@ -410,7 +420,8 @@ const file_memjev_v1_outcome_proto_rawDesc = "" +
 	"\x11correction_reason\x18\x05 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\x10correctionReason\x12C\n" +
 	"\bevidence\x18\x06 \x03(\v2\x1a.memjev.v1.OutcomeEvidenceB\v\xbaH\b\x92\x01\x05\b\x01\x10\x80\x02R\bevidence\x12*\n" +
 	"\finjection_id\x18\a \x01(\tB\a\xbaH\x04r\x02\x18PR\vinjectionId\x123\n" +
-	"\x11task_execution_id\x18\b \x01(\tB\a\xbaH\x04r\x02\x18PR\x0ftaskExecutionId\"\x85\x03\n" +
+	"\x11task_execution_id\x18\b \x01(\tB\a\xbaH\x04r\x02\x18PR\x0ftaskExecutionId\x12\x16\n" +
+	"\x06unsafe\x18\t \x01(\bR\x06unsafe\"\x85\x03\n" +
 	"\x15RecordOutcomeResponse\x12\x1d\n" +
 	"\n" +
 	"outcome_id\x18\x01 \x01(\tR\toutcomeId\x12\x19\n" +

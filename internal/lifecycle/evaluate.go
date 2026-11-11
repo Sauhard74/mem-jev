@@ -64,6 +64,7 @@ const (
 	ReasonUnsafeCeilingExceeded   = "unsafe_outcome_ceiling_exceeded"
 	ReasonImmediateQuarantine     = "immediate_quarantine_triggered"
 	ReasonActiveRollback          = "active_version_rolled_back"
+	ReasonTrialDemoted            = "trial_version_demoted"
 	ReasonTerminalState           = "terminal_state_unchanged"
 	ReasonStateMaintained         = "state_maintained"
 )
@@ -136,10 +137,15 @@ func transition(request EvaluationRequest, samples uint64, bound uint32) (State,
 		}
 		return Trial, []string{ReasonCandidatePromoted}
 	}
-	reasons := thresholdReasons(samples, p.ActiveMinimumCausalSamples, bound, p.ActiveMinimumWilsonLowerBoundPPM)
 	if e.UnsafeOutcomeCount > p.ActiveUnsafeOutcomeCeiling {
 		return Candidate, []string{ReasonUnsafeCeilingExceeded}
 	}
+	// Verified failures demote a trial version once the success-rate bound
+	// falls below the bar it needed to enter trial.
+	if samples >= p.TrialMinimumCausalSamples && bound < p.TrialMinimumWilsonLowerBoundPPM {
+		return Candidate, []string{ReasonTrialDemoted, ReasonWilsonBelowThreshold}
+	}
+	reasons := thresholdReasons(samples, p.ActiveMinimumCausalSamples, bound, p.ActiveMinimumWilsonLowerBoundPPM)
 	if e.TrialStartedAt.IsZero() || e.TrialStartedAt.After(request.EvidenceCutoffAt.Add(-time.Duration(p.MinimumTrialSeconds)*time.Second)) {
 		reasons = append(reasons, ReasonTrialDurationIncomplete)
 	}

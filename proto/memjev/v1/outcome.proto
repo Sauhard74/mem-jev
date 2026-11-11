@@ -47,6 +47,9 @@ message RecordOutcomeRequest {
   }];
   string injection_id = 7 [(buf.validate.field).string.max_len = 80];
   string task_execution_id = 8 [(buf.validate.field).string.max_len = 80];
+  // The run of the recalled plan did something unsafe. Requires injection_id.
+  // Every routine in that plan is quarantined and never served again.
+  bool unsafe = 9;
 }
 
 enum OutcomeCreditClass {

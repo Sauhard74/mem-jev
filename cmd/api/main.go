@@ -99,30 +99,32 @@ func run() int {
 		logger.Error("telemetry startup failed", "error", err)
 		return 1
 	}
-	resolver, err := security.NewFileCredentialResolver(configuration.CredentialsFile)
+	resolver, err := security.NewReloadingCredentialResolver(configuration.CredentialsFile)
 	if err != nil {
 		logger.Error("credential configuration rejected", "error", err)
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
+	// New people (scripts/add-person.sh) take effect without a restart.
+	go resolver.Watch(ctx, 2*time.Second, logger)
 
-	archives, ingestRepository, outcomeRepository, selectionRepository, retrievalService, readiness, closeDatabase, err := buildAdapters(ctx, configuration)
+	deps, err := buildAdapters(ctx, configuration)
 	if err != nil {
 		logger.Error("dependency startup failed", "error", err)
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
-	if closeDatabase != nil {
-		defer closeDatabase()
+	if deps.close != nil {
+		defer deps.close()
 	}
-	ingestService := ingest.NewService(archives, ingestRepository, ingest.DefaultPolicy())
+	ingestService := ingest.NewService(deps.archives, deps.ingest, ingest.DefaultPolicy())
 	creditRules, err := credit.NewRuleManifest("outcome-credit.v1", 30*time.Second)
 	if err != nil {
 		return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, 1)
 	}
-	outcomeService := outcome.NewService(outcomeRepository, outcome.DefaultPolicy(), outcome.Attribution{Selections: selectionRepository, Rules: creditRules})
+	outcomeService := outcome.NewService(deps.outcomes, outcome.DefaultPolicy(), outcome.Attribution{Selections: deps.selections, Rules: creditRules, Quarantine: deps.quarantine})
 	info := buildinfo.Info{Version: configuration.Build.Version, Commit: configuration.Build.Commit, BuiltAt: configuration.Build.BuiltAt}
 	server := &http.Server{
 		Addr:              configuration.ListenAddress,
-		Handler:           api.NewHandler(api.Dependencies{Ingest: ingestService, Outcome: outcomeService, Retrieval: retrievalService, RetrievalPolicyVersion: configuration.Retrieval.PolicyVersion, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
+		Handler:           api.NewHandler(api.Dependencies{Ingest: ingestService, Outcome: outcomeService, Retrieval: deps.retrieval, ToolContracts: deps.contracts, RetrievalPolicyVersion: configuration.Retrieval.PolicyVersion, Authenticator: security.NewBearerAuthenticator(resolver), BuildInfo: info, Readiness: deps.readiness, Timeout: configuration.RequestTimeout, Logger: logger}),
 		ReadHeaderTimeout: configuration.RequestTimeout,
 		ReadTimeout:       configuration.RequestTimeout,
 		WriteTimeout:      configuration.RequestTimeout + time.Second,
@@ -152,28 +154,40 @@ func run() int {
 	return shutdownAndCode(logger, shutdownTelemetry, configuration.ShutdownTimeout, exitCode)
 }
 
-func buildAdapters(ctx context.Context, configuration config.Config) (archive.Store, store.IngestRepository, store.OutcomeRepository, selection.Repository, *retrieval.Service, func(context.Context) error, func(), error) {
+type adapters struct {
+	archives   archive.Store
+	ingest     store.IngestRepository
+	outcomes   store.OutcomeRepository
+	selections selection.Repository
+	retrieval  *retrieval.Service
+	quarantine outcome.Quarantiner
+	contracts  api.ToolContractRegistrar
+	readiness  func(context.Context) error
+	close      func()
+}
+
+func buildAdapters(ctx context.Context, configuration config.Config) (adapters, error) {
 	if configuration.AdapterMode == "memory" {
 		repository := storememory.NewIngestRepository()
 		selections, err := storememory.NewSelectionRepository(selection.RetentionPolicy{TTL: configuration.Retrieval.Retention})
-		return archive.NewMemoryStore(), repository, repository, selections, nil, func(context.Context) error { return nil }, nil, err
+		return adapters{archives: archive.NewMemoryStore(), ingest: repository, outcomes: repository, selections: selections, readiness: func(context.Context) error { return nil }}, err
 	}
 	db, err := storesurreal.Open(ctx, storesurreal.Config{
 		Endpoint: configuration.Surreal.Endpoint, Namespace: configuration.Surreal.Namespace, Database: configuration.Surreal.Database,
 		Username: configuration.Surreal.Username, Password: configuration.Surreal.Password, AuthScope: storesurreal.AuthScope(configuration.Surreal.AuthScope),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
+		return adapters{}, err
 	}
 	closeDB := func() { _ = db.Close(context.Background()) }
 	if err := storesurreal.NewMigrator(db).Apply(ctx); err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, nil, err
+		return adapters{}, err
 	}
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(configuration.Archive.Region))
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("load archive client configuration: %w", err)
+		return adapters{}, fmt.Errorf("load archive client configuration: %w", err)
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
 		if configuration.Archive.Endpoint != "" {
@@ -190,17 +204,17 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 	})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, nil, err
+		return adapters{}, err
 	}
 	selectionRepository, err := storesurreal.NewSelectionRepository(db, selection.RetentionPolicy{TTL: configuration.Retrieval.Retention})
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, nil, err
+		return adapters{}, err
 	}
 	retrievalService, closeJev, err := buildRetrievalService(ctx, db, selectionRepository, configuration.Retrieval, configuration.Jev, configuration.Environment)
 	if err != nil {
 		closeDB()
-		return nil, nil, nil, nil, nil, nil, nil, err
+		return adapters{}, err
 	}
 	readiness := func(ctx context.Context) error {
 		if _, err := surrealdb.Query[any](ctx, db, "INFO FOR DB", nil); err != nil {
@@ -213,7 +227,10 @@ func buildAdapters(ctx context.Context, configuration config.Config) (archive.St
 		closeJev()
 		closeDB()
 	}
-	return archiveStore, storesurreal.NewIngestRepository(db), storesurreal.NewOutcomeRepository(db), selectionRepository, retrievalService, readiness, closeDependencies, nil
+	return adapters{
+		archives: archiveStore, ingest: storesurreal.NewIngestRepository(db), outcomes: storesurreal.NewOutcomeRepository(db), selections: selectionRepository,
+		retrieval: retrievalService, quarantine: storesurreal.NewLifecycleRepository(db), contracts: storesurreal.NewToolContractRepository(db), readiness: readiness, close: closeDependencies,
+	}, nil
 }
 
 func buildRetrievalService(ctx context.Context, db *surrealdb.DB, selectionRepository selection.Repository, configuration config.RetrievalConfig, jevConfiguration config.JevConfig, environment string) (*retrieval.Service, func(), error) {
@@ -292,6 +309,9 @@ func buildServingBootstrap(repository *storesurreal.RetrievalRunRepository, chan
 			return
 		}
 		activated, ensureErr := repository.EnsureDefaultServing(ctx, tenantID, defaults, indexes)
+		if errors.Is(ensureErr, retrieval.ErrNothingLearned) {
+			return // nothing to serve yet; check again on the next recall
+		}
 		if ensureErr != nil {
 			logger.Warn("default serving activation failed", "error", ensureErr)
 			return

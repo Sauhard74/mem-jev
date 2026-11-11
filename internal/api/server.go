@@ -26,6 +26,7 @@ type Dependencies struct {
 	Ingest                 *ingest.Service
 	Outcome                *outcome.Service
 	Retrieval              retrievalAPI
+	ToolContracts          ToolContractRegistrar
 	RetrievalPolicyVersion string
 	Authenticator          security.Authenticator
 	BuildInfo              buildinfo.Info
@@ -76,6 +77,14 @@ func NewHandler(dependencies Dependencies) http.Handler {
 	retrievalPath, retrievalHTTPHandler := memjevv1connect.NewRetrievalServiceHandler(
 		&retrievalHandler{service: dependencies.Retrieval, currentPolicyVersion: dependencies.RetrievalPolicyVersion}, retrievalOptions...)
 	mux.Handle(retrievalPath, retrievalHTTPHandler)
+	contractOptions := append([]connect.HandlerOption{}, commonOptions...)
+	contractOptions = append(contractOptions, connect.WithInterceptors(
+		errorDetailsInterceptor(),
+		interceptors.NewAuth(dependencies.Authenticator, security.ScopeContractWrite),
+	))
+	contractPath, contractHTTPHandler := memjevv1connect.NewToolContractServiceHandler(
+		&toolContractHandler{registrar: dependencies.ToolContracts}, contractOptions...)
+	mux.Handle(contractPath, contractHTTPHandler)
 	healthPath, healthHTTPHandler := memjevv1connect.NewHealthServiceHandler(
 		&healthHandler{info: dependencies.BuildInfo, readiness: dependencies.Readiness}, commonOptions...)
 	mux.Handle(healthPath, healthHTTPHandler)

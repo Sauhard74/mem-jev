@@ -34,6 +34,8 @@ type StoredOutcome struct {
 	PolicyVersion     string                   `json:"policy_version"`
 	Evidence          []domain.OutcomeEvidence `json:"evidence"`
 	CreatedAt         time.Time                `json:"created_at"`
+	// InjectionID links the outcome to the recalled plan the run followed.
+	InjectionID string `json:"injection_id,omitempty"`
 }
 
 type LoadedSource struct {
@@ -96,8 +98,62 @@ type Processor struct {
 	registries  RegistryProvider
 	artifacts   StageArtifactRepository
 	projections projection.Repository
+	recalled    RecalledPlanReader
 	config      ProcessorConfig
 	now         func() time.Time
+}
+
+// RecalledPlanReader returns the procedure versions of the plan an injection
+// handed out, with the ordered steps of each version.
+type RecalledPlanReader interface {
+	RecalledPlan(ctx context.Context, tenantID domain.TenantID, injectionID string) (RecalledPlan, bool, error)
+}
+
+type RecalledPlan struct {
+	VersionIDs []string
+	Steps      map[string][]RecalledStep
+}
+
+type RecalledStep struct {
+	ContractVersionID string
+	SideEffect        string
+}
+
+// DispositionFolded marks a run of a recalled plan whose steps match the
+// recalled procedure: its outcome counts for that procedure (outcome credit)
+// and no second procedure is learned from it.
+const DispositionFolded projection.Disposition = "folded"
+
+// WithRecalledPlans lets the processor fold runs of recalled plans into the
+// procedure they followed instead of learning a duplicate.
+func (p *Processor) WithRecalledPlans(reader RecalledPlanReader) *Processor {
+	p.recalled = reader
+	return p
+}
+
+// foldTarget returns the recalled procedure version a synthesized procedure
+// duplicates: the plan had one procedure, every one of its steps appears in
+// order in the run, and any extra step in the run only reads (for example a
+// person or verifier check).
+func foldTarget(plan RecalledPlan, steps []domain.ProcedureStep) (string, bool) {
+	if len(plan.VersionIDs) != 1 || len(steps) == 0 {
+		return "", false
+	}
+	planned := plan.Steps[plan.VersionIDs[0]]
+	if len(planned) == 0 {
+		return "", false
+	}
+	next := 0
+	for _, step := range steps {
+		if next < len(planned) && step.ToolContractVersionID == planned[next].ContractVersionID {
+			next++
+			continue
+		}
+		if step.SideEffect != string(toolcontract.SideEffectNone) && step.SideEffect != string(toolcontract.SideEffectRead) {
+			return "", false
+		}
+	}
+	return plan.VersionIDs[0], next == len(planned)
 }
 
 func NewProcessor(sources SourceLoader, registries RegistryProvider, artifacts StageArtifactRepository, projections projection.Repository, config ProcessorConfig) (*Processor, error) {
@@ -251,6 +307,20 @@ func (p *Processor) Publish(ctx context.Context, request StageRequest) (StageRes
 		}
 		synthesized := synthesizedArtifact.Result
 		synthesized.Hash = synthesizedArtifact.ResultHash
+		if p.recalled != nil && source.Outcome != nil && source.Outcome.InjectionID != "" && synthesized.Status != synthesis.StatusAbstained {
+			plan, found, err := p.recalled.RecalledPlan(ctx, request.Input.TenantID, source.Outcome.InjectionID)
+			if err != nil {
+				return nil, "", "", &StageError{Code: "recalled_plan_unavailable", Retryable: true, Err: err}
+			}
+			if versionID, fold := foldTarget(plan, synthesized.Steps); found && fold {
+				observability.RecordSynthesisAbstention(ctx, "folded_into_recalled_procedure")
+				payload := struct {
+					VersionID   string                 `json:"procedure_version_id"`
+					Disposition projection.Disposition `json:"disposition"`
+				}{versionID, DispositionFolded}
+				return payload, StageStatusReady, "folded_into_recalled_procedure", nil
+			}
+		}
 		value, err := projection.Build(projection.BuildRequest{
 			TenantID: request.Input.TenantID, OutcomeID: request.Input.OutcomeID,
 			IntentHash: graph.IntentHash, EffectSignatureHash: graph.EffectSignatureHash, EnvironmentScopeHash: graph.EnvironmentHash,

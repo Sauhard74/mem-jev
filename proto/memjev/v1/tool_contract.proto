@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package memjev.v1;
+
+import "buf/validate/validate.proto";
+
+message RegisterToolContractsRequest {
+  // A JSON document {"contracts": [ ... ]} in the format of
+  // examples/tool-contracts/quickstart.json. The contracts are registered for
+  // the caller's tenant and apply to every person in it.
+  string contracts_json = 1 [(buf.validate.field).string = {
+    min_len: 2
+    max_len: 1000000
+  }];
+}
+
+message RegisteredToolContract {
+  string tool_id = 1;
+  string version = 2;
+  // Use as the tool's contractVersionId in Retrieve requests.
+  string contract_version_id = 3;
+  // False when the same contract was already registered.
+  bool created = 4;
+}
+
+message RegisterToolContractsResponse {
+  repeated RegisteredToolContract contracts = 1;
+}
+
+service ToolContractService {
+  // Requires the contracts:write scope on a tenant credential (not a
+  // per-person one). Registering the same contract again is a no-op; a
+  // different contract for a registered tool version is rejected.
+  rpc RegisterToolContracts(RegisterToolContractsRequest) returns (RegisterToolContractsResponse) {}
+}

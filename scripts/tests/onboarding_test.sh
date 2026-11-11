@@ -52,13 +52,13 @@ MEMJEV_ENV_FILE="$env_file" \
 MEMJEV_RUNTIME_DIR="$runtime_dir" \
   "$repo_dir/scripts/setup.sh" --prepare-only --jev-key-file "$jev_key" >/dev/null
 grep -q "^MEMJEV_JEV_API_KEY_HOST_FILE=$jev_key$" "$env_file" || { printf '%s\n' 'setup did not save the Jev key path' >&2; exit 1; }
-grep -q '^MEMJEV_JEV_MODEL=jev-1.13.0$' "$env_file" || { printf '%s\n' 'setup did not save the default Jev model' >&2; exit 1; }
+grep -q '^MEMJEV_JEV_MODEL=jev-1.14.0$' "$env_file" || { printf '%s\n' 'setup did not save the default Jev model' >&2; exit 1; }
 python3 -c 'import json,sys; assert all(c["allow_external_inference"] for c in json.load(open(sys.argv[1]))["credentials"])' "$runtime_dir/credentials.json" || {
   printf '%s\n' 'setup did not allow Jev on local credentials' >&2
   exit 1
 }
 
-MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" alice --no-restart > "$tmp_dir/alice.out"
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" alice --no-reload > "$tmp_dir/alice.out"
 alice_token=$(tail -n 1 "$tmp_dir/alice.out")
 alice_hash=$(printf '%s' "$alice_token" | shasum -a 256 | awk '{print $1}')
 python3 - "$runtime_dir/credentials.json" "$alice_hash" <<'PY' || { printf '%s\n' 'add-person did not add a per-person credential' >&2; exit 1; }
@@ -66,18 +66,18 @@ import json, sys
 entries = [c for c in json.load(open(sys.argv[1]))["credentials"] if c["credential_sha256"] == sys.argv[2]]
 assert len(entries) == 1 and entries[0]["subject_id"] == "alice" and entries[0]["tenant_id"] == "tenant_local"
 PY
-if MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" ' padded' --no-restart >/dev/null 2>&1; then
+if MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" ' padded' --no-reload >/dev/null 2>&1; then
   printf '%s\n' 'add-person accepted an invalid name' >&2
   exit 1
 fi
 
 # Long or underscored person IDs are accepted and stored under a hashed scope.
 long_person="milkyway_$(printf 'p%.0s' $(seq 1 100))"
-MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" "$long_person" --no-restart > "$tmp_dir/long.out"
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" "$long_person" --no-reload > "$tmp_dir/long.out"
 expected_scope=$(python3 -c 'import hashlib,sys; print("tenant_local__h_" + hashlib.sha256(b"memjev-subject.v1\x00" + sys.argv[1].encode()).hexdigest()[:40])' "$long_person")
 grep -q "stored as $expected_scope" "$tmp_dir/long.out" || { printf '%s\n' 'add-person printed the wrong scope for a long person ID' >&2; exit 1; }
 
-MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" --service --no-restart > "$tmp_dir/service.out"
+MEMJEV_ENV_FILE="$env_file" "$repo_dir/scripts/add-person.sh" --service --no-reload > "$tmp_dir/service.out"
 service_hash=$(tail -n 1 "$tmp_dir/service.out" | tr -d '\n' | shasum -a 256 | awk '{print $1}')
 python3 - "$runtime_dir/credentials.json" "$service_hash" <<'PY' || { printf '%s\n' 'add-person --service did not add a trusted service credential' >&2; exit 1; }
 import json, sys

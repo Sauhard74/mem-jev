@@ -26,12 +26,7 @@ func NewToolContractRepository(db *surrealdb.DB) *ToolContractRepository {
 }
 
 // RegisteredContract reports the stored version of one registered contract.
-type RegisteredContract struct {
-	ToolID            string `json:"tool_id"`
-	Version           string `json:"version"`
-	ContractVersionID string `json:"contract_version_id"`
-	Created           bool   `json:"created"`
-}
+type RegisteredContract = toolcontract.Registration
 
 // Register stores a contract version for a tenant. Registering the same
 // contract again is a no-op. A different contract for an already registered
@@ -42,7 +37,7 @@ type RegisteredContract struct {
 // scopes ("tenant__person").
 func (r *ToolContractRepository) Register(ctx context.Context, tenantID domain.TenantID, source toolcontract.Manifest) (RegisteredContract, error) {
 	if r == nil || r.db == nil || tenantID == "" || security.OrganizationOf(tenantID) != tenantID {
-		return RegisteredContract{}, errors.New("tool contracts are registered for a tenant, not a per-person scope")
+		return RegisteredContract{}, toolcontract.ErrNotTenantScope
 	}
 	manifest, err := toolcontract.Canonicalize(source)
 	if err != nil {

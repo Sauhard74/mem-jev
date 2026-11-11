@@ -12,6 +12,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/ranking"
 	"github.com/sauhard74/mem-jev/internal/retrieval"
 	"github.com/sauhard74/mem-jev/internal/store/storetest"
+	surrealdb "github.com/surrealdb/surrealdb.go"
 )
 
 func defaultIndexes() []retrieval.SnapshotIndex {
@@ -155,5 +156,29 @@ func TestConditionalActivationNeverOverwritesConcurrentOperatorChange(t *testing
 	}
 	if active, _, readErr := repository.activeServingConfig(ctx, "tenant_a"); readErr != nil || active.ID != operator.ID {
 		t.Fatalf("operator config overwritten: active = %s, err = %v", active.ID, readErr)
+	}
+}
+
+// A recall for a scope that learned nothing (an unknown person) writes no
+// serving configuration and reports nothing_learned_yet.
+func TestEnsureDefaultServingWritesNothingForAnEmptyScope(t *testing.T) {
+	ctx := context.Background()
+	db := projectionDatabase(t)
+	repository := NewRetrievalRunRepository(db)
+	plain, err := retrieval.BuildDefaultServing(retrieval.DefaultServingInput{AllowedResidencyRegions: []string{"local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activated, err := repository.EnsureDefaultServing(ctx, "tenant_a__nobody", plain, defaultIndexes()); activated || !errors.Is(err, retrieval.ErrNothingLearned) {
+		t.Fatalf("empty scope activation = %v, %v", activated, err)
+	}
+	for _, table := range []string{"retrieval_serving_head", "retrieval_serving_config", "eligibility_policy_manifest", "ranker_manifest"} {
+		rows, err := surrealdb.Query[[]map[string]any](ctx, db, "SELECT * FROM type::table($table) WHERE tenant_id = $tenant_id", map[string]any{"table": table, "tenant_id": "tenant_a__nobody"})
+		if err != nil || len((*rows)[0].Result) != 0 {
+			t.Fatalf("%s rows for an empty scope = %v, %v", table, rows, err)
+		}
+	}
+	if _, err := repository.AcquireServingSnapshot(ctx, "tenant_a__nobody"); !errors.Is(err, retrieval.ErrNothingLearned) {
+		t.Fatalf("snapshot error = %v, want nothing learned", err)
 	}
 }

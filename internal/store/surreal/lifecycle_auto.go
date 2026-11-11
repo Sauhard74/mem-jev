@@ -7,6 +7,7 @@ import (
 
 	"github.com/sauhard74/mem-jev/internal/domain"
 	"github.com/sauhard74/mem-jev/internal/lifecycle"
+	"github.com/sauhard74/mem-jev/internal/store"
 	surrealdb "github.com/surrealdb/surrealdb.go"
 	"github.com/surrealdb/surrealdb.go/pkg/models"
 )
@@ -78,15 +79,20 @@ func (r *LifecycleRepository) evaluateVersion(ctx context.Context, tenantID doma
 	if err != nil {
 		return lifecycle.Decision{}, false, err
 	}
-	// Unsafe outcomes recorded on the procedure always count: the policy
-	// quarantines at the first one and never promotes past the ceiling.
-	evidence.UnsafeOutcomeCount = document.UnsafeOutcomeCount
+	// Unsafe outcomes always count: the policy quarantines at the first one.
+	// Outcomes raise procedure_version's count; the document carries it too
+	// once a decision or relearn republishes it.
+	recorded, err := r.recordedUnsafeCount(ctx, tenantID, versionID)
+	if err != nil {
+		return lifecycle.Decision{}, false, err
+	}
+	evidence.UnsafeOutcomeCount = max(document.UnsafeOutcomeCount, recorded)
 	head, headFound, err := findVersionHead(ctx, r.db, tenantID, versionID, manifest.ID)
 	if err != nil {
 		return lifecycle.Decision{}, false, databaseFailure("read lifecycle version head", err)
 	}
 	samples := evidence.CausalSuccessCount + evidence.CausalFailureCount
-	if !headFound && samples == 0 {
+	if !headFound && samples == 0 && evidence.UnsafeOutcomeCount == 0 {
 		return lifecycle.Decision{}, false, nil
 	}
 	if prior == lifecycle.Trial {
@@ -182,4 +188,63 @@ func (r *LifecycleRepository) decisionCounts(ctx context.Context, tenantID domai
 		return [2]uint64{^uint64(0), ^uint64(0)}, nil
 	}
 	return [2]uint64{(*rows)[0].Result[0].Successes, (*rows)[0].Result[0].Failures}, nil
+}
+
+func (r *LifecycleRepository) recordedUnsafeCount(ctx context.Context, tenantID domain.TenantID, versionID string) (uint64, error) {
+	rows, err := surrealdb.Query[[]struct {
+		Unsafe uint64 `json:"unsafe_outcome_count"`
+	}](ctx, r.db, `SELECT unsafe_outcome_count FROM procedure_version WHERE tenant_id = $tenant_id AND procedure_version_id = $version_id LIMIT 1`,
+		map[string]any{"tenant_id": string(tenantID), "version_id": versionID})
+	if err != nil {
+		return 0, databaseFailure("read unsafe outcome count", err)
+	}
+	if rows == nil || len(*rows) == 0 || len((*rows)[0].Result) == 0 {
+		return 0, nil
+	}
+	return (*rows)[0].Result[0].Unsafe, nil
+}
+
+// QuarantineUnsafe applies recorded unsafe outcomes to the lifecycle of the
+// given procedure versions right away, under the default lifecycle policy, so
+// retrieval stops serving them without waiting for the worker. It runs whether
+// or not automatic promotion is on: quarantine only ever removes a routine.
+func (r *LifecycleRepository) QuarantineUnsafe(ctx context.Context, tenantID domain.TenantID, versionIDs []string) error {
+	manifest, err := lifecycle.DefaultPolicy()
+	if err != nil {
+		return err
+	}
+	for _, versionID := range versionIDs {
+		const attempts = 5
+		for attempt := 0; ; attempt++ {
+			document, _, err := currentLifecycleDocument(ctx, r.db, tenantID, versionID)
+			if errors.Is(err, lifecycle.ErrLifecycleConflict) {
+				break // nothing published for this version: nothing to serve
+			}
+			if err != nil {
+				return databaseFailure("read unsafe procedure document", err)
+			}
+			if state := lifecycle.State(document.Lifecycle); state == lifecycle.Quarantined || state == lifecycle.Retired {
+				break
+			}
+			recorded, err := r.recordedUnsafeCount(ctx, tenantID, versionID)
+			if err != nil {
+				return err
+			}
+			if max(recorded, document.UnsafeOutcomeCount) == 0 {
+				break // no unsafe outcome recorded: nothing to quarantine
+			}
+			if attempt == attempts {
+				return &store.OpError{Operation: "quarantine unsafe procedure", Retryable: true, Err: lifecycle.ErrLifecycleConflict}
+			}
+			if attempt > 0 {
+				if err := waitForRetry(ctx, attempt-1); err != nil {
+					return err
+				}
+			}
+			if _, _, err := r.evaluateVersion(ctx, tenantID, versionID, manifest, time.Now().UTC().Truncate(time.Second)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

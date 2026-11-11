@@ -132,6 +132,7 @@ func runWorker(ctx context.Context, logger *slog.Logger, configuration config.Co
 		logger.Error("pipeline startup failed", "error", err)
 		return 1
 	}
+	processor.WithRecalledPlans(storesurreal.NewStepRepository(db))
 	activities, err := memworkflow.NewPipelineActivities(processor)
 	if err != nil {
 		logger.Error("activity startup failed", "error", err)

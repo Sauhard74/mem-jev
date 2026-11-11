@@ -16,6 +16,7 @@ var (
 	ErrVersionConflict = errors.New("tool contract version is immutable")
 	ErrAliasConflict   = errors.New("tool alias belongs to another contract")
 	ErrInvalidQuery    = errors.New("invalid tool contract query")
+	ErrNotTenantScope  = errors.New("tool contracts are registered for a tenant, not a per-person scope")
 )
 
 type Registry interface {
@@ -136,4 +137,12 @@ func cloneManifest(source Manifest) Manifest {
 		result.Compensation = &compensation
 	}
 	return result
+}
+
+// Registration reports the stored version of one registered contract.
+type Registration struct {
+	ToolID            string `json:"tool_id"`
+	Version           string `json:"version"`
+	ContractVersionID string `json:"contract_version_id"`
+	Created           bool   `json:"created"`
 }

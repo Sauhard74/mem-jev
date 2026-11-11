@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/sauhard74/mem-jev/internal/archive"
@@ -363,4 +364,15 @@ func tableCount(ctx context.Context, db *surrealdb.DB, table string) (int, error
 		return 0, nil
 	}
 	return (*results)[0].Result[0].Count, nil
+}
+
+// isUniqueIndexViolation reports whether err is SurrealDB rejecting a write
+// because a unique index already holds the value. That is a conflict with
+// stored data, not an outage, so it must not be reported as retryable.
+func isUniqueIndexViolation(err error) bool {
+	var serverErr *surrealdb.ServerError
+	if errors.As(err, &serverErr) && serverErr.Kind == surrealdb.KindAlreadyExists {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), "already contains")
 }

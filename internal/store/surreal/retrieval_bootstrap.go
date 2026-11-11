@@ -28,6 +28,16 @@ func (r *RetrievalRunRepository) EnsureDefaultServing(ctx context.Context, tenan
 	if r == nil || r.db == nil || tenantID == "" || len(indexes) == 0 {
 		return false, store.ErrServingConfigUnavailable
 	}
+	// A recall must not create state for a scope that has learned nothing
+	// (for example an unknown person): activate only once there is something
+	// to serve.
+	learned, err := hasLearned(ctx, r.db, tenantID)
+	if err != nil {
+		return false, databaseFailure("check learned procedures", err)
+	}
+	if !learned {
+		return false, retrieval.ErrNothingLearned
+	}
 	now := time.Now().UTC()
 	served := make([]retrieval.SnapshotIndex, 0, len(indexes))
 	for _, index := range indexes {

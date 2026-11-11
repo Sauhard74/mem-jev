@@ -18,6 +18,7 @@ import (
 	"github.com/sauhard74/mem-jev/internal/store"
 	"github.com/sauhard74/mem-jev/internal/store/storetest"
 	"github.com/sauhard74/mem-jev/internal/testinfra"
+	surrealdb "github.com/surrealdb/surrealdb.go"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -131,5 +132,74 @@ func TestCausalChallengerFailureUpdatesUnsafeBudgetsAtomically(t *testing.T) {
 	}
 	if err := NewMaintenanceRepository(db).VerifyExposureBudgets(context.Background(), "tenant_a", reservation.Assignment.WindowStart); err != nil {
 		t.Fatalf("exposure audit: %v", err)
+	}
+}
+
+// worked -> didn't work -> worked on the same injected plan: each correction
+// takes over the plan's credit, and repeating an earlier fact is accepted.
+func TestCorrectionsTakeOverCreditAndMayRepeatEvidence(t *testing.T) {
+	db := testinfra.StartSurreal(t, surrealImage)
+	if err := NewMigrator(db).Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewIngestRepository(db).Commit(context.Background(), storetest.ValidCommitRequest(t)); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	selections, err := NewSelectionRepository(db, selection.RetentionPolicy{TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selections.now = func() time.Time { return created }
+	receipt, err := selections.Commit(context.Background(), selection.CommitRequest{TenantID: "tenant_a", IdempotencyIdentityHash: strings.Repeat("d", 64), Draft: storetest.SelectionDraft(t, "tenant_a", 'a')})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := credit.NewRuleManifest("credit.v1", 0)
+	repository := NewOutcomeRepository(db)
+	repository.now = func() time.Time { return created.Add(2 * time.Minute) }
+	record := func(key byte, worked bool, supersedes domain.OutcomeID) (store.OutcomeReceipt, error) {
+		verdict, state := memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_SATISFIED, domain.OutcomeStateVerifiedSuccess
+		if !worked {
+			verdict, state = memjevv1.EvidenceVerdict_EVIDENCE_VERDICT_FAILED, domain.OutcomeStateVerifiedFailure
+		}
+		request := &memjevv1.RecordOutcomeRequest{TraceId: "tr_" + strings.Repeat("a", 64), InjectionId: receipt.Record.InjectionID, TaskExecutionId: selection.TaskExecutionID(receipt.Record.InjectionID),
+			Evidence: []*memjevv1.OutcomeEvidence{{ClientEvidenceId: "person", Class: memjevv1.EvidenceClass_EVIDENCE_CLASS_GOAL_PREDICATE, Verdict: verdict, PredicateId: "goal.done", VerifierId: "person", ObservedAt: timestamppb.New(created.Add(time.Minute))}}}
+		if supersedes != "" {
+			request.SupersedesOutcomeId, request.CorrectionReason = string(supersedes), "person changed their answer"
+		}
+		outcomeValue, err := evidence.Canonicalize("tenant_a", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := evidence.Result{State: state, PromotionEligible: worked, PolicyVersion: "outcome-policy.v1"}
+		assigned, err := credit.Assign(credit.AssignmentRequest{Manifest: rules, Selection: receipt.Record, Outcome: outcomeValue, Evaluation: result, InjectionID: outcomeValue.InjectionID, TaskExecutionID: outcomeValue.TaskExecutionID, Now: created.Add(2 * time.Minute)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repository.CommitOutcome(context.Background(), store.CommitOutcomeRequest{TenantID: "tenant_a", IdempotencyKeyHash: strings.Repeat(string(key), 64), Outcome: outcomeValue, Evaluation: result, Credit: &assigned})
+	}
+	first, err := record('1', true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := record('2', false, first.OutcomeID)
+	if err != nil || second.CreditClass != credit.CausalFailure {
+		t.Fatalf("correction to failure = %#v, %v", second, err)
+	}
+	third, err := record('3', true, second.OutcomeID)
+	if err != nil || third.CreditClass != credit.CausalSuccess {
+		t.Fatalf("correction back to success (repeats the first fact) = %#v, %v", third, err)
+	}
+	rows, err := surrealdb.Query[[]struct {
+		OutcomeID string `json:"outcome_id"`
+		Class     string `json:"credit_class"`
+	}](context.Background(), db, `SELECT outcome_id, credit_class FROM outcome_credit WHERE tenant_id = "tenant_a"`, nil)
+	if err != nil || len((*rows)[0].Result) != 1 || (*rows)[0].Result[0].OutcomeID != string(third.OutcomeID) {
+		t.Fatalf("credit rows = %#v, %v", rows, err)
+	}
+	// Superseding an outcome that does not hold the claim is still refused.
+	if _, err := record('4', false, first.OutcomeID); !errors.Is(err, store.ErrOutcomeCreditClaimed) {
+		t.Fatalf("stale correction error = %v", err)
 	}
 }

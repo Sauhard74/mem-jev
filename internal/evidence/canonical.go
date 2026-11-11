@@ -33,6 +33,7 @@ type outcomeIdentity struct {
 	TaskExecutionID     string                   `json:"task_execution_id,omitempty"`
 	SupersedesOutcomeID domain.OutcomeID         `json:"supersedes_outcome_id,omitempty"`
 	CorrectionReason    string                   `json:"correction_reason,omitempty"`
+	Unsafe              bool                     `json:"unsafe,omitempty"`
 	Evidence            []domain.OutcomeEvidence `json:"evidence"`
 }
 
@@ -82,6 +83,7 @@ func Canonicalize(tenantID domain.TenantID, request *memjevv1.RecordOutcomeReque
 		TaskExecutionID:     normalizeToken(request.GetTaskExecutionId()),
 		SupersedesOutcomeID: domain.OutcomeID(normalizeToken(request.GetSupersedesOutcomeId())),
 		CorrectionReason:    normalizeText(request.GetCorrectionReason()),
+		Unsafe:              request.GetUnsafe(),
 		Evidence:            facts,
 	}
 	_, identityHash, err := canonical.MarshalAndHash(identity)
@@ -99,6 +101,7 @@ func Canonicalize(tenantID domain.TenantID, request *memjevv1.RecordOutcomeReque
 		TaskExecutionID:     identity.TaskExecutionID,
 		SupersedesOutcomeID: identity.SupersedesOutcomeID,
 		CorrectionReason:    identity.CorrectionReason,
+		Unsafe:              identity.Unsafe,
 		Evidence:            facts,
 	}
 	encoded, hash, err := canonical.MarshalAndHash(outcome)
@@ -136,7 +139,7 @@ func VerifyCanonical(outcome domain.CanonicalOutcome) error {
 		TenantID: outcome.TenantID, TraceID: outcome.TraceID, ExecutionID: outcome.ExecutionID,
 		SelectionID: outcome.SelectionID, SupersedesOutcomeID: outcome.SupersedesOutcomeID,
 		InjectionID: outcome.InjectionID, TaskExecutionID: outcome.TaskExecutionID,
-		CorrectionReason: outcome.CorrectionReason, Evidence: facts,
+		CorrectionReason: outcome.CorrectionReason, Unsafe: outcome.Unsafe, Evidence: facts,
 	}
 	_, identityHash, err := canonical.MarshalAndHash(identity)
 	if err != nil || outcome.ID != domain.OutcomeID("out_"+identityHash) {

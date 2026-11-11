@@ -72,7 +72,12 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 	}
 	goalSum := sha256.Sum256([]byte(primary.ProcedureVersionID + "\x00" + run.QueryHash))
 	goalID := "goal_" + hex.EncodeToString(goalSum[:])
-	certifiedReplay := len(run.SelectedVersionIDs) == 1 && primary.ObservedEndToEnd && hasCertifiedExactHit(run, primary.ProcedureVersionID)
+	// A single routine observed end to end covers the task goal however the
+	// request was worded: the outcome's verified goal evidence decides whether
+	// the goal was met (credit.goalEvidence). Certified replay (an exact-channel
+	// hit) only marks the plan as an exact replay of a known run.
+	coversTaskGoal := len(run.SelectedVersionIDs) == 1 && primary.ObservedEndToEnd
+	certifiedReplay := coversTaskGoal && hasCertifiedExactHit(run, primary.ProcedureVersionID)
 	plannerCandidates := make([]composition.PlannerCandidate, 0, len(run.SelectedVersionIDs))
 	graphCandidates := make([]composition.Candidate, 0, len(run.SelectedVersionIDs))
 	for index, versionID := range run.SelectedVersionIDs {
@@ -81,7 +86,7 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 			return retrieval.PlanArtifact{}, retrieval.ErrPlanUnavailable
 		}
 		goals := []string(nil)
-		if index == 0 && certifiedReplay {
+		if index == 0 && coversTaskGoal {
 			goals = []string{goalID}
 		}
 		candidate := composition.PlannerCandidate{
@@ -131,7 +136,7 @@ func (i *DeterministicIssuer) Issue(ctx context.Context, run retrieval.Run, docu
 		}
 		if hasBridge {
 			novelty = selection.NoveltyBridged
-		} else if primary.ObservedEndToEnd {
+		} else if certifiedReplay {
 			novelty = selection.NoveltyExact
 		}
 	}

@@ -151,6 +151,8 @@ func mapDomainError(ctx context.Context, err error) error {
 		code, reason = connect.CodeNotFound, "selection_not_found"
 	case errors.Is(err, store.ErrOutcomeCreditClaimed):
 		code, reason = connect.CodeAlreadyExists, "outcome_credit_claimed"
+	case errors.Is(err, store.ErrOutcomeConflict):
+		code, reason = connect.CodeAlreadyExists, "outcome_conflict"
 	case errors.Is(err, store.ErrOutcomeSupersessionInvalid):
 		code, reason = connect.CodeFailedPrecondition, "invalid_supersession"
 	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidRun):
@@ -185,7 +187,9 @@ func mapDomainError(ctx context.Context, err error) error {
 }
 
 func safeConnectError(ctx context.Context, code connect.Code, reason string, retryable bool) *connect.Error {
-	connectErr := connect.NewError(code, errors.New("request failed"))
+	// The reason code comes from a fixed vocabulary, so it is safe to show;
+	// it is also in details[].reasonCode for programs.
+	connectErr := connect.NewError(code, errors.New("request failed: "+reason))
 	detail, err := connect.NewErrorDetail(&memjevv1.ErrorDetail{
 		RequestId:  requestIDFromContext(ctx),
 		ReasonCode: reason,

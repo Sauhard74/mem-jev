@@ -47,6 +47,9 @@ func (r *OutcomeRepository) CommitOutcome(ctx context.Context, request store.Com
 		if found {
 			return resolveExistingOutcome(existing, request.Outcome.Hash)
 		}
+		if isUniqueIndexViolation(err) {
+			return store.OutcomeReceipt{}, fmt.Errorf("%w: %w", store.ErrOutcomeConflict, err)
+		}
 		if !surrealdb.IsTransactionConflict(err) {
 			return store.OutcomeReceipt{}, databaseFailure("commit outcome ledger", err)
 		}
@@ -88,6 +91,17 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 		// contract. Fail closed; attributed outcomes use injection_id instead.
 		return store.OutcomeReceipt{}, store.ErrOutcomeSelectionNotFound
 	}
+	if request.Outcome.SupersedesOutcomeID != "" {
+		previousTraceID, found, findErr := findOutcomeTrace(ctx, tx, request.TenantID, request.Outcome.SupersedesOutcomeID)
+		if findErr != nil {
+			return store.OutcomeReceipt{}, fmt.Errorf("find superseded outcome: %w", findErr)
+		}
+		if !found || previousTraceID != request.Outcome.TraceID {
+			return store.OutcomeReceipt{}, store.ErrOutcomeSupersessionInvalid
+		}
+	}
+	// supersededClaim is the outcome whose credit this correction takes over.
+	supersededClaim := domain.OutcomeID("")
 	if request.Credit != nil {
 		valid, validationErr := creditSelectionValid(ctx, tx, request, r.now().UTC())
 		if validationErr != nil {
@@ -101,16 +115,11 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 			return store.OutcomeReceipt{}, claimErr
 		}
 		if claimed && claimedOutcome != request.Outcome.ID {
-			return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
-		}
-	}
-	if request.Outcome.SupersedesOutcomeID != "" {
-		previousTraceID, found, findErr := findOutcomeTrace(ctx, tx, request.TenantID, request.Outcome.SupersedesOutcomeID)
-		if findErr != nil {
-			return store.OutcomeReceipt{}, fmt.Errorf("find superseded outcome: %w", findErr)
-		}
-		if !found || previousTraceID != request.Outcome.TraceID {
-			return store.OutcomeReceipt{}, store.ErrOutcomeSupersessionInvalid
+			// Only a correction of the outcome holding the claim may take it.
+			if request.Outcome.SupersedesOutcomeID == "" || claimedOutcome != request.Outcome.SupersedesOutcomeID {
+				return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
+			}
+			supersededClaim = claimedOutcome
 		}
 	}
 	createdAt := r.now().UTC()
@@ -152,6 +161,11 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 		}
 	}
 	if request.Credit != nil {
+		if supersededClaim != "" {
+			if err := releaseOutcomeCredit(ctx, tx, request, supersededClaim, createdAt); err != nil {
+				return store.OutcomeReceipt{}, err
+			}
+		}
 		if err := createOutcomeCredit(ctx, tx, *request.Credit); err != nil {
 			return store.OutcomeReceipt{}, err
 		}
@@ -163,6 +177,12 @@ func (r *OutcomeRepository) commitOutcomeOnce(ctx context.Context, request store
 			if err := incrementExperimentUnsafeBudget(ctx, tx, *request.Credit, createdAt); err != nil {
 				return store.OutcomeReceipt{}, err
 			}
+		}
+	}
+	if len(request.UnsafeVersionIDs) > 0 {
+		if err := execute(ctx, tx, "record unsafe outcome", `UPDATE procedure_version SET unsafe_outcome_count += 1 WHERE tenant_id = $tenant_id AND procedure_version_id IN $version_ids`,
+			map[string]any{"tenant_id": string(request.TenantID), "version_ids": request.UnsafeVersionIDs}); err != nil {
+			return store.OutcomeReceipt{}, err
 		}
 	}
 	if err := createOutcomeOutbox(ctx, tx, request, receipt, createdAt); err != nil {
@@ -310,6 +330,24 @@ func claimedCreditOutcome(ctx context.Context, tx *surrealdb.Transaction, tenant
 	return domain.OutcomeID((*rows)[0].Result[0].OutcomeID), true, nil
 }
 
+// releaseOutcomeCredit removes the credit row of the superseded outcome so the
+// correction can claim the injected plan, and records the move for audit.
+// Lifecycle evaluation counts outcome_credit rows, so the earlier answer stops
+// counting toward promotion in the same transaction.
+func releaseOutcomeCredit(ctx context.Context, tx *surrealdb.Transaction, request store.CommitOutcomeRequest, previous domain.OutcomeID, createdAt time.Time) error {
+	if err := execute(ctx, tx, "release superseded outcome credit", `DELETE outcome_credit WHERE tenant_id = $tenant_id AND injection_id = $injection_id AND outcome_id = $outcome_id`,
+		map[string]any{"tenant_id": string(request.TenantID), "injection_id": request.Credit.InjectionID, "outcome_id": string(previous)}); err != nil {
+		return err
+	}
+	id := store.CreditSupersededAuditEventID(request.TenantID, request.Outcome.ID)
+	return execute(ctx, tx, "create credit supersession audit", "CREATE ONLY audit_event CONTENT $record", map[string]any{"record": map[string]any{
+		"tenant_id": string(request.TenantID), "audit_event_id": id, "event_type": "outcome_credit_superseded",
+		"subject_id": string(request.Outcome.ID), "reason_code": "outcome_corrected",
+		"details": map[string]any{"superseded_outcome_id": string(previous), "injection_id": request.Credit.InjectionID}, "created_at": createdAt,
+		"schema_version": "audit.v1", "content_hash": id[6:],
+	}})
+}
+
 func createOutcomeCredit(ctx context.Context, tx *surrealdb.Transaction, record credit.Record) error {
 	value := map[string]any{
 		"tenant_id": string(record.TenantID), "outcome_credit_id": record.ID, "outcome_id": string(record.OutcomeID), "injection_id": record.InjectionID,
@@ -357,6 +395,9 @@ func createOutcome(ctx context.Context, tx *surrealdb.Transaction, request store
 	}
 	if request.Outcome.CorrectionReason != "" {
 		record["correction_reason"] = request.Outcome.CorrectionReason
+	}
+	if request.Outcome.Unsafe {
+		record["unsafe"] = true
 	}
 	return execute(ctx, tx, "create outcome evidence", "CREATE ONLY outcome_evidence CONTENT $record", map[string]any{"record": record})
 }

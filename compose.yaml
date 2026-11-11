@@ -86,7 +86,9 @@ services:
     image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
-    command: ["cp /source/credentials.json /target/credentials.json && chown 65532:65532 /target/credentials.json && chmod 0400 /target/credentials.json"]
+    # Write a temporary file and rename it, so the API (which re-reads the file
+    # every few seconds) never sees a half-written one.
+    command: ["cp /source/credentials.json /target/.credentials.json.tmp && chown 65532:65532 /target/.credentials.json.tmp && chmod 0400 /target/.credentials.json.tmp && mv -f /target/.credentials.json.tmp /target/credentials.json"]
     volumes:
       - type: bind
         source: "${MEMJEV_CREDENTIALS_FILE_HOST:?}"

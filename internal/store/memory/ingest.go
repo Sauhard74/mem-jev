@@ -43,6 +43,7 @@ type IngestRepository struct {
 	outcomeOutbox       map[string]struct{}
 	outcomeCredits      map[string]credit.Record
 	creditClaims        map[string]domain.OutcomeID
+	unsafeCounts        map[string]uint64
 	now                 func() time.Time
 }
 
@@ -65,6 +66,7 @@ func newIngestRepository(failure failurePoint) *IngestRepository {
 		outcomeOutbox:       make(map[string]struct{}),
 		outcomeCredits:      make(map[string]credit.Record),
 		creditClaims:        make(map[string]domain.OutcomeID),
+		unsafeCounts:        make(map[string]uint64),
 		now:                 time.Now,
 	}
 }
@@ -110,9 +112,14 @@ func (r *IngestRepository) CommitOutcome(ctx context.Context, request store.Comm
 		State:      request.Evaluation.State, PromotionEligible: request.Evaluation.PromotionEligible,
 		PolicyVersion: request.Evaluation.PolicyVersion, Disposition: store.OutcomeDispositionAccepted, CreatedAt: createdAt,
 	}
+	supersededClaim := domain.OutcomeID("")
 	if request.Credit != nil {
 		if existing, claimed := r.creditClaims[tenantKey(request.TenantID, request.Credit.InjectionID)]; claimed && existing != request.Outcome.ID {
-			return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
+			// Only a correction of the outcome holding the claim may take it.
+			if request.Outcome.SupersedesOutcomeID == "" || existing != request.Outcome.SupersedesOutcomeID {
+				return store.OutcomeReceipt{}, store.ErrOutcomeCreditClaimed
+			}
+			supersededClaim = existing
 		}
 		receipt.OutcomeCreditID, receipt.CreditClass = request.Credit.ID, request.Credit.Class
 	}
@@ -123,11 +130,21 @@ func (r *IngestRepository) CommitOutcome(ctx context.Context, request store.Comm
 	r.outcomeReceipts[receiptKey] = outcomeReceiptRecord{receipt: receipt}
 	r.outcomes[outcomeKey] = request.Outcome
 	if request.Credit != nil {
+		if supersededClaim != "" {
+			for key, record := range r.outcomeCredits {
+				if record.TenantID == request.TenantID && record.OutcomeID == supersededClaim {
+					delete(r.outcomeCredits, key)
+				}
+			}
+		}
 		r.outcomeCredits[tenantKey(request.TenantID, request.Credit.ID)] = *request.Credit
 		r.creditClaims[tenantKey(request.TenantID, request.Credit.InjectionID)] = request.Outcome.ID
 	}
 	for _, fact := range request.Outcome.Evidence {
-		r.verificationResults[tenantKey(request.TenantID, string(fact.ID))] = struct{}{}
+		r.verificationResults[tenantKey(request.TenantID, string(request.Outcome.ID)+"\x00"+string(fact.ID))] = struct{}{}
+	}
+	for _, versionID := range request.UnsafeVersionIDs {
+		r.unsafeCounts[tenantKey(request.TenantID, versionID)]++
 	}
 	if len(request.Evaluation.ConflictPredicates) > 0 {
 		r.auditEvents[tenantKey(request.TenantID, store.OutcomeAuditEventID(request.TenantID, request.Outcome.ID))] = struct{}{}
@@ -215,4 +232,12 @@ func (r *IngestRepository) Counts(ctx context.Context) (store.AggregateCounts, e
 
 func tenantKey(tenantID domain.TenantID, value string) string {
 	return string(tenantID) + "\x00" + value
+}
+
+// UnsafeOutcomeCount returns how many unsafe outcomes were recorded against a
+// procedure version.
+func (r *IngestRepository) UnsafeOutcomeCount(tenantID domain.TenantID, versionID string) uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.unsafeCounts[tenantKey(tenantID, versionID)]
 }

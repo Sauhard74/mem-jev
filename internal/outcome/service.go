@@ -57,6 +57,15 @@ type Service struct {
 type Attribution struct {
 	Selections selection.Repository
 	Rules      credit.RuleManifest
+	// Quarantine, when set, applies an unsafe outcome to the plan's procedures
+	// before the outcome is acknowledged, so retrieval stops serving them.
+	Quarantine Quarantiner
+}
+
+// Quarantiner moves procedure versions with recorded unsafe outcomes out of
+// service. It must be idempotent: a retried outcome calls it again.
+type Quarantiner interface {
+	QuarantineUnsafe(ctx context.Context, tenantID domain.TenantID, versionIDs []string) error
 }
 
 func DefaultPolicy() evidence.Policy {
@@ -125,6 +134,7 @@ func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
 	}
 	conflict = len(evaluation.ConflictPredicates) > 0
 	var outcomeCredit *credit.Record
+	var unsafeVersionIDs []string
 	if canonicalOutcome.InjectionID != "" || canonicalOutcome.TaskExecutionID != "" {
 		if canonicalOutcome.InjectionID == "" || canonicalOutcome.TaskExecutionID == "" || s.attribution == nil {
 			return Result{}, ErrInvalidCommand
@@ -138,13 +148,27 @@ func (s *Service) Record(ctx context.Context, command Command) (Result, error) {
 			return Result{}, fmt.Errorf("attribute outcome: %w", ErrInvalidCommand)
 		}
 		outcomeCredit = &assigned
+		if canonicalOutcome.Unsafe {
+			for _, node := range selected.Plan.Nodes {
+				unsafeVersionIDs = append(unsafeVersionIDs, node.VersionID)
+			}
+			if len(unsafeVersionIDs) == 0 {
+				return Result{}, ErrInvalidCommand
+			}
+		}
 	}
 	receipt, err := s.repository.CommitOutcome(ctx, store.CommitOutcomeRequest{
 		TenantID: command.Principal.TenantID, IdempotencyKeyHash: command.IdempotencyKeyHash,
-		Outcome: canonicalOutcome, Evaluation: evaluation, Credit: outcomeCredit,
+		Outcome: canonicalOutcome, Evaluation: evaluation, Credit: outcomeCredit, UnsafeVersionIDs: unsafeVersionIDs,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("commit outcome: %w", err)
+	}
+	// Also on a duplicate: a retry after a failed quarantine finishes it.
+	if len(unsafeVersionIDs) > 0 && s.attribution.Quarantine != nil {
+		if err := s.attribution.Quarantine.QuarantineUnsafe(ctx, command.Principal.TenantID, unsafeVersionIDs); err != nil {
+			return Result{}, fmt.Errorf("quarantine unsafe procedures: %w", err)
+		}
 	}
 	resultCode = string(receipt.State)
 	return Result{

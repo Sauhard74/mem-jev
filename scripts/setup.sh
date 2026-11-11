@@ -8,7 +8,7 @@ prepare_only=false
 jev_key_file=${MEMJEV_JEV_API_KEY_HOST_FILE:-}
 jev_model=${MEMJEV_JEV_MODEL:-}
 project=${COMPOSE_PROJECT_NAME:-}
-default_jev_model=jev-1.13.0
+default_jev_model=jev-1.14.0
 
 usage() {
   printf '%s\n' 'Usage: scripts/setup.sh [--prepare-only] [--jev-key-file PATH] [--jev-model jev-X.Y.Z] [--project NAME]'
@@ -50,7 +50,7 @@ if [[ ! -f "$env_file" ]]; then
   token_hash=$(printf '%s' "$token" | shasum -a 256 | awk '{print $1}')
   other_token_hash=$(printf '%s' "$other_token" | shasum -a 256 | awk '{print $1}')
   other_region_token_hash=$(printf '%s' "$other_region_token" | shasum -a 256 | awk '{print $1}')
-  printf '{"credentials":[{"credential_sha256":"%s","tenant_id":"tenant_local","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_other","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_local","region":"other","scopes":["retrievals:read"],"consent":"learn_and_recall"}]}' \
+  printf '{"credentials":[{"credential_sha256":"%s","tenant_id":"tenant_local","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read","contracts:write"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_other","region":"local","scopes":["ingest:write","outcomes:write","retrievals:read"],"consent":"learn_and_recall"},{"credential_sha256":"%s","tenant_id":"tenant_local","region":"other","scopes":["retrievals:read"],"consent":"learn_and_recall"}]}' \
     "$token_hash" "$other_token_hash" "$other_region_token_hash" > "$credential_path"
   chmod 600 "$credential_path"
 

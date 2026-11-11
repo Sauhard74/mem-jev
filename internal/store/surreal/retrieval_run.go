@@ -181,7 +181,18 @@ func (r *RetrievalRunRepository) AcquireServingSnapshot(ctx context.Context, ten
 		ConfigID string `json:"serving_config_id"`
 	}
 	heads, err := surrealdb.Query[[]headRow](ctx, tx, `SELECT serving_config_id FROM retrieval_serving_head WHERE tenant_id = $tenant_id LIMIT 1`, map[string]any{"tenant_id": string(tenantID)})
-	if err != nil || heads == nil || len(*heads) == 0 || len((*heads)[0].Result) == 0 {
+	if err != nil || heads == nil || len(*heads) == 0 {
+		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
+	}
+	if len((*heads)[0].Result) == 0 {
+		// No serving configuration. When nothing was learned either (for
+		// example a person's first recall), say so rather than "unavailable":
+		// the default configuration is only activated once there is something
+		// to serve.
+		learned, learnedErr := hasLearned(ctx, tx, tenantID)
+		if learnedErr == nil && !learned {
+			return retrieval.ServingSnapshot{}, fmt.Errorf("%w: %w", store.ErrServingConfigUnavailable, retrieval.ErrNothingLearned)
+		}
 		return retrieval.ServingSnapshot{}, store.ErrServingConfigUnavailable
 	}
 	config, found, err := readServingConfig(ctx, tx, tenantID, (*heads)[0].Result[0].ConfigID)
@@ -449,3 +460,16 @@ func (r *RetrievalRunRepository) ChildCounts(ctx context.Context, runID string) 
 }
 
 var _ store.RetrievalRunRepository = (*RetrievalRunRepository)(nil)
+
+// hasLearned reports whether the tenant scope has published any procedures.
+func hasLearned[S interface {
+	*surrealdb.DB | *surrealdb.Transaction
+}](ctx context.Context, sender S, tenantID domain.TenantID) (bool, error) {
+	rows, err := surrealdb.Query[[]struct {
+		Epoch uint64 `json:"current_epoch"`
+	}](ctx, sender, `SELECT current_epoch FROM projection_epoch_head WHERE tenant_id = $tenant_id LIMIT 1`, map[string]any{"tenant_id": string(tenantID)})
+	if err != nil || rows == nil || len(*rows) == 0 {
+		return false, err
+	}
+	return len((*rows)[0].Result) > 0, nil
+}

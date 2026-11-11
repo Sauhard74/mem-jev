@@ -53,6 +53,6 @@ The live smoke command reads the same restricted file source and prints only the
 
 ```sh
 MEMJEV_JEV_API_KEY_FILE=/run/secrets/jev-api-key \
-MEMJEV_JEV_MODEL=jev-1.13.0 \
+MEMJEV_JEV_MODEL=jev-1.14.0 \
 make jev-smoke
 ```
