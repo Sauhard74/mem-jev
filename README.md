@@ -14,7 +14,7 @@
 
 <p>
   <a href="https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Sauhard74/mem-jev/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://go.dev/"><img alt="Go 1.25+" src="https://img.shields.io/badge/Go-1.25%2B-000000"></a>
+  <a href="https://go.dev/"><img alt="Go 1.26+" src="https://img.shields.io/badge/Go-1.26%2B-000000"></a>
   <a href="LICENSE"><img alt="AGPL v3" src="https://img.shields.io/badge/License-AGPL%20v3-000000.svg"></a>
 </p>
 
@@ -40,7 +40,7 @@ Unlike a fuzzy trace cache, memJev checks tools, resources, policies, environmen
 
 ## Quickstart
 
-You need Go 1.25+, Docker with Compose v2, OpenSSL, curl, and Python 3.
+You need Go 1.26+, Docker with Compose v2, OpenSSL, curl, and Python 3.
 
 ```sh
 git clone https://github.com/Sauhard74/mem-jev.git

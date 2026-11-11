@@ -1,6 +1,6 @@
 # Local development
 
-Prerequisites are Go 1.25 or newer (the release and CI toolchain is pinned to Go 1.26.8), Docker with Compose v2, OpenSSL, curl, and Python 3. No durable credential is committed to the repository.
+Prerequisites are Go 1.26 or newer (the release and CI toolchain is pinned to Go 1.26.11), Docker with Compose v2, OpenSSL, curl, and Python 3. No durable credential is committed to the repository.
 
 For ordinary development, run `make setup`. It creates `.env.local` and `.runtime/credentials.json` with mode `0600`, starts the complete Compose stack, and waits for health checks. It preserves existing credentials. Run `make quickstart` to exercise retrieve, ingest, and outcome through the public API, and `make dev-down` to stop the containers without deleting local volumes.
 
