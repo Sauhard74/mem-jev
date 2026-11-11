@@ -88,7 +88,10 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command: ["cp /source/credentials.json /target/credentials.json && chown 65532:65532 /target/credentials.json && chmod 0400 /target/credentials.json"]
     volumes:
-      - "${MEMJEV_CREDENTIALS_FILE_HOST:?}:/source/credentials.json:ro"
+      - type: bind
+        source: "${MEMJEV_CREDENTIALS_FILE_HOST:?}"
+        target: /source/credentials.json
+        read_only: true
       - "api-credentials:/target"
     networks: ["private"]
     restart: "no"

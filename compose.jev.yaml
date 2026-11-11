@@ -10,7 +10,10 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command: ["cp /source/api-key /target/api-key && chown 65532:65532 /target/api-key && chmod 0400 /target/api-key"]
     volumes:
-      - "${MEMJEV_JEV_API_KEY_HOST_FILE:?}:/source/api-key:ro"
+      - type: bind
+        source: "${MEMJEV_JEV_API_KEY_HOST_FILE:?}"
+        target: /source/api-key
+        read_only: true
       - "api-jev-secret:/target"
     networks: ["private"]
     restart: "no"

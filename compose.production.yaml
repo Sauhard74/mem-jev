@@ -29,8 +29,14 @@ services:
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?}"
       AWS_EC2_METADATA_DISABLED: "true"
     volumes:
-      - "${MEMJEV_CREDENTIALS_FILE_HOST:?}:/run/secrets/credentials.json:ro"
-      - "${MEMJEV_JEV_API_KEY_HOST_FILE:?}:/run/secrets/jev-api-key:ro"
+      - type: bind
+        source: "${MEMJEV_CREDENTIALS_FILE_HOST:?}"
+        target: /run/secrets/credentials.json
+        read_only: true
+      - type: bind
+        source: "${MEMJEV_JEV_API_KEY_HOST_FILE:?}"
+        target: /run/secrets/jev-api-key
+        read_only: true
     networks: [private]
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
