@@ -39,8 +39,9 @@ type credentialEntry struct {
 }
 
 // SubjectSeparator joins a tenant and a person into the storage scope. Tenant
-// IDs used with subjects may not contain it, so every scope maps back to
-// exactly one tenant and person.
+// IDs may not contain it, and tenants with people may not end in "_", so the
+// first SubjectSeparator in a scope is always the one that was added and every
+// scope maps back to exactly one tenant and person.
 const SubjectSeparator = "__"
 
 // MaximumSubjectLength is the longest person ID accepted, in bytes.
@@ -63,7 +64,7 @@ func ScopedTenantID(tenantID domain.TenantID, subjectID string) (domain.TenantID
 	if subjectID == "" {
 		return tenantID, nil
 	}
-	if strings.Contains(string(tenantID), SubjectSeparator) || !validSubject(subjectID) {
+	if strings.Contains(string(tenantID), SubjectSeparator) || strings.HasSuffix(string(tenantID), "_") || !validSubject(subjectID) {
 		return "", ErrInvalidSubject
 	}
 	key := subjectID
@@ -131,11 +132,15 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 		subject string
 	}
 	scopes := make(map[domain.TenantID]owner, len(document.Credentials))
-	personOrganizations := make(map[domain.TenantID]struct{})
 	for _, entry := range document.Credentials {
 		decodedHash, decodeHashErr := hex.DecodeString(entry.CredentialSHA256)
 		if decodeHashErr != nil || len(decodedHash) != 32 || entry.TenantID == "" || entry.Region == "" || !validConsent(entry.Consent) {
 			return nil, errors.New("credential file contains an invalid entry")
+		}
+		// Only ScopedTenantID may introduce the separator; a plain tenant_id
+		// containing it would be read as a person of another tenant.
+		if strings.Contains(string(entry.TenantID), SubjectSeparator) {
+			return nil, errors.New("credential file contains a tenant_id with \"__\"")
 		}
 		scope, scopeErr := ScopedTenantID(entry.TenantID, entry.SubjectID)
 		if scopeErr != nil {
@@ -153,9 +158,6 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 			}
 		}
 		scopes[scope] = owner{entry.TenantID, entry.SubjectID}
-		if entry.SubjectID != "" || entry.MayAssertSubject {
-			personOrganizations[entry.TenantID] = struct{}{}
-		}
 		hash := strings.ToLower(entry.CredentialSHA256)
 		if _, exists := resolver.principals[hash]; exists {
 			return nil, errors.New("credential file contains a duplicate hash")
@@ -168,16 +170,6 @@ func NewFileCredentialResolver(path string) (*FileCredentialResolver, error) {
 			permissions[permission] = struct{}{}
 		}
 		resolver.principals[hash] = Principal{TenantID: scope, OrganizationID: entry.TenantID, SubjectID: entry.SubjectID, MayAssertSubject: entry.MayAssertSubject, Region: entry.Region, Scopes: permissions, Consent: entry.Consent, AllowExternalInference: entry.AllowExternalInference}
-	}
-	// A plain tenant_id such as "acme__alice" would share storage with a person
-	// of tenant "acme", so it is rejected once "acme" has per-person scopes.
-	for scope, entry := range scopes {
-		if entry.subject != "" {
-			continue
-		}
-		if _, ok := personOrganizations[OrganizationOf(scope)]; ok && OrganizationOf(scope) != scope {
-			return nil, errors.New("credential file contains a tenant_id that collides with a tenant and subject_id pair")
-		}
 	}
 	return resolver, nil
 }

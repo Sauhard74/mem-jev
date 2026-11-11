@@ -109,7 +109,7 @@ A tenant's tokens share one memory unless they name a person. There are two ways
 - A token issued with `subject_id` (for example `scripts/add-person.sh alice`) always acts for that person.
 - A token issued with `may_assert_subject` (`scripts/add-person.sh --service`) names the person on each request with the `Memjev-Subject` header. Use this when one trusted service acts for many people, such as a chat platform's memory plugin. Requests without the header use the tenant's shared memory. Other tokens that send the header are rejected.
 
-Person IDs are 1 to 256 printable characters. Each person's data is stored in the scope `<tenant>__<person>`; IDs longer than 63 characters or with characters other than letters, digits, and dashes are replaced by `h_` and the first 40 hex digits of SHA-256 over `memjev-subject.v1`, a zero byte, and the ID. `scripts/add-person.sh` prints the scope, which you need to [erase one person](runbooks/tenant-erasure.md).
+Person IDs are 1 to 256 printable characters. Tenant IDs may not contain `__`, and tenants with people may not end in `_`. Each person's data is stored in the scope `<tenant>__<person>`; IDs longer than 63 characters or with characters other than letters, digits, and dashes are replaced by `h_` and the first 40 hex digits of SHA-256 over `memjev-subject.v1`, a zero byte, and the ID. `scripts/add-person.sh` prints the scope, which you need to [erase one person](runbooks/tenant-erasure.md).
 
 ## Production checklist
 

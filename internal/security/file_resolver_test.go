@@ -79,7 +79,10 @@ func TestFileCredentialResolverRejectsInvalidOrCollidingSubjects(t *testing.T) {
 		"tenant collides with subject": entry(strings.Repeat("a", 64), "acme", "alice") + `,` + entry(strings.Repeat("b", 64), "acme__alice", ""),
 		"tenant collides with asserted subject": `{"credential_sha256":"` + strings.Repeat("a", 64) + `","tenant_id":"acme","region":"local","scopes":["retrievals:read"],"consent":"learn_and_recall","may_assert_subject":true},` +
 			entry(strings.Repeat("b", 64), "acme__bob", ""),
-		"subject and may_assert_subject": `{"credential_sha256":"` + strings.Repeat("a", 64) + `","tenant_id":"acme","subject_id":"alice","region":"local","scopes":["retrievals:read"],"consent":"learn_and_recall","may_assert_subject":true}`,
+		"separator in plain tenant":             entry(strings.Repeat("a", 64), "acme__x", ""),
+		"tenant ending in underscore":           entry(strings.Repeat("a", 64), "a_", "bob"),
+		"asserting tenant ending in underscore": `{"credential_sha256":"` + strings.Repeat("a", 64) + `","tenant_id":"a_","region":"local","scopes":["retrievals:read"],"consent":"learn_and_recall","may_assert_subject":true}`,
+		"subject and may_assert_subject":        `{"credential_sha256":"` + strings.Repeat("a", 64) + `","tenant_id":"acme","subject_id":"alice","region":"local","scopes":["retrievals:read"],"consent":"learn_and_recall","may_assert_subject":true}`,
 	}
 	for name, entries := range tests {
 		t.Run(name, func(t *testing.T) {

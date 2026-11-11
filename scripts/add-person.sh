@@ -44,7 +44,7 @@ if [[ "$service" == true ]]; then
 else
   [[ -n "$person" ]] || { usage >&2; exit 2; }
 fi
-[[ "$tenant" != *__* ]] || { printf '%s\n' 'tenant may not contain "__"' >&2; exit 2; }
+[[ "$tenant" != *__* && "$tenant" != *_ ]] || { printf '%s\n' 'tenant may not contain "__" or end with "_"' >&2; exit 2; }
 
 for command_name in openssl python3 shasum; do
   command -v "$command_name" >/dev/null 2>&1 || { printf '%s is required\n' "$command_name" >&2; exit 1; }
