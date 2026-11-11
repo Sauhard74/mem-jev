@@ -33,6 +33,11 @@ func (h *toolContractHandler) RegisterToolContracts(ctx context.Context, request
 	if h.registrar == nil {
 		return nil, safeConnectError(ctx, connect.CodeUnimplemented, "tool_contracts_unavailable", false)
 	}
+	// The auth interceptor also requires this scope; check it here too so the
+	// handler stays safe if it is ever mounted differently.
+	if !principal.HasScope(security.ScopeContractWrite) {
+		return nil, safeConnectError(ctx, connect.CodePermissionDenied, "permission_denied", false)
+	}
 	// Contracts belong to the tenant; a person's credential may not change them.
 	if principal.OrganizationID == "" || principal.TenantID != principal.OrganizationID {
 		return nil, safeConnectError(ctx, connect.CodePermissionDenied, "tenant_credential_required", false)

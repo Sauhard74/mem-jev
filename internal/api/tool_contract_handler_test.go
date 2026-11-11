@@ -76,3 +76,16 @@ func TestRegisterToolContractsOverTheAPI(t *testing.T) {
 		t.Fatalf("invalid document: %v", err)
 	}
 }
+
+// The handler refuses a tenant principal without contracts:write even when
+// called without the auth interceptor's scope check.
+func TestRegisterToolContractsHandlerChecksScope(t *testing.T) {
+	principal := testPrincipal(policy.LearnAndRecall)
+	principal.OrganizationID = principal.TenantID
+	ctx := security.WithPrincipal(context.Background(), principal)
+	registrar := &recordingRegistrar{}
+	_, err := (&toolContractHandler{registrar: registrar}).RegisterToolContracts(ctx, connect.NewRequest(&memjevv1.RegisterToolContractsRequest{ContractsJson: `{"contracts":[]}`}))
+	if connect.CodeOf(err) != connect.CodePermissionDenied || len(registrar.tenants) != 0 {
+		t.Fatalf("error = %v, registered %v", err, registrar.tenants)
+	}
+}
